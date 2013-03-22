@@ -1,0 +1,41 @@
+K 25
+svn:wc:ra_dav:version-url
+V 26
+/svn/!svn/ver/233/trunk/m4
+END
+ax_prototype_scandir.m4
+K 25
+svn:wc:ra_dav:version-url
+V 50
+/svn/!svn/ver/229/trunk/m4/ax_prototype_scandir.m4
+END
+m4_ax_save_flags.m4
+K 25
+svn:wc:ra_dav:version-url
+V 46
+/svn/!svn/ver/233/trunk/m4/m4_ax_save_flags.m4
+END
+m4_ax_c_bigendian_cross.m4
+K 25
+svn:wc:ra_dav:version-url
+V 53
+/svn/!svn/ver/229/trunk/m4/m4_ax_c_bigendian_cross.m4
+END
+m4_ax_restore_flags.m4
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/!svn/ver/233/trunk/m4/m4_ax_restore_flags.m4
+END
+m4_ax_prototype.m4
+K 25
+svn:wc:ra_dav:version-url
+V 45
+/svn/!svn/ver/233/trunk/m4/m4_ax_prototype.m4
+END
+m4_ax_pthread.m4
+K 25
+svn:wc:ra_dav:version-url
+V 43
+/svn/!svn/ver/229/trunk/m4/m4_ax_pthread.m4
+END
