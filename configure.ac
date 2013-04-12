@@ -289,8 +289,18 @@ AC_MSG_CHECKING(for source revision in SVN)
 SVNREV=`$AWK '{if(NR==4){print $0;exit}}' .svn/entries 2>/dev/null`
 if test x"$SVNREV" != x; then
     AC_SUBST([CONFIG_STATUS_DEPENDENCIES], ['$(top_srcdir)/.svn/entries'])
-    CFLAGS="$CFLAGS -DSVNREV=$SVNREV"
+    CFLAGS="$CFLAGS -DSVNREV_=$SVNREV"
     echo $SVNREV
+else
+    echo no
+fi
+AC_MSG_CHECKING(for commit hash in git repo)
+HEAD=.git/$(cat .git/HEAD 2>/dev/null | cut -d" " -f2)
+GITREV=$(cut -c1-7 $HEAD 2>/dev/null)
+if test x"$GITREV" != x; then
+    AC_SUBST([CONFIG_STATUS_DEPENDENCIES], ['$HEAD'])
+    CFLAGS="$CFLAGS -DGITREV_=0x$GITREV"
+    echo $GITREV
 else
     echo no
 fi

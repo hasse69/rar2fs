@@ -3800,15 +3800,32 @@ static int work(struct fuse_args *args)
                 rar2_operations.chown           = (void *)rar2_eperm_stub;
         }
 
-        struct fuse *f;
+        struct fuse *f = NULL;
+        struct fuse_chan* ch;
+        struct fuse_session* se;
         pthread_t t;
         char *mp;
-        int mt;
+        int mt = 0;
+        int fg = 0;
 
-        f = fuse_setup(args->argc, args->argv, &rar2_operations,
-                                sizeof(rar2_operations), &mp, &mt, NULL);
+        /* This is doing more or less the same as fuse_setup(). */
+        if (!fuse_parse_cmdline(args, &mp, &mt, &fg)) {
+              printd(1, "mounting file system on %s\n", mp);
+              ch = fuse_mount(mp, args);
+              if (ch) {
+                      f = fuse_new(ch, args, &rar2_operations, 
+                                        sizeof(rar2_operations), NULL);
+                      if (f) {
+                              se = fuse_get_session(f);
+                              fuse_set_signal_handlers(se);
+                              fuse_daemonize(fg);
+                     }
+              }
+        }
+
         if (!f)
-            return -1;
+                return -1;
+
         wdt.fuse = f;
         wdt.mt = mt;
         wdt.work_task_exited = 0;
@@ -3830,7 +3847,12 @@ static int work(struct fuse_args *args)
 
         fs_terminated = 1;
         pthread_join(t, NULL);
-        fuse_teardown(f, mp);
+
+        /* This is doing more or less the same as fuse_teardown(). */
+        fuse_remove_signal_handlers(se);
+        fuse_unmount(mp, ch);
+        fuse_destroy(f);
+        free(mp);
 
 #if defined ( HAVE_SCHED_SETAFFINITY ) && defined ( HAVE_CPU_SET_T )
         if (OPT_SET(OPT_KEY_NO_SMP)) {
@@ -3850,16 +3872,20 @@ static int work(struct fuse_args *args)
  ****************************************************************************/
 static void print_version()
 {
-#ifdef SVNREV
-        printf("rar2fs v%u.%u.%u-svnr%d (DLL version %d)    Copyright (C) 2009-2013 Hans Beckerus\n",
+        char src_rev[16];
+#ifdef SVNREV_
+        snprintf(src_rev, 16, "-svnr%d", SVNREV_);
 #else
-        printf("rar2fs v%u.%u.%u (DLL version %d)    Copyright (C) 2009-2013 Hans Beckerus\n",
+#ifdef GITREV_
+        snprintf(src_rev, 16, "-git%x", GITREV_);
+#else
+        src_rev[0] = '\0';
 #endif
+#endif
+        printf("rar2fs v%u.%u.%u%s (DLL version %d)    Copyright (C) 2009-2013 Hans Beckerus\n",
                RAR2FS_MAJOR_VER,
                RAR2FS_MINOR_VER, RAR2FS_PATCH_LVL,
-#ifdef SVNREV
-               SVNREV,
-#endif
+               src_rev,
                RARGetDllVersion());
         printf("This program comes with ABSOLUTELY NO WARRANTY.\n"
                "This is free software, and you are welcome to redistribute it under\n"
