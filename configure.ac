@@ -8,7 +8,7 @@ AC_CONFIG_AUX_DIR(config)
 AC_CANONICAL_TARGET
 AM_INIT_AUTOMAKE
 AC_CONFIG_MACRO_DIR(m4)
-AM_CONFIG_HEADER(config.h)
+AC_CONFIG_HEADERS([config.h])
 
 AM_CONDITIONAL([LINUX],
                [case $host_os in *linux*) true;; *) false;; esac])

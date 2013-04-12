@@ -1,5 +1,10 @@
 rar2fs ChangeLog file.
 
+2013-04-12  Hans Beckerus <hans.beckerus@gmail.com>
+
+        * Replaced the deprecated AM_CONFIG_HEADER with
+          AC_CONFIG_HEADERS in configure.ac
+
 2013-03-17  Hans Beckerus <hans.beckerus@gmail.com>
 
         * Second try to correct the Makefile.am error as reported
