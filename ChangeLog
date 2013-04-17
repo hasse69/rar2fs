@@ -1,5 +1,13 @@
 rar2fs ChangeLog file.
 
+2013-04-16  Hans Beckerus <hans.beckerus@gmail.com>
+
+        * Fixed a minor compilation warning discovered on a 
+          SLED 11 64-bit platform.
+
+        * Added improved detection of corrupt RAR file headers.
+          This should resolve issue #13.
+
 2013-04-12  Hans Beckerus <hans.beckerus@gmail.com>
 
         * Added extraction of git commit hash when cloned

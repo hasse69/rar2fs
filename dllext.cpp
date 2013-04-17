@@ -152,6 +152,8 @@ int PASCAL RARListArchiveEx(HANDLE* hArcData, RARArchiveListEx* N, off_t* FileDa
      Archive& Arc = Data->Arc;
      while(Arc.ReadHeader()>0)
      {
+       if (Arc.BrokenFileHeader)
+         break;
        int HeaderType=Arc.GetHeaderType();
        if (HeaderType==ENDARC_HEAD)
        {
