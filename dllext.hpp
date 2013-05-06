@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2011 Hans Beckerus (hans.beckerus@gmail.com)
+    Copyright (C) 2009-2013 Hans Beckerus (hans.beckerus@gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -36,7 +36,6 @@
 #define _UNIX
 #endif
 #endif
-#include "version.hpp"
 #include "dll.hpp"
 
 #ifdef _UNIX
@@ -66,24 +65,24 @@
 #define  SIZEOF_BEEAHEAD        24
 #define  SIZEOF_STREAMHEAD      26
 
-#define  PACK_VER               29
-#define  PACK_CRYPT_VER         29
-#define  UNP_VER                36
-#define  CRYPT_VER              29
-#define  AV_VER                 20
-#define  PROTECT_VER            20
+//#define  PACK_VER               29
+//#define  PACK_CRYPT_VER         29
+//#define  UNP_VER                36
+//#define  CRYPT_VER              29
+//#define  AV_VER                 20
+//#define  PROTECT_VER            20
 
 #define  MHD_VOLUME         0x0001U
-#define  MHD_COMMENT        0x0002U
-#define  MHD_LOCK           0x0004U
-#define  MHD_SOLID          0x0008U
-#define  MHD_PACK_COMMENT   0x0010U
+//#define  MHD_COMMENT        0x0002U
+//#define  MHD_LOCK           0x0004U
+//#define  MHD_SOLID          0x0008U
+//#define  MHD_PACK_COMMENT   0x0010U
 #define  MHD_NEWNUMBERING   0x0010U
-#define  MHD_AV             0x0020U
-#define  MHD_PROTECT        0x0040U
+//#define  MHD_AV             0x0020U
+//#define  MHD_PROTECT        0x0040U
 #define  MHD_PASSWORD       0x0080U
 #define  MHD_FIRSTVOLUME    0x0100U
-#define  MHD_ENCRYPTVER     0x0200U
+//#define  MHD_ENCRYPTVER     0x0200U
 
 #define  LHD_SPLIT_BEFORE   0x0001U
 #define  LHD_SPLIT_AFTER    0x0002U
@@ -159,7 +158,6 @@ struct RARArchiveList
   unsigned int Method;
   unsigned int FileAttr;
   unsigned int HeadSize;
-  unsigned int NameSize;
   off_t        Offset;
   RARArchiveList* next;
 };
@@ -180,7 +178,6 @@ struct RARArchiveListEx
   unsigned int Method;
   unsigned int FileAttr;
   unsigned int HeadSize;
-  unsigned int NameSize;
   off_t        Offset;
   RARArchiveListEx* next;
 };
@@ -193,11 +190,9 @@ HANDLE       PASCAL RARInitArchive(struct RAROpenArchiveData *ArchiveData, FileH
 HANDLE       PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *ArchiveData, FileHandle);
 int          PASCAL RARFreeArchive(HANDLE hArcData);
 int          PASCAL RARListArchive(HANDLE hArcData, RARArchiveList* fList, off_t* FileDataEnd);
-int          PASCAL RARListArchiveEx(HANDLE* hArcData, RARArchiveListEx* fList, off_t* FileDataEnd);
+int          PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* fList, off_t* FileDataEnd);
 void         PASCAL RARFreeList(RARArchiveList* fList);
 void         PASCAL RARFreeListEx(RARArchiveListEx* fList);
-unsigned int PASCAL RARGetMainHeaderSize(HANDLE hArcData);
-unsigned int PASCAL RARGetMainHeaderFlags(HANDLE hArcData);
 FileHandle   PASCAL RARGetFileHandle(HANDLE hArcData);
 void         PASCAL RARNextVolumeName(char*, bool);
 void         PASCAL RARVolNameToFirstName(char*, bool);

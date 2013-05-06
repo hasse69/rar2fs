@@ -476,9 +476,10 @@ static int pclose_(FILE *fp, pid_t pid)
 /* Size of file data in first volume number */
 #define VOL_REAL_SZ op->entry_p->vsize_real
 
-/* Calculate volume number base offset using cached file offsets */
-#define VOL_NO(off)\
-        (off < VOL_FIRST_SZ ? 0 : ((offset - VOL_FIRST_SZ) / VOL_NEXT_SZ) + 1)
+/* Calculate volume number base offset using inputd file offset */
+#define VOL_NO(off, d)\
+        (off < VOL_FIRST_SZ ? 0 : ((off - VOL_FIRST_SZ) /\
+                (VOL_NEXT_SZ - (d))) + 1)
 
 /*!
  *****************************************************************************
@@ -553,13 +554,26 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                 off_t src_off = 0;
                 struct vol_handle *vol_p = NULL;
                 if (VOL_FIRST_SZ) {
-                        chunk = offset < VOL_FIRST_SZ
-                                ? VOL_FIRST_SZ - offset
-                                : (VOL_NEXT_SZ) -
-                                  ((offset - VOL_FIRST_SZ) % (VOL_NEXT_SZ));
+                        /* 
+                         * RAR5.x (and later?) have a 1 byte volume number in 
+                         * the Main Archive Header for volume 1-127 and 2 byte
+                         * for the rest. The first byte has already been 
+                         * compensated for in VOL_NEXT_SZ.
+                         */
+                        int vol = VOL_NO(offset, 0);
+                        if (op->entry_p->flags.vno_in_header && vol > 127) {
+                                vol = 127 + VOL_NO(offset - (127 * VOL_NEXT_SZ), 1);
+                                chunk = (VOL_NEXT_SZ - 1) -
+                                          ((offset - (VOL_FIRST_SZ + (127 * VOL_NEXT_SZ))) %
+                                          (VOL_NEXT_SZ - 1));
+                        } else {
+                                chunk = offset < VOL_FIRST_SZ
+                                        ? VOL_FIRST_SZ - offset
+                                        : (VOL_NEXT_SZ) -
+                                          ((offset - VOL_FIRST_SZ) % (VOL_NEXT_SZ));
+                        }
 
                         /* keep current open file */
-                        int vol = VOL_NO(offset);
                         if (vol != op->vno) {
                                 /* close/open */
                                 op->vno = vol;
@@ -1260,8 +1274,11 @@ static int CALLBACK index_callback(UINT msg, LPARAM UserData,
 static int extract_index(const dir_elem_t *entry_p, off_t offset)
 {
         int e = ERAR_BAD_DATA;
-        struct RAROpenArchiveData d =
-                {entry_p->rar_p, RAR_OM_EXTRACT, ERAR_EOPEN, NULL, 0, 0, 0};
+        struct RAROpenArchiveDataEx d;
+        memset(&d, 0, sizeof(RAROpenArchiveDataEx));
+        d.ArcName = entry_p->rar_p;
+        d.OpenMode = RAR_OM_EXTRACT;
+
         struct RARHeaderData header;
         HANDLE hdl = 0;
         struct idx_head head = {R2I_MAGIC, 0, 0, 0, 0};
@@ -1281,7 +1298,7 @@ static int extract_index(const dir_elem_t *entry_p, off_t offset)
                 goto index_error;
         lseek(eofd.fd, sizeof(struct idx_head), SEEK_SET);
 
-        hdl = RAROpenArchive(&d);
+        hdl = RAROpenArchiveEx(&d);
         if (!hdl || d.OpenResult)
                 goto index_error;
 
@@ -1299,7 +1316,7 @@ static int extract_index(const dir_elem_t *entry_p, off_t offset)
                                 if (RARProcessFile(hdl, RAR_SKIP, NULL, NULL))
                                         break;
                 } else {
-                        e = RARProcessFile(hdl, RAR_TEST, NULL, NULL);
+                        e = RARProcessFile(hdl, RAR_EXTRACT, NULL, NULL);
                         if (!e) {
                                 head.offset = offset;
                                 head.size = eofd.size;
@@ -1358,10 +1375,13 @@ static int extract_rar(char *arch, const char *file, char *passwd, FILE *fp,
                 void *arg)
 {
         int ret = 0;
-        struct RAROpenArchiveData d = {
-                arch, RAR_OM_EXTRACT, ERAR_EOPEN, NULL, 0, 0, 0 };
+        struct RAROpenArchiveDataEx d;
+        memset(&d, 0, sizeof(RAROpenArchiveDataEx));
+        d.ArcName = arch;
+        d.OpenMode = RAR_OM_EXTRACT;
+
         struct RARHeaderData header;
-        HANDLE hdl = fp ? RARInitArchive(&d, fp) : RAROpenArchive(&d);
+        HANDLE hdl = fp ? RARInitArchiveEx(&d, fp) : RAROpenArchiveEx(&d);
         if (!hdl || d.OpenResult)
                 goto extract_error;
 
@@ -1369,18 +1389,16 @@ static int extract_rar(char *arch, const char *file, char *passwd, FILE *fp,
                 RARSetPassword(hdl, passwd);
 
         header.CmtBufSize = 0;
-
         RARSetCallback(hdl, extract_callback, (LPARAM) (arg));
         while (1) {
                 if (RARReadHeader(hdl, &header))
                         break;
-
                 /* We won't extract subdirs */
                 if (IS_RAR_DIR(&header) || strcmp(header.FileName, file)) {
                         if (RARProcessFile(hdl, RAR_SKIP, NULL, NULL))
                                 break;
                 } else {
-                        ret = RARProcessFile(hdl, RAR_TEST, NULL, NULL);
+                        ret = RARProcessFile(hdl, RAR_EXTRACT, NULL, NULL);
                         break;
                 }
         }
@@ -1504,7 +1522,7 @@ static void set_rarstats(dir_elem_t *entry_p, RARArchiveListEx *alist_p,
  *
  ****************************************************************************/
 #define NEED_PASSWORD() \
-        ((MainHeaderFlags & MHD_PASSWORD) || (next->Flags & LHD_PASSWORD))
+        ((d.Flags & MHD_PASSWORD) || (next->Flags & LHD_PASSWORD))
 #define BS_TO_UNIX(p) \
         do {\
                 char *s = (p); \
@@ -1540,28 +1558,24 @@ wide_to_char(char *dst, const wchar_t *src, size_t size)
  ****************************************************************************/
 static int listrar_rar(const char *path, struct dir_entry_list **buffer,
                 const char *arch,  HANDLE hdl, const RARArchiveListEx *next,
-                const dir_elem_t *entry_p)
+                const dir_elem_t *entry_p, unsigned int mh_flags)
 {
         printd(3, "%llu byte RAR file %s found in archive %s\n",
                GET_RAR_PACK_SZ(next), entry_p->name_p, arch);
 
-        RAROpenArchiveData d2;
+        RAROpenArchiveDataEx d2;
+        memset(&d2, 0, sizeof(RAROpenArchiveDataEx));
         d2.ArcName = entry_p->name_p;
         d2.OpenMode = RAR_OM_LIST;
-        d2.CmtBuf = NULL;
-        d2.CmtBufSize = 0;
-        d2.CmtSize = 0;
-        d2.CmtState = 0;
 
         HANDLE hdl2 = NULL;
         FILE *fp = NULL;
         char *maddr = MAP_FAILED;
         off_t msize = 0;
         int mflags = 0;
-        const unsigned int MainHeaderFlags = RARGetMainHeaderFlags(hdl);
 
         if (next->Method == FHD_STORING && 
-                        !(MainHeaderFlags & (MHD_PASSWORD | MHD_VOLUME))) {
+                        !(mh_flags & (MHD_PASSWORD | MHD_VOLUME))) {
                 struct stat st;
                 int fd = fileno(RARGetFileHandle(hdl));
                 if (fd == -1)
@@ -1595,18 +1609,18 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
         }
 
         if (fp)
-                hdl2 = RARInitArchive(&d2, fp);
+                hdl2 = RARInitArchiveEx(&d2, fp);
         if (!hdl2)
                 goto file_error;
 
-        RARArchiveListEx LL;
-        RARArchiveListEx *next2 = &LL;
-        if (!RARListArchiveEx(&hdl2, next2, NULL)) {
+        if (d2.Flags & MHD_VOLUME) {
                 hdl2 = NULL;
                 goto file_error;
         }
 
-        if (RARGetMainHeaderFlags(hdl2) & MHD_VOLUME) {
+        RARArchiveListEx LL;
+        RARArchiveListEx *next2 = &LL;
+        if (!RARListArchiveEx(hdl2, next2, NULL)) {
                 hdl2 = NULL;
                 goto file_error;
         }
@@ -1737,7 +1751,6 @@ file_error:
                 else
                         free(maddr);
         }
-
         return hdl2 ? 0 : 1;
 }
 
@@ -1751,14 +1764,11 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         ENTER_("%s   arch=%s", path, arch);
 
         pthread_mutex_lock(&file_access_mutex);
-        RAROpenArchiveData d;
+        RAROpenArchiveDataEx d;
+        memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.ArcName = (char *)arch;       /* Horrible cast! But hey... it is the API! */
         d.OpenMode = RAR_OM_LIST;
-        d.CmtBuf = NULL;
-        d.CmtBufSize = 0;
-        d.CmtSize = 0;
-        d.CmtState = 0;
-        HANDLE hdl = RAROpenArchive(&d);
+        HANDLE hdl = RAROpenArchiveEx(&d);
 
         /* Check for fault */
         if (d.OpenResult) {
@@ -1772,13 +1782,10 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         off_t FileDataEnd;
         RARArchiveListEx L;
         RARArchiveListEx *next = &L;
-        if (!RARListArchiveEx(&hdl, next, &FileDataEnd)) {
+        if (!RARListArchiveEx(hdl, next, &FileDataEnd)) {
                 pthread_mutex_unlock(&file_access_mutex);
                 return 1;
         }
-
-        const unsigned int MainHeaderSize = RARGetMainHeaderSize(hdl);
-        const unsigned int MainHeaderFlags = RARGetMainHeaderFlags(hdl);
 
         char *tmp1 = strdup(arch);
         char *rar_root = strdup(dirname(tmp1));
@@ -1811,7 +1818,6 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 if (is_root_path) {
                         if (!CHRCMP(rar_name, '.'))
                                 display = 1;
-
                         /*
                          * Handle the rare case when the parent folder does not have
                          * its own entry in the file header. The entry needs to be
@@ -1838,9 +1844,9 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                                 entry_p->flags.force_dir = 1;
 
                                                 /* Check if part of a volume */
-                                                if (MainHeaderFlags & MHD_VOLUME) {
+                                                if (d.Flags & MHD_VOLUME) {
                                                         entry_p->flags.multipart = 1;
-                                                        entry_p->vtype = MainHeaderFlags & MHD_NEWNUMBERING ? 1 : 0;
+                                                        entry_p->vtype = (d.Flags & MHD_NEWNUMBERING) ? 1 : 0;
                                                         /* 
                                                          * Make sure parent folders are always searched
                                                          * from the first volume file since sub-folders
@@ -1913,10 +1919,10 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 /* Check for .rar file inside archive */
                 if (!OPT_SET(OPT_KEY_FLAT_ONLY) && IS_RAR(entry_p->name_p)
                                         && !IS_RAR_DIR(next)) {
-                        int vno = !(MainHeaderFlags & MHD_VOLUME)
-                                ? 1
-                                : get_vformat(arch, entry_p->vtype, NULL, NULL);
-                        if (vno > 1 || !listrar_rar(path, buffer, arch, hdl, next, entry_p)) {
+                        /* Only process files split across multiple volumes once */
+                        int inval = (d.Flags & MHD_VOLUME) && 
+                                        (next->Flags & LHD_SPLIT_BEFORE);
+                        if (inval || !listrar_rar(path, buffer, arch, hdl, next, entry_p, d.Flags)) {
                                 /* We are done with this rar file (.rar will never display!) */
                                 inval_cache_path(mp);
                                 next = next->next;
@@ -1927,13 +1933,13 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 if (next->Method == FHD_STORING && !NEED_PASSWORD() &&
                                  !IS_RAR_DIR(next)) {
                         entry_p->flags.raw = 1;
-                        if ((MainHeaderFlags & MHD_VOLUME) &&   /* volume ? */
+                        if ((d.Flags & MHD_VOLUME) &&   /* volume ? */
                                         ((next->Flags & (LHD_SPLIT_BEFORE | LHD_SPLIT_AFTER)))) {
                                 int len, pos;
 
                                 entry_p->flags.multipart = 1;
                                 entry_p->flags.image = IS_IMG(next->FileName);
-                                entry_p->vtype = MainHeaderFlags & MHD_NEWNUMBERING ? 1 : 0;
+                                entry_p->vtype = (d.Flags & MHD_NEWNUMBERING) ? 1 : 0;
                                 entry_p->vno_base = get_vformat(arch, entry_p->vtype, &len, &pos);
 
                                 if (len > 0) {
@@ -1941,9 +1947,10 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                         entry_p->vpos = pos;
                                         if (!IS_RAR_DIR(next)) {
                                                 entry_p->vsize_real = FileDataEnd;
-                                                entry_p->vsize_next = FileDataEnd - 
-                                                        (SIZEOF_MARKHEAD + MainHeaderSize + next->HeadSize);
                                                 entry_p->vsize_first = GET_RAR_PACK_SZ(next);
+                                                entry_p->vsize_next = entry_p->vsize_first; 
+                                                entry_p->vsize_next -= next->UnpVer >= 50 ? 1 : 0;
+                                                entry_p->flags.vno_in_header = next->UnpVer >= 50 ? 1 : 0;
                                         }
                                 } else {
                                         entry_p->flags.raw = 0;
@@ -1964,9 +1971,9 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                         entry_p->flags.save_eof = 0;
                         }
                         /* Check if part of a volume */
-                        if (MainHeaderFlags & MHD_VOLUME) {
+                        if (d.Flags & MHD_VOLUME) {
                                 entry_p->flags.multipart = 1;
-                                entry_p->vtype = MainHeaderFlags & MHD_NEWNUMBERING ? 1 : 0;
+                                entry_p->vtype = (d.Flags & MHD_NEWNUMBERING) ? 1 : 0;
                                 /* 
                                  * Make sure parent folders are always searched
                                  * from the first volume file since sub-folders
@@ -2398,14 +2405,16 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 short vtype = entry_p->vtype;
                 pthread_mutex_unlock(&file_access_mutex);
                 if (multipart) {
-                        do {
+                        int vol_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
+                        printd(3, "Search for local directory in %s\n", tmp);
+                        password = get_password(tmp, tmpbuf);
+                        while (!listrar(path, &next, tmp, password)) {
+                                ++vol;
+                                if (vol_end && vol_end < vol)
+                                        goto fill_buff;
+                                RARNextVolumeName(tmp, !vtype);
                                 printd(3, "Search for local directory in %s\n", tmp);
-                                if (vol++ == 1) { /* first file */
-                                        password = get_password(tmp, tmpbuf);
-                                } else {
-                                        RARNextVolumeName(tmp, !vtype);
-                                }
-                        } while (!listrar(path, &next, tmp, password));
+                        }
                 } else { 
                         if (tmp) {
                                 printd(3, "Search for local directory in %s\n", tmp);
@@ -2421,7 +2430,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 pthread_mutex_unlock(&file_access_mutex);
         }
 
-        if (vol < 3) {  /* First attempt failed! */
+        if (vol == 1) {
                 dir_list_free(&dir_list);
                 /*
                  * Fuse bug!? Returning -ENOENT here seems to be

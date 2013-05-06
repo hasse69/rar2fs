@@ -63,7 +63,8 @@ struct dir_elem {
                 unsigned int fake_iso:1;
                 unsigned int mmap:2;
                 unsigned int force_dir:1;
-                unsigned int :22;
+                unsigned int vno_in_header:1;
+                unsigned int :21;
                 unsigned int direct_io:1;
                 unsigned int avi_tested:1;
                 unsigned int save_eof:1;

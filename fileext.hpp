@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2011 Hans Beckerus (hans.beckerus@gmail.com)
+    Copyright (C) 2009-2013 Hans Beckerus (hans.beckerus@gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -27,15 +27,12 @@
 */
 
 #ifndef _RAR_FILEEXT_
-#define _RAR_FILEEXT__
+#define _RAR_FILEEXT_
 
-#ifdef _WIN_ALL
-typedef HANDLE FileHandle;
-#define BAD_HANDLE INVALID_HANDLE_VALUE
-#else
+#include <version.hpp>
+
 typedef FILE* FileHandle;
 #define BAD_HANDLE NULL
-#endif
 
 class FileExt
 {
@@ -48,16 +45,18 @@ class FileExt
     bool NewFile;
     bool AllowDelete;
     bool AllowExceptions;
-#ifdef _WIN_ALL
-    bool NoSequentialRead;
-#endif
   protected:
     bool OpenShared;
   public:
+#if RARVER_MAJOR < 5
     char FileName[NM];
+#endif
     wchar FileNameW[NM];
+
     FILE_ERRORTYPE ErrorType;
+#if RARVER_MAJOR < 5
     uint CloseCount;
+#endif
   public:
     FileExt();
     virtual ~FileExt();

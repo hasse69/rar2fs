@@ -1,5 +1,18 @@
 rar2fs ChangeLog file.
 
+2013-05-06  Hans Beckerus <hans.beckerus@gmail.com>
+
+        * Built and tested against unrar source v5.0.2.
+          This update requires a new invokation of autoreconf 
+          to properly update the configure script and Makefile(s).
+          This should resolve issue #14.
+   
+        * Fixed a few issues with "rar inside rar" that could
+          have resulted in some files not being detected properly.
+
+        * Removed some code from the unrar library extension
+          that was no longer needed.
+          
 2013-04-16  Hans Beckerus <hans.beckerus@gmail.com>
 
         * Fixed a minor compilation warning discovered on a 
