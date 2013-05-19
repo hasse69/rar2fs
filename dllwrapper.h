@@ -36,10 +36,6 @@
 #endif
 
 #include "dllext.hpp"
-#include "version.hpp"
-#if RARVER_MAJOR > 5
-#include "headers5.hpp"
-#endif
 
 #ifdef __cplusplus
 extern "C" {

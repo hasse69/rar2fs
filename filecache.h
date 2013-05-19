@@ -96,16 +96,13 @@ typedef struct dir_elem dir_elem_t;
 extern pthread_mutex_t file_access_mutex;
 
 dir_elem_t *
-cache_path_alloc(const char *path);
+filecache_alloc(const char *path);
 
 dir_elem_t *
-cache_path_get(const char *path);
-
-dir_elem_t *
-cache_path(const char *path, struct stat *stbuf);
+filecache_get(const char *path);
 
 void
-inval_cache_path(const char *path);
+filecache_invalidate(const char *path);
 
 dir_elem_t *
 filecache_clone(const dir_elem_t *src);

@@ -452,6 +452,7 @@ ac_c_werror_flag=
 AC_LANG_POP
 
 AC_PROG_LN_S
+AC_PROG_MKDIR_P
 
 # Do some final preparations before we finish
 #

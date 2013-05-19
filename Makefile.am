@@ -35,6 +35,7 @@ mkr2i_LINK = $(CC) -o $@
 
 if LINUX
 install-exec-hook:
+	$(MKDIR_P) $(DESTDIR)$(sbindir) && \
 	rm -f $(DESTDIR)$(sbindir)/mount.rar2fs && \
 	$(LN_S) $(bindir)/rar2fs $(DESTDIR)$(sbindir)/mount.rar2fs
 

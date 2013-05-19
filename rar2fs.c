@@ -167,6 +167,13 @@ struct io_handle {
 /*#define ENABLE_OBSOLETE_ARGS*/
 #define USE_RAR_PASSWORD
 
+#define IS_ISO(s) (!strcasecmp((s)+(strlen(s)-4), ".iso"))
+#define IS_AVI(s) (!strcasecmp((s)+(strlen(s)-4), ".avi"))
+#define IS_MKV(s) (!strcasecmp((s)+(strlen(s)-4), ".mkv"))
+#define IS_RAR(s) (!strcasecmp((s)+(strlen(s)-4), ".rar"))
+#define IS_CBR(s) (!OPT_SET(OPT_KEY_NO_EXPAND_CBR) && \
+                        !strcasecmp((s)+(strlen(s)-4), ".cbr"))
+
 long page_size = 0;
 static int mount_type;
 struct dir_entry_list arch_list_root;        /* internal list root */
@@ -186,8 +193,89 @@ struct eof_data {
         size_t size;
         int fd;
 };
+
 static int extract_index(const dir_elem_t *entry_p, off_t offset);
 static int preload_index(struct io_buf *buf, const char *path);
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static dir_elem_t *path_lookup_miss(const char *path, struct stat *stbuf)
+{
+        struct stat st;
+        char *root;
+
+        printd(3, "MISS    %s\n", path);
+
+        ABS_ROOT(root, path);
+
+        /* Check if the missing file can be found on the local fs */
+        if(!lstat(root, stbuf?stbuf:&st)) {
+                printd(3, "STAT retrieved for %s\n", root);
+                return LOCAL_FS_ENTRY;
+        }
+
+        /* Check if the missing file is a fake .iso */
+        if (OPT_SET(OPT_KEY_FAKE_ISO) && IS_ISO(root)) {
+                dir_elem_t *e_p;
+                int i;
+                int obj = OPT_CNT(OPT_KEY_FAKE_ISO)
+                        ? OPT_KEY_FAKE_ISO
+                        : OPT_KEY_IMG_TYPE;
+
+                /* Try the image file extensions one by one */
+                for (i = 0; i < OPT_CNT(obj); i++) {
+                        char *tmp = (OPT_STR(obj, i));
+                        int l = strlen(tmp ? tmp : "");
+                        char *root1 = strdup(root);
+                        if (l > 4)
+                                root1 = realloc(root1, strlen(root1) + 1 + (l - 4));
+                        strcpy(root1 + (strlen(root1) - 4), tmp ? tmp : "");
+                        if (lstat(root1, &st)) {
+                                free(root1);
+                                continue;
+                        }
+                        e_p = filecache_alloc(path);
+                        e_p->name_p = strdup(path);
+                        e_p->file_p = strdup(path);
+                        e_p->flags.fake_iso = 1;
+                        if (l > 4)
+                                e_p->file_p = realloc(
+                                        e_p->file_p,
+                                        strlen(path) + 1 + (l - 4));
+                        /* back-patch *real* file name */
+                        strncpy(e_p->file_p + (strlen(e_p->file_p) - 4),
+                                        tmp ? tmp : "", l);
+                        *(e_p->file_p+(strlen(path)-4+l)) = 0;
+                        memcpy(&e_p->stat, &st, sizeof(struct stat));
+                        if (stbuf) {
+                                memcpy(stbuf, &st, sizeof(struct stat));
+                        }
+                        free(root1);
+                        return e_p;
+                }
+        }
+        return NULL;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static dir_elem_t *path_lookup(const char *path, struct stat *stbuf)
+{
+        dir_elem_t *e_p = filecache_get(path);
+        if (e_p && !e_p->flags.fake_iso) {
+                if (stbuf)
+                        memcpy(stbuf, &e_p->stat, sizeof(struct stat));
+                return e_p;
+        }
+        /* Do not remember fake .ISO entries between eg. getattr() calls */
+        if (e_p && e_p->flags.fake_iso)
+                filecache_invalidate(path);
+        return path_lookup_miss(path, stbuf);
+}
 
 /*!
  *****************************************************************************
@@ -476,7 +564,7 @@ static int pclose_(FILE *fp, pid_t pid)
 /* Size of file data in first volume number */
 #define VOL_REAL_SZ op->entry_p->vsize_real
 
-/* Calculate volume number base offset using inputd file offset */
+/* Calculate volume number base offset using input file offset */
 #define VOL_NO(off, d)\
         (off < VOL_FIRST_SZ ? 0 : ((off - VOL_FIRST_SZ) /\
                 (VOL_NEXT_SZ - (d))) + 1)
@@ -553,16 +641,18 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                 FILE *fp;
                 off_t src_off = 0;
                 struct vol_handle *vol_p = NULL;
-                if (VOL_FIRST_SZ) {
+                if (op->entry_p->flags.multipart) {
                         /* 
                          * RAR5.x (and later?) have a 1 byte volume number in 
                          * the Main Archive Header for volume 1-127 and 2 byte
-                         * for the rest. The first byte has already been 
-                         * compensated for in VOL_NEXT_SZ.
+                         * for the rest. Check if we need to compensate. 
                          */
                         int vol = VOL_NO(offset, 0);
-                        if (op->entry_p->flags.vno_in_header && vol > 127) {
-                                vol = 127 + VOL_NO(offset - (127 * VOL_NEXT_SZ), 1);
+                        if (op->entry_p->flags.vno_in_header && 
+                                        op->entry_p->vno_base < 128 &&
+                                        (vol + op->entry_p->vno_base) > 128) {
+                                int vol_contrib = 128 - op->entry_p->vno_base;
+                                vol = vol_contrib + VOL_NO(offset - (vol_contrib * VOL_NEXT_SZ), 1);
                                 chunk = (VOL_NEXT_SZ - 1) -
                                           ((offset - (VOL_FIRST_SZ + (127 * VOL_NEXT_SZ))) %
                                           (VOL_NEXT_SZ - 1));
@@ -851,7 +941,7 @@ check_idx:
                         dir_elem_t *e_p; /* "real" cache entry */
                         if (op->entry_p->flags.save_eof) {
                                 pthread_mutex_lock(&file_access_mutex);
-                                e_p = cache_path_get(op->entry_p->name_p);
+                                e_p = filecache_get(op->entry_p->name_p);
                                 if (e_p)
                                         e_p->flags.save_eof = 0;
                                 pthread_mutex_unlock(&file_access_mutex);
@@ -865,7 +955,7 @@ check_idx:
                         }
                         fi->direct_io = 1;
                         pthread_mutex_lock(&file_access_mutex);
-                        e_p = cache_path_get(op->entry_p->name_p);
+                        e_p = filecache_get(op->entry_p->name_p);
                         if (e_p)
                                 e_p->flags.direct_io = 1;
                         pthread_mutex_unlock(&file_access_mutex);
@@ -906,7 +996,7 @@ check_idx:
                                 op->seq--;      /* pretend it never happened */
                                 fi->direct_io = 1;
                                 pthread_mutex_lock(&file_access_mutex);
-                                e_p = cache_path_get(op->entry_p->name_p);
+                                e_p = filecache_get(op->entry_p->name_p);
                                 if (e_p)
                                         e_p->flags.direct_io = 1;
                                 pthread_mutex_unlock(&file_access_mutex);
@@ -1206,15 +1296,12 @@ static int get_vformat(const char *s, int t, int *l, int *p)
 #define IS_CBR(s) (!OPT_SET(OPT_KEY_NO_EXPAND_CBR) && \
                         !strcasecmp((s)+(strlen(s)-4), ".cbr"))
 #define IS_RXX(s) (is_rxx_vol(s))
-#if 0
 #define IS_RAR_DIR(l) \
-        ((l)->HostOS != HOST_UNIX && (l)->HostOS != HOST_BEOS \
-                ? (l)->FileAttr & 0x10 : (l)->FileAttr & S_IFDIR)
-#else
-/* Unless we need to support RAR version < 2.0 this is good enough */
-#define IS_RAR_DIR(l) \
-        (((l)->Flags&LHD_DIRECTORY)==LHD_DIRECTORY)
-#endif
+        ((l)->UnpVer >= 20 \
+                ? (((l)->Flags&LHD_DIRECTORY)==LHD_DIRECTORY) \
+                : ((l)->HostOS != HOST_UNIX && (l)->HostOS != HOST_BEOS \
+                        ? (l)->FileAttr & 0x10 \
+                        : (l)->FileAttr & S_IFDIR))
 #define GET_RAR_MODE(l) \
         ((l)->HostOS != HOST_UNIX && (l)->HostOS != HOST_BEOS \
                 ? IS_RAR_DIR(l) ? (S_IFDIR|(0777&~umask_)) \
@@ -1316,7 +1403,7 @@ static int extract_index(const dir_elem_t *entry_p, off_t offset)
                                 if (RARProcessFile(hdl, RAR_SKIP, NULL, NULL))
                                         break;
                 } else {
-                        e = RARProcessFile(hdl, RAR_EXTRACT, NULL, NULL);
+                        e = RARProcessFile(hdl, RAR_TEST, NULL, NULL);
                         if (!e) {
                                 head.offset = offset;
                                 head.size = eofd.size;
@@ -1382,7 +1469,7 @@ static int extract_rar(char *arch, const char *file, char *passwd, FILE *fp,
 
         struct RARHeaderData header;
         HANDLE hdl = fp ? RARInitArchiveEx(&d, fp) : RAROpenArchiveEx(&d);
-        if (!hdl || d.OpenResult)
+        if (d.OpenResult)
                 goto extract_error;
 
         if (passwd && strlen(passwd))
@@ -1398,17 +1485,19 @@ static int extract_rar(char *arch, const char *file, char *passwd, FILE *fp,
                         if (RARProcessFile(hdl, RAR_SKIP, NULL, NULL))
                                 break;
                 } else {
-                        ret = RARProcessFile(hdl, RAR_EXTRACT, NULL, NULL);
+                        ret = RARProcessFile(hdl, RAR_TEST, NULL, NULL);
                         break;
                 }
         }
 
 extract_error:
 
-        if (!fp)
-                RARCloseArchive(hdl);
-        else
-                RARFreeArchive(hdl);
+        if (hdl) {
+                if (!fp)
+                        RARCloseArchive(hdl);
+                else
+                        RARFreeArchive(hdl);
+        }
         return ret;
 }
 
@@ -1563,6 +1652,7 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
         printd(3, "%llu byte RAR file %s found in archive %s\n",
                GET_RAR_PACK_SZ(next), entry_p->name_p, arch);
 
+        int result = 1;
         RAROpenArchiveDataEx d2;
         memset(&d2, 0, sizeof(RAROpenArchiveDataEx));
         d2.ArcName = entry_p->name_p;
@@ -1610,20 +1700,13 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
 
         if (fp)
                 hdl2 = RARInitArchiveEx(&d2, fp);
-        if (!hdl2)
+        if (!fp || d2.OpenResult || (d2.Flags & MHD_VOLUME))
                 goto file_error;
-
-        if (d2.Flags & MHD_VOLUME) {
-                hdl2 = NULL;
-                goto file_error;
-        }
 
         RARArchiveListEx LL;
         RARArchiveListEx *next2 = &LL;
-        if (!RARListArchiveEx(hdl2, next2, NULL)) {
-                hdl2 = NULL;
+        if (!RARListArchiveEx(hdl2, next2, NULL))
                 goto file_error;
-        }
 
         char *tmp1 = strdup(entry_p->name_p);
         char *rar_root = dirname(tmp1);
@@ -1671,10 +1754,10 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
                                 if (!strcmp(basename(safe_path), rar_name)) {
                                         char *mp;
                                         ABS_MP(mp, path, rar_name);
-                                        entry2_p = cache_path_get(mp);
+                                        entry2_p = filecache_get(mp);
                                         if (entry2_p == NULL) {
                                                 printd(3, "Adding %s to cache\n", mp);
-                                                entry2_p = cache_path_alloc(mp);
+                                                entry2_p = filecache_alloc(mp);
                                                 entry2_p->name_p = strdup(mp);
                                                 entry2_p->rar_p = strdup(arch);
                                                 entry2_p->flags.force_dir = 1;
@@ -1696,7 +1779,7 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
                 }
 
                 printd(3, "Looking up %s in cache\n", rar_file);
-                entry2_p = cache_path_get(rar_file);
+                entry2_p = filecache_get(rar_file);
                 if (entry2_p)  {
                         /*
                          * Check if this was a forced/fake entry. In that
@@ -1711,7 +1794,7 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
 
                 /* Allocate a cache entry for this file */
                 printd(3, "Adding %s to cache\n", rar_file);
-                entry2_p = cache_path_alloc(rar_file);
+                entry2_p = filecache_alloc(rar_file);
                 entry2_p->name_p = strdup(rar_file);
                 entry2_p->rar_p = strdup(arch);
                 entry2_p->file_p = strdup(next->FileName);
@@ -1739,10 +1822,12 @@ cache_hit:
                 next2 = next2->next;
         }
         RARFreeListEx(&LL);
-        RARFreeArchive(hdl2);
         free(tmp1);
+        result = 0;
 
 file_error:
+        if (hdl2)
+                RARFreeArchive(hdl2);
         if (fp)
                 fclose(fp);
         if (maddr != MAP_FAILED) {
@@ -1751,7 +1836,7 @@ file_error:
                 else
                         free(maddr);
         }
-        return hdl2 ? 0 : 1;
+        return result;
 }
 
 /*!
@@ -1830,10 +1915,10 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                 if (!strcmp(basename(safe_path), rar_name)) {
                                         char *mp;
                                         ABS_MP(mp, path, rar_name);
-                                        dir_elem_t *entry_p = cache_path_get(mp);
+                                        dir_elem_t *entry_p = filecache_get(mp);
                                         if (entry_p == NULL) {
                                                 printd(3, "Adding %s to cache\n", mp);
-                                                entry_p = cache_path_alloc(mp);
+                                                entry_p = filecache_alloc(mp);
                                                 entry_p->name_p = strdup(mp);
                                                 entry_p->rar_p = strdup(arch);
                                                 entry_p->file_p = strdup(rar_name);
@@ -1892,7 +1977,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 }
 
                 printd(3, "Looking up %s in cache\n", mp);
-                dir_elem_t *entry_p = cache_path_get(mp);
+                dir_elem_t *entry_p = filecache_get(mp);
                 if (entry_p)  {
                         /* 
                          * Check if this was a forced/fake entry. In that
@@ -1907,7 +1992,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
 
                 /* Allocate a cache entry for this file */
                 printd(3, "Adding %s to cache\n", mp);
-                entry_p = cache_path_alloc(mp);
+                entry_p = filecache_alloc(mp);
                 entry_p->name_p = strdup(mp);
                 entry_p->rar_p = strdup(arch);
                 entry_p->file_p = strdup(next->FileName);
@@ -1924,7 +2009,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                         (next->Flags & LHD_SPLIT_BEFORE);
                         if (inval || !listrar_rar(path, buffer, arch, hdl, next, entry_p, d.Flags)) {
                                 /* We are done with this rar file (.rar will never display!) */
-                                inval_cache_path(mp);
+                                filecache_invalidate(mp);
                                 next = next->next;
                                 continue;
                         }
@@ -1948,9 +2033,19 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                         if (!IS_RAR_DIR(next)) {
                                                 entry_p->vsize_real = FileDataEnd;
                                                 entry_p->vsize_first = GET_RAR_PACK_SZ(next);
-                                                entry_p->vsize_next = entry_p->vsize_first; 
-                                                entry_p->vsize_next -= next->UnpVer >= 50 ? 1 : 0;
-                                                entry_p->flags.vno_in_header = next->UnpVer >= 50 ? 1 : 0;
+                                                entry_p->vsize_next = FileDataEnd - (
+                                                                RARGetMarkHeaderSize(hdl) +
+                                                                RARGetMainHeaderSize(hdl) + next->HeadSize);
+                                                /* 
+                                                 * Check if we might need to compensate for the 
+                                                 * 1-byte RAR5.x (and later?) volume number in 
+                                                 * next main archive header.
+                                                 */
+                                                if (next->UnpVer >= 50) {
+                                                        if (entry_p->vno_base == 1 || entry_p->vno_base == 128)
+                                                                entry_p->vsize_next -= 1;
+                                                        entry_p->flags.vno_in_header = 1;
+                                                }
                                         }
                                 } else {
                                         entry_p->flags.raw = 0;
@@ -2262,7 +2357,7 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
 {
         ENTER_("%s", path);
         pthread_mutex_lock(&file_access_mutex);
-        if (cache_path(path, stbuf)) {
+        if (path_lookup(path, stbuf)) {
                 pthread_mutex_unlock(&file_access_mutex);
                 dump_stat(stbuf);
                 return 0;
@@ -2280,7 +2375,7 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         syncdir(dirname(safe_path));
         free(safe_path);
         pthread_mutex_lock(&file_access_mutex);
-        dir_elem_t *e_p = cache_path_get(path);
+        dir_elem_t *e_p = filecache_get(path);
         if (e_p) {
                 memcpy(stbuf, &e_p->stat, sizeof(struct stat));
                 pthread_mutex_unlock(&file_access_mutex);
@@ -2300,7 +2395,7 @@ static int rar2_getattr2(const char *path, struct stat *stbuf)
         ENTER_("%s", path);
 
         pthread_mutex_lock(&file_access_mutex);
-        if (cache_path(path, stbuf)) {
+        if (path_lookup(path, stbuf)) {
                 pthread_mutex_unlock(&file_access_mutex);
                 dump_stat(stbuf);
                 return 0;
@@ -2316,7 +2411,7 @@ static int rar2_getattr2(const char *path, struct stat *stbuf)
         syncrar("/");
 
         pthread_mutex_lock(&file_access_mutex);
-        dir_elem_t *e_p = cache_path_get(path);
+        dir_elem_t *e_p = filecache_get(path);
         if (e_p) {
                 memcpy(stbuf, &e_p->stat, sizeof(struct stat));
                 pthread_mutex_unlock(&file_access_mutex);
@@ -2357,7 +2452,7 @@ static void dump_dir_list(const char *path, void *buffer, fuse_fill_dir_t filler
                             next->entry.type == DIR_E_NRM) { /* Oops! */
                                 char *tmp;
                                 ABS_MP(tmp, path, next->entry.name);
-                                inval_cache_path(tmp);
+                                filecache_invalidate(tmp);
                         }
                 }
                 next = next->next;
@@ -2398,7 +2493,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
         int vol = 1;
 
         pthread_mutex_lock(&file_access_mutex);
-        dir_elem_t *entry_p = cache_path_get(path);
+        dir_elem_t *entry_p = filecache_get(path);
         if (entry_p) {
                 char *tmp = strdup(entry_p->rar_p);
                 int multipart = entry_p->flags.multipart;
@@ -2723,7 +2818,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
 
         errno = 0;
         pthread_mutex_lock(&file_access_mutex);
-        entry_p = cache_path(path, NULL);
+        entry_p = path_lookup(path, NULL);
 
         if (entry_p == NULL) {
                 pthread_mutex_unlock(&file_access_mutex);
@@ -2808,23 +2903,28 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                                   */
                                                  entry_p->vno_max = 901;  /* .rar -> .z99 */
                                         }
-                                        op->volHdl =
-                                            malloc(entry_p->vno_max * sizeof(struct vol_handle));
+                                        op->volHdl = malloc(entry_p->vno_max * sizeof(struct vol_handle));
                                         if (op->volHdl) {
                                                 memset(op->volHdl, 0, entry_p->vno_max * sizeof(struct vol_handle));
                                                 char *tmp = strdup(entry_p->rar_p);
-                                                int j = entry_p->vno_max;
-                                                while (j--) {
+                                                int j = 0;
+                                                while (j < entry_p->vno_max) {
                                                         FILE *fp_ = fopen(tmp, "r");
-                                                        if (fp_ == NULL) {
+                                                        if (fp_ == NULL)
                                                                 break;
-                                                        }
                                                         printd(3, "pre-open %s\n", tmp);
                                                         op->volHdl[j].fp = fp_;
-                                                        op->volHdl[j].pos = VOL_REAL_SZ - VOL_FIRST_SZ;
+                                                        /* 
+                                                         * The file position is only a qualified
+                                                         * guess. If it is wrong it will be adjusted
+                                                         * later.
+                                                         */
+                                                        op->volHdl[j].pos = VOL_REAL_SZ - 
+                                                                        (j ? VOL_NEXT_SZ : VOL_FIRST_SZ);
                                                         printd(3, "SEEK src_off = %llu\n", op->volHdl[j].pos);
                                                         fseeko(fp_, op->volHdl[j].pos, SEEK_SET);
                                                         RARNextVolumeName(tmp, !entry_p->vtype);
+                                                        ++j;
                                                 }
                                                 free(tmp);
                                         } else {
@@ -3027,10 +3127,10 @@ static inline int access_chk(const char *path, int new_file)
          */
         if (new_file) {
                 char *p = strdup(path); /* In case p is destroyed by dirname() */
-                e = (void *)cache_path_get(dirname(p));
+                e = (void *)filecache_get(dirname(p));
                 free(p);
         } else {
-                e = (void *)cache_path_get(path);
+                e = (void *)filecache_get(path);
         }
         return e ? 1 : 0;
 }
@@ -3130,7 +3230,7 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                FH_TOCONTEXT(fi->fh));
         if (!FH_ISSET(fi->fh)) {
                 pthread_mutex_lock(&file_access_mutex);
-                inval_cache_path(path);
+                filecache_invalidate(path);
                 pthread_mutex_unlock(&file_access_mutex);
                 return 0;
         }
@@ -4051,7 +4151,7 @@ int main(int argc, char *argv[])
         int res = 0;
 
 #ifdef HAVE_SETLOCALE
-        setlocale(LC_CTYPE, "");
+        setlocale(LC_ALL, "");
 #endif
 
 #ifdef HAVE_UMASK

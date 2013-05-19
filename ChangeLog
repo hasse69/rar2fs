@@ -1,5 +1,50 @@
 rar2fs ChangeLog file.
 
+2013-05-16  Hans Beckerus <hans.beckerus@gmail.com>
+
+        * Fixed broken pre-open logic
+
+        * Updated the pre-open logic to better handle RAR5
+
+        * Minor code re-structuring
+
+2013-05-10  Hans Beckerus <hans.beckerus@gmail.com>
+
+        * Added full support for RAR1.5 format.
+        
+        * Minor code clean-up 
+
+2013-05-09  Hans Beckerus <hans.beckerus@gmail.com>
+
+        * Added creation of $(DESTDIR)/$(sbindir) in 
+          Makefile.am before attempting to install the
+          mount helper utility softlink. 
+          Thanks to ssuominen for the patch. 
+        
+        * Fixed a memory corruption bug when using libunrar5
+          in combination with volume name lookup causing 
+          intermittent crashes.
+          
+2013-05-08  Hans Beckerus <hans.beckerus@gmail.com>
+
+        * Replaced RAR_EXTRACT with RAR_TEST in calls to
+          RARProcessFile(). The wrong behavior when using
+          RAR_TEST has been fixed in UnRAR source v5.0.2.
+
+        * Added a missing call to RARFreeArchive()
+
+2013-05-08  Hans Beckerus <hans.beckerus@gmail.com>
+
+        * Removed an incorret assert()
+
+        * Fixed a compilation problem introduced in last version
+          for UnRAR source releases earlier than v5.0.x
+
+2013-05-07  Hans Beckerus <hans.beckerus@gmail.com>
+
+        * Fixed a bug in the volume file number and offset 
+          calculation for RAR5 archives in store mode.
+
 2013-05-06  Hans Beckerus <hans.beckerus@gmail.com>
 
         * Built and tested against unrar source v5.0.2.

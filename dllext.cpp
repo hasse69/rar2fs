@@ -95,28 +95,27 @@ HANDLE PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *r, FileHandle fh)
 #if RARVER_MAJOR < 5
     Data->Cmd.FileArgs->AddString("*");
 
-    char an[NM];
+    char AnsiArcName[NM];
     if (r->ArcName==NULL && r->ArcNameW!=NULL)
     {
-      WideToChar(r->ArcNameW,an,NM);
-      r->ArcName=an;
+      WideToChar(r->ArcNameW,AnsiArcName,NM);
+      r->ArcName=AnsiArcName;
     }
 
     Data->Cmd.AddArcName(r->ArcName,r->ArcNameW);
 #else
     Data->Cmd.FileArgs.AddString(L"*");
 
-    char AnsiArcName[NM];
-    *AnsiArcName=0;
-    if (r->ArcName!=NULL)
+    char *ArcName = NULL;
+    if (r->ArcName!=NULL && r->ArcNameW==NULL)
     {
-      strncpyz(AnsiArcName,r->ArcName,ASIZE(AnsiArcName));
+      ArcName = r->ArcName;
     }
 
-    wchar ArcName[NM];
-    GetWideName(AnsiArcName,r->ArcNameW,ArcName,ASIZE(ArcName));
+    wchar ArcNameW[NM];
+    GetWideName(ArcName,r->ArcNameW,ArcNameW,ASIZE(ArcNameW));
 
-    Data->Cmd.AddArcName(ArcName);
+    Data->Cmd.AddArcName(ArcNameW);
 #endif
     Data->Cmd.Overwrite=OVERWRITE_ALL;
     Data->Cmd.VersionControl=1;
@@ -250,7 +249,6 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
            FileCount++;
 
 #if RARVER_MAJOR < 5
-           IntToExt(Arc.FileHead.FileName,Arc.FileHead.FileName);
            strncpyz(N->FileName,Arc.FileHead.FileName,ASIZE(N->FileName));
            if (*Arc.FileHead.FileNameW)
              wcsncpy(N->FileNameW,Arc.FileHead.FileNameW,ASIZE(N->FileNameW));
@@ -303,10 +301,10 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
 #if RARVER_MAJOR < 5
            N->UnpVer = Arc.FileHead.UnpVer;
 #else
-           if (Data->Arc.Format>=RARFMT50)
-             N->UnpVer=Data->Arc.FileHead.UnpVer==0 ? 50 : 200; // If it is not 0, just set it to something big.
+           if (Arc.Format>=RARFMT50)
+             N->UnpVer=Arc.FileHead.UnpVer==0 ? 50 : 200; // If it is not 0, just set it to something big.
            else
-             N->UnpVer=Data->Arc.FileHead.UnpVer;
+             N->UnpVer=Arc.FileHead.UnpVer;
 #endif
 
 #if RARVER_MAJOR < 5
@@ -365,6 +363,24 @@ void PASCAL RARFreeListEx(RARArchiveListEx* L)
 }
 
 
+unsigned int PASCAL RARGetMainHeaderSize(HANDLE hArcData)
+{
+  DataSet *Data=(DataSet*)hArcData;
+  return Data->Arc.MainHead.HeadSize;
+}
+ 
+ 	
+unsigned int PASCAL RARGetMarkHeaderSize(HANDLE hArcData)
+{
+#if RARVER_MAJOR > 4
+  DataSet *Data=(DataSet*)hArcData;
+  return (Data->Arc.FileHead.UnpVer >= 50 ? SIZEOF_MARKHEAD5 : SIZEOF_MARKHEAD3);
+#else
+  (void)hArcData;
+  return SIZEOF_MARKHEAD;
+#endif
+}
+
 FileHandle PASCAL RARGetFileHandle(HANDLE hArcData)
 {
   DataSet *Data=(DataSet*)hArcData;
@@ -380,7 +396,7 @@ void PASCAL RARNextVolumeName(char* arch, bool oldstylevolume)
   wchar NextName[NM];
   CharToWide(arch, NextName, ASIZE(NextName));
   NextVolumeName(NextName, ASIZE(NextName), oldstylevolume);
-  WideToChar(NextName,arch,NM);
+  WideToChar(NextName,arch,strlen(arch)+1);
 #endif
 }
 
@@ -393,7 +409,7 @@ void PASCAL RARVolNameToFirstName(char* arch, bool oldstylevolume)
   wchar ArcName[NM];
   CharToWide(arch, ArcName, ASIZE(ArcName));
   VolNameToFirstName(ArcName, ArcName, !oldstylevolume);
-  WideToChar(ArcName,arch,NM);
+  WideToChar(ArcName,arch,strlen(arch)+1);
 #endif
 }
 

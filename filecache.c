@@ -62,13 +62,11 @@ static dir_elem_t path_cache[PATH_CACHE_SZ];
                 (e)->password_p = NULL;\
         } while(0)
 
-#define IS_ISO(s) (!strcasecmp((s)+(strlen(s)-4), ".iso"))
-
 /*!
  *****************************************************************************
  *
  ****************************************************************************/
-dir_elem_t *cache_path_alloc(const char *path)
+dir_elem_t *filecache_alloc(const char *path)
 {
         uint32_t hash = get_hash(path, 0);
         dir_elem_t *p = &path_cache[(hash & (PATH_CACHE_SZ - 1))];
@@ -92,7 +90,7 @@ dir_elem_t *cache_path_alloc(const char *path)
  *****************************************************************************
  *
  ****************************************************************************/
-dir_elem_t *cache_path_get(const char *path)
+dir_elem_t *filecache_get(const char *path)
 {
         uint32_t hash = get_hash(path, 0);
         dir_elem_t *p = &path_cache[hash & (PATH_CACHE_SZ - 1)];
@@ -108,7 +106,6 @@ dir_elem_t *cache_path_get(const char *path)
                                 return p;
                         p = p->next_p;
                 }
-                assert(0);
         }
         return NULL;
 }
@@ -117,76 +114,7 @@ dir_elem_t *cache_path_get(const char *path)
  *****************************************************************************
  *
  ****************************************************************************/
-dir_elem_t *cache_path(const char *path, struct stat *stbuf)
-{
-        dir_elem_t *e_p = cache_path_get(path);
-        if (e_p && !e_p->flags.fake_iso) {
-                if (stbuf)
-                        memcpy(stbuf, &e_p->stat, sizeof(struct stat));
-                return e_p;
-        } else  { /* CACHE MISS */
-                struct stat st;
-                char *root;
-
-                printd(3, "MISS    %s   (collision: %s)\n", path,
-                                (e_p && e_p->name_p) ? e_p->name_p : "no");
-
-                /* Do _NOT_ remember fake .ISO entries between eg. getattr() calls */
-                if (e_p && e_p->flags.fake_iso) inval_cache_path(path);
-
-                ABS_ROOT(root, path);
-                if(!lstat(root, stbuf?stbuf:&st)) {
-                        printd(3, "STAT retrieved for %s\n", root);
-                        return LOCAL_FS_ENTRY;
-                }
-                /* Check if the missing file might be a fake .iso file */
-                if (OPT_SET(OPT_KEY_FAKE_ISO) && IS_ISO(root)) {
-                        int i;
-                        int obj = OPT_CNT(OPT_KEY_FAKE_ISO)
-                                ? OPT_KEY_FAKE_ISO
-                                : OPT_KEY_IMG_TYPE;
-
-                        /* Try the image file extensions one by one */
-                        for (i = 0; i < OPT_CNT(obj); i++) {
-                                char *tmp = (OPT_STR(obj, i));
-                                int l = strlen(tmp ? tmp : "");
-                                char *root1 = strdup(root);
-                                if (l > 4)
-                                        root1 = realloc(root1, strlen(root1) + 1 + (l - 4));
-                                strcpy(root1 + (strlen(root1) - 4), tmp ? tmp : "");
-                                if (lstat(root1, &st)) {
-                                        free(root1);
-                                        continue;
-                                }
-                                e_p = cache_path_alloc(path);
-                                e_p->name_p = strdup(path);
-                                e_p->file_p = strdup(path);
-                                e_p->flags.fake_iso = 1;
-                                if (l > 4)
-                                        e_p->file_p = realloc(
-                                                e_p->file_p,
-                                                strlen(path) + 1 + (l - 4));
-                                /* back-patch *real* file name */
-                                strncpy(e_p->file_p + (strlen(e_p->file_p) - 4),
-                                                tmp ? tmp : "", l);
-                                *(e_p->file_p+(strlen(path)-4+l)) = 0;
-                                memcpy(&e_p->stat, &st, sizeof(struct stat));
-                                if (stbuf) {
-                                        memcpy(stbuf, &st, sizeof(struct stat));
-                                }
-                                free(root1);
-                                return e_p;
-                        }
-                }
-        }
-        return NULL;
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-void inval_cache_path(const char *path)
+void filecache_invalidate(const char *path)
 {
         int i;
         if (path) {
@@ -298,7 +226,7 @@ void filecache_init()
  ****************************************************************************/
 void filecache_destroy()
 {
-        inval_cache_path(NULL);
+        filecache_invalidate(NULL);
         pthread_mutex_destroy(&file_access_mutex);
 }
 

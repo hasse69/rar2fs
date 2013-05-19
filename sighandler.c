@@ -120,7 +120,7 @@ static RETSIGTYPE sig_handler(int signum)
                 printd(4, "Caught signal SIGUSR1\n");
                 printd(3, "Invalidating path cache\n");
                 pthread_mutex_lock(&file_access_mutex);
-                inval_cache_path(NULL);
+                filecache_invalidate(NULL);
                 pthread_mutex_unlock(&file_access_mutex);
                 break;
         case SIGSEGV:

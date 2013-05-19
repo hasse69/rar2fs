@@ -37,6 +37,10 @@
 #endif
 #endif
 #include "dll.hpp"
+#include "version.hpp"
+#if RARVER_MAJOR > 4
+#include "headers5.hpp"
+#endif
 
 #ifdef _UNIX
 #define FileHandle FILE*
@@ -47,42 +51,17 @@
 #ifndef __cplusplus
 /* These are defined here since headers.hpp can not be included from non C++ code */
 
-#define  SIZEOF_MARKHEAD         7
-#define  SIZEOF_OLDMHD           7
-#define  SIZEOF_NEWMHD          13
-#define  SIZEOF_OLDLHD          21
-#define  SIZEOF_NEWLHD          32
-#define  SIZEOF_SHORTBLOCKHEAD   7
-#define  SIZEOF_LONGBLOCKHEAD   11
-#define  SIZEOF_SUBBLOCKHEAD    14
-#define  SIZEOF_COMMHEAD        13
-#define  SIZEOF_PROTECTHEAD     26
-#define  SIZEOF_AVHEAD          14
-#define  SIZEOF_SIGNHEAD        15
-#define  SIZEOF_UOHEAD          18
-#define  SIZEOF_MACHEAD         22
-#define  SIZEOF_EAHEAD          24
-#define  SIZEOF_BEEAHEAD        24
-#define  SIZEOF_STREAMHEAD      26
-
-//#define  PACK_VER               29
-//#define  PACK_CRYPT_VER         29
-//#define  UNP_VER                36
-//#define  CRYPT_VER              29
-//#define  AV_VER                 20
-//#define  PROTECT_VER            20
-
 #define  MHD_VOLUME         0x0001U
-//#define  MHD_COMMENT        0x0002U
-//#define  MHD_LOCK           0x0004U
-//#define  MHD_SOLID          0x0008U
-//#define  MHD_PACK_COMMENT   0x0010U
+#define  MHD_COMMENT        0x0002U
+#define  MHD_LOCK           0x0004U
+#define  MHD_SOLID          0x0008U
+#define  MHD_PACK_COMMENT   0x0010U
 #define  MHD_NEWNUMBERING   0x0010U
-//#define  MHD_AV             0x0020U
-//#define  MHD_PROTECT        0x0040U
+#define  MHD_AV             0x0020U
+#define  MHD_PROTECT        0x0040U
 #define  MHD_PASSWORD       0x0080U
 #define  MHD_FIRSTVOLUME    0x0100U
-//#define  MHD_ENCRYPTVER     0x0200U
+#define  MHD_ENCRYPTVER     0x0200U
 
 #define  LHD_SPLIT_BEFORE   0x0001U
 #define  LHD_SPLIT_AFTER    0x0002U
@@ -193,6 +172,8 @@ int          PASCAL RARListArchive(HANDLE hArcData, RARArchiveList* fList, off_t
 int          PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* fList, off_t* FileDataEnd);
 void         PASCAL RARFreeList(RARArchiveList* fList);
 void         PASCAL RARFreeListEx(RARArchiveListEx* fList);
+unsigned int PASCAL RARGetMainHeaderSize(HANDLE hArcData);
+unsigned int PASCAL RARGetMarkHeaderSize(HANDLE hArcData);
 FileHandle   PASCAL RARGetFileHandle(HANDLE hArcData);
 void         PASCAL RARNextVolumeName(char*, bool);
 void         PASCAL RARVolNameToFirstName(char*, bool);
