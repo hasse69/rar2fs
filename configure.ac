@@ -254,7 +254,7 @@ if test x"$cross_compiling" = x"no"; then
         [AC_MSG_RESULT([no])
         AC_MSG_FAILURE([
     $PACKAGE requires FUSE 2.6 or newer.  Please check config.log for errors.
-    If you cannot determine the problem, mail hans.beckerus@gmail.com
+    If you cannot determine the problem, mail the author of the package
     and include the config.log file])
         ]
     )

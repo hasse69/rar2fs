@@ -1,4 +1,4 @@
-.TH RAR2FS 1 "v\ " "Wed, January 26, 2011" "User Commands"
+.TH RAR2FS 1 "v\ " "Wed, May 22, 2013" "User Commands"
 .SH NAME
 .B rar2fs
 \- FUSE file system for reading RAR archives
@@ -47,7 +47,7 @@ show image file types also for compressed/encrypted archives
 Image media files in compressed/encrypted archives usually does not playback very well, if at all. This is because imaged media, such as DVD images, is implementing a file access
 pattern that can not be fully supported by a partly buffered decoded data stream with limited history. For that reason the default is to
 .I not
-display these files (hide).
+show such files.
 .TP
 .B --preopen-img
 prefetch volume file descriptors for image file types
@@ -182,5 +182,5 @@ Project home page
 .br
 .B Hans Beckérus
 .br
-.I \<hans.beckerus@gmail.com\>
+.I \<hans.beckerus#AT#gmail.com\>
 

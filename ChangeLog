@@ -1,6 +1,10 @@
 rar2fs ChangeLog file.
 
-2013-05-16  Hans Beckerus <hans.beckerus@gmail.com>
+2013-05-21  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Built and tested against UnRAR source v5.0.4
+
+2013-05-16  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed broken pre-open logic
 
@@ -8,13 +12,13 @@ rar2fs ChangeLog file.
 
         * Minor code re-structuring
 
-2013-05-10  Hans Beckerus <hans.beckerus@gmail.com>
+2013-05-10  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added full support for RAR1.5 format.
         
         * Minor code clean-up 
 
-2013-05-09  Hans Beckerus <hans.beckerus@gmail.com>
+2013-05-09  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added creation of $(DESTDIR)/$(sbindir) in 
           Makefile.am before attempting to install the
@@ -25,7 +29,7 @@ rar2fs ChangeLog file.
           in combination with volume name lookup causing 
           intermittent crashes.
           
-2013-05-08  Hans Beckerus <hans.beckerus@gmail.com>
+2013-05-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Replaced RAR_EXTRACT with RAR_TEST in calls to
           RARProcessFile(). The wrong behavior when using
@@ -33,21 +37,21 @@ rar2fs ChangeLog file.
 
         * Added a missing call to RARFreeArchive()
 
-2013-05-08  Hans Beckerus <hans.beckerus@gmail.com>
+2013-05-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Removed an incorret assert()
 
         * Fixed a compilation problem introduced in last version
           for UnRAR source releases earlier than v5.0.x
 
-2013-05-07  Hans Beckerus <hans.beckerus@gmail.com>
+2013-05-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a bug in the volume file number and offset 
           calculation for RAR5 archives in store mode.
 
-2013-05-06  Hans Beckerus <hans.beckerus@gmail.com>
+2013-05-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-        * Built and tested against unrar source v5.0.2.
+        * Built and tested against UnRAR source v5.0.2.
           This update requires a new invokation of autoreconf 
           to properly update the configure script and Makefile(s).
           This should resolve issue #14.
@@ -58,7 +62,7 @@ rar2fs ChangeLog file.
         * Removed some code from the unrar library extension
           that was no longer needed.
           
-2013-04-16  Hans Beckerus <hans.beckerus@gmail.com>
+2013-04-16  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a minor compilation warning discovered on a 
           SLED 11 64-bit platform.
@@ -66,56 +70,56 @@ rar2fs ChangeLog file.
         * Added improved detection of corrupt RAR file headers.
           This should resolve issue #13.
 
-2013-04-12  Hans Beckerus <hans.beckerus@gmail.com>
+2013-04-12  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added extraction of git commit hash when cloned
           from github.com (requires autoreconf)
         
         * Split of FUSE functions 
 
-2013-04-12  Hans Beckerus <hans.beckerus@gmail.com>
+2013-04-12  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Replaced the deprecated AM_CONFIG_HEADER with
           AC_CONFIG_HEADERS in configure.ac
 
-2013-03-17  Hans Beckerus <hans.beckerus@gmail.com>
+2013-03-17  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Second try to correct the Makefile.am error as reported
           in issue #12.
 
-2013-03-13  Hans Beckerus <hans.beckerus@gmail.com>
+2013-03-13  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added an uninstall hook in Makefile.am to make sure
           also the mount helper/script is removed when doing
           "make uninstall".
 
-2013-03-13  Hans Beckerus <hans.beckerus@gmail.com>
+2013-03-13  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Corrected an error in the install hook in Makefile.am.
           This should resolve issue #12.
 
-2013-03-12  Hans Beckerus <hans.beckerus@gmail.com>
+2013-03-12  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Improved the file extension matching that is now
           less case sensitive.
 
-2013-03-02  Hans Beckerus <hans.beckerus@gmail.com>
+2013-03-02  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed an issue with some archives that contained
           digits in the name were incorrectly identified as
           being part of a volume.
 
-2013-02-23  Hans Beckerus <hans.beckerus@gmail.com>
+2013-02-23  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.16.0
 
-2013-02-17  Hans Beckerus <hans.beckerus@gmail.com>
+2013-02-17  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added option '--flat-only' that replaces the now 
           obsoleted option '--seek-depth=n'
           rar2fs(1) man page updated accordingly.
 
-2013-02-16  Hans Beckerus <hans.beckerus@gmail.com>
+2013-02-16  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a problem with some options not being possible
           to change if initially assigned a default value.
@@ -123,7 +127,7 @@ rar2fs ChangeLog file.
         * Changed to use a fixed file count for '--preopen-img'
           in combination with old style volume naming convention.
 
-2013-02-08  Hans Beckerus <hans.beckerus@gmail.com>
+2013-02-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added option '--no-expand-cbr' that can be used
           to disable support for comic book archives.
@@ -132,16 +136,16 @@ rar2fs ChangeLog file.
         * Removed option '--no-idx-mmap'. 
           rar2fs(1) man page updated accordingly.
 
-2013-02-08  Hans Beckerus <hans.beckerus@gmail.com>
+2013-02-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added support for comic book archives (.cbr)
 
-2013-02-07  Hans Beckerus <hans.beckerus@gmail.com>
+2013-02-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a problem with folders inside RAR volumes
           not always showing up properly.
 
-2013-02-05  Hans Beckerus <hans.beckerus@gmail.com>
+2013-02-05  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added a few missing error checks after calls
           made to malloc()
@@ -151,18 +155,18 @@ rar2fs ChangeLog file.
           is invalidated while being accessed by e.g. 
           read operations.
 
-2013-02-04  Hans Beckerus <hans.beckerus@gmail.com>
+2013-02-04  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed an issue for "rar inside rar" with 
           folders when located in the root of the
           mount point.
 
-2013-02-04  Hans Beckerus <hans.beckerus@gmail.com>
+2013-02-04  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Removed hard link count update. It did not
           work as expected in some cases.
 
-2013-02-03  Hans Beckerus <hans.beckerus@gmail.com>
+2013-02-03  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Hard link count now properly updated for 
           directories inside RAR files.
@@ -175,7 +179,7 @@ rar2fs ChangeLog file.
           unnecessary calls to strcmp() when searching
           a hash collision chain.
 
-2013-02-01  Hans Beckerus <hans.beckerus@gmail.com>
+2013-02-01  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Replaced 'configdb' with a more appropriate
           implementation
@@ -183,7 +187,7 @@ rar2fs ChangeLog file.
         * New file(s): optdb.h, optdb.c
           Deleted file(s): configdb.h, configdb.c
 
-2013-01-31  Hans Beckerus <hans.beckerus@gmail.com>
+2013-01-31  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Removed workaround for zombie processes since 
           waitpid() should now be called properly
@@ -191,33 +195,33 @@ rar2fs ChangeLog file.
         * Aligned DLL extension with later implementations
           of libunrar.
 
-2013-01-30  Hans Beckerus <hans.beckerus@gmail.com>
+2013-01-30  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Removed the limititation that main archive must
           not be a volume when encapsulating other RAR
           files for proper display/extraction.
 
-2013-01-28  Hans Beckerus <hans.beckerus@gmail.com>
+2013-01-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Replaced a call to strncmp() with an inline short
           byte sequence check.
 
-2013-01-28  Hans Beckerus <hans.beckerus@gmail.com>
+2013-01-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Got rid of some more unnecessary calls to
           strlen() and strcmp()
 
-2013-01-28  Hans Beckerus <hans.beckerus@gmail.com>
+2013-01-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added proper implementation of utimes()
 
-2013-01-27  Hans Beckerus <hans.beckerus@gmail.com>
+2013-01-27  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a very rare error case to prevent a lock-up
            
         * Removed a few more calls to strcmp()
 
-2013-01-25  Hans Beckerus <hans.beckerus@gmail.com>
+2013-01-25  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Improved support for folders located in leaf RAR
           files contained in a master archive.
@@ -261,14 +265,14 @@ rar2fs ChangeLog file.
         * Now returns -EPERM instead of -EACCES in case of
           write operations targeting the contents of an archive.
 
-2013-01-21  Hans Beckerus <hans.beckerus@gmail.com>
+2013-01-21  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a problem with function fmemopen() not being
           detected properly on systems supporting it.
           The change will not take effect until 'autoreconf'
           is executed before a 'configure' and/or 'make'.
 
-2013-01-10  Hans Beckerus <hans.beckerus@gmail.com>
+2013-01-10  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a fuse4x detection problem in the compatible
           build system.
@@ -276,7 +280,7 @@ rar2fs ChangeLog file.
         * Added support for OSX fuse in the compatible 
           build system.
 
-2013-01-09  Hans Beckerus <hans.beckerus@gmail.com>
+2013-01-09  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * When default permission is applied to a file or 
           directory also the current effective umask of the
@@ -285,53 +289,53 @@ rar2fs ChangeLog file.
           The default permission is applied only if the archive
           file header does not provide a Unix-style file mode. 
 
-2013-01-08  Hans Beckerus <hans.beckerus@gmail.com>
+2013-01-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added blunt support for unicode filenames
 
         * Fixed some compilation warnings in the compatibility
           build mode
 
-2012-12-11  Hans Beckerus <hans.beckerus@gmail.com>
+2012-12-11  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed some compilation warnings on OS X Lion 
           with Xcode 4 and command line tools.
 
-2012-12-09  Hans Beckerus <hans.beckerus@gmail.com>
+2012-12-09  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added support for OSX fuse
    
         * Added hook to install mount.rar2fs
 
-        * Built against unrar source v4.2.4
+        * Built against UnRAR source v4.2.4
         
-2012-05-06  Hans Beckerus <hans.beckerus@gmail.com>
+2012-05-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.15.1
 
-        * Built against unrar source v4.2.1
+        * Built against UnRAR source v4.2.1
 
-2012-04-29  Hans Beckerus <hans.beckerus@gmail.com>
+2012-04-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.15.0
 
         * Fixed build errors using Makefile.mk
 
-2012-04-28  Hans Beckerus <hans.beckerus@gmail.com>
+2012-04-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
       
         * Fixed some compilation warnings on OSX
 
         * Added dependency to .svn/entries for proper
           rebuild of SVNREV
 
-2012-04-22  Hans Beckerus <hans.beckerus@gmail.com>
+2012-04-22  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Corrected some calls to POSIX style basename() to
           make sure a safe string copy is provided.
 
         * Removed some usage of alloca()
 
-2012-03-31  Hans Beckerus <hans.beckerus@gmail.com>
+2012-03-31  Hans Beckerus <hans.beckerus#AT#gmail.com>
  
         * Added use of a hash instead of string comparison to
           improve performance of readdir() calls.
@@ -340,16 +344,16 @@ rar2fs ChangeLog file.
 
         * New file(s): dirlist.c, hash.h
 
-2012-03-16  Hans Beckerus <hans.beckerus@gmail.com>
+2012-03-16  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed some OpenSolaris build errors
 
-2012-03-16  Hans Beckerus <hans.beckerus@gmail.com>
+2012-03-16  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Removed an unnecessary cache lookup at every
           read call
 
-2012-03-16  Hans Beckerus <hans.beckerus@gmail.com>
+2012-03-16  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed broken truncate() function
 
@@ -358,7 +362,7 @@ rar2fs ChangeLog file.
 
         * Some code clean-up 
 
-2012-03-14  Hans Beckerus <hans.beckerus@gmail.com>
+2012-03-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.14.6
 
@@ -368,7 +372,7 @@ rar2fs ChangeLog file.
         * History buffer should now be preserved when large
           forward jumps are made in the stream.
 
-2012-03-06  Hans Beckerus <hans.beckerus@gmail.com>
+2012-03-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.14.5
 
@@ -381,30 +385,30 @@ rar2fs ChangeLog file.
         * Completed the xattr suit of functions.
           Also changed to no longer follow symbolic links.
 
-2012-02-24  Hans Beckerus <hans.beckerus@gmail.com>
+2012-02-24  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * When a .r2i file is successfully loaded any direct I/O
           information is now purged from the cache. It might 
           still not take effect immediately depending on how the
           client internal cache is handled. 
  
-2012-02-24  Hans Beckerus <hans.beckerus@gmail.com>
+2012-02-24  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a serious calculation error in one of the
           paths dealing with compressed RARs.
 
-2012-02-23  Hans Beckerus <hans.beckerus@gmail.com>
+2012-02-23  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Changed return from xattr functions from ENODATA 
           to ENOTSUP for files inside RAR archives.
  
-2012-02-23  Hans Beckerus <hans.beckerus@gmail.com>
+2012-02-23  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed an issue with 'echo' in get-version.sh that
           caused some systems, eg. OS X, to produce invalid
           configure scripts.
           
-2012-02-23  Hans Beckerus <hans.beckerus@gmail.com>
+2012-02-23  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Removed all but one call to pthread_exit. At least 
           one has been identified to cause C++ runtime crashes 
@@ -429,29 +433,29 @@ rar2fs ChangeLog file.
         * Updated the check for '-Wno-unused-result' support
           by the compiler. It did not work as expected.
 
-2012-02-02  Hans Beckerus <hans.beckerus@gmail.com>
+2012-02-02  Hans Beckerus <hans.beckerus#AT#gmail.com>
   
         * Released 1.14.0
 
-        * Built against unrar source v4.1.4
+        * Built against UnRAR source v4.1.4
 
-2012-01-29  Hans Beckerus <hans.beckerus@gmail.com>
+2012-01-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a bug when caching path name for folders inside
           RAR archives for which the root folder entry is not
           present in the file header.
 
-2012-01-12  Hans Beckerus <hans.beckerus@gmail.com>
+2012-01-12  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed yet another build problem on OS X due to 
           additional argument required for Fuse4x
 
-2012-01-11  Hans Beckerus <hans.beckerus@gmail.com>
+2012-01-11  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a problem with xattr functions taking additional
           arguments like on Darwin
 
-2012-01-11  Hans Beckerus <hans.beckerus@gmail.com>
+2012-01-11  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Implemented getxattr() and listxattr()
 
@@ -459,21 +463,21 @@ rar2fs ChangeLog file.
 
         * Fixed issue with fdatasync() missing on some platforms
 
-2012-01-10  Hans Beckerus <hans.beckerus@gmail.com>
+2012-01-10  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a bug introduced in previous version resulting
           in some options did not take effect
 
-2012-01-09  Hans Beckerus <hans.beckerus@gmail.com>
+2012-01-09  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Corrected a minor options database problem
 
-2012-01-09  Hans Beckerus <hans.beckerus@gmail.com>
+2012-01-09  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a crash when reading options with optional
           arguments.
 
-2012-01-09  Hans Beckerus <hans.beckerus@gmail.com>
+2012-01-09  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed an issue that caused the option '--no-smp' to
           generate an error message if executing on a single CPU
@@ -483,7 +487,7 @@ rar2fs ChangeLog file.
           fuse options. This will solve the problem reported
           in issue #8.
 
-2012-01-04  Hans Beckerus <hans.beckerus@gmail.com>
+2012-01-04  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added yet another case that was not covered at read
           of compressed archives that could result in corrupt
@@ -491,7 +495,7 @@ rar2fs ChangeLog file.
 
         * Added -DNDEBUG to CPPFLAGS for non-debug builds 
           
-2011-12-28  Hans Beckerus <hans.beckerus@gmail.com>
+2011-12-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fall-back to direct I/O mode only if legit data can not
           be returned when reading compressed/encrypted archives. 
@@ -500,7 +504,7 @@ rar2fs ChangeLog file.
           files. Restricted to AVI 1.0 and non multi-part AVI 2.0 
           files only. Use --save-eof to enable this feature.
 
-2011-12-21  Hans Beckerus <hans.beckerus@gmail.com>
+2011-12-21  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Setting seek depth to 1 by default
 
@@ -509,7 +513,7 @@ rar2fs ChangeLog file.
 
         * Some additional code re-structuring.
 
-2011-12-20  Hans Beckerus <hans.beckerus@gmail.com>
+2011-12-20  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Removed the pre-mature checks for EOF to avoid some
           theoretical short byte item counts.
@@ -522,7 +526,7 @@ rar2fs ChangeLog file.
           rarf2s to crash at file release due to an invalid
           thread handle.
 
-2011-12-14  Hans Beckerus <hans.beckerus@gmail.com>
+2011-12-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Split of some large functions
 
@@ -531,7 +535,7 @@ rar2fs ChangeLog file.
         * Added missing definitions of compression method to unrar
           source extension
 
-2011-12-13  Hans Beckerus <hans.beckerus@gmail.com>
+2011-12-13  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added global flag to indicate if file system as been shutdown
           so that running threads can terminate nicely.
@@ -539,7 +543,7 @@ rar2fs ChangeLog file.
         * Added a mutex to allow for early termination of reader thread
           in combination with forward jumps.
 
-2011-12-12  Hans Beckerus <hans.beckerus@gmail.com>
+2011-12-12  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a crash (SEGV) if fuse_setup() failed
 
@@ -549,18 +553,18 @@ rar2fs ChangeLog file.
         * Changed work around when reading far beyond current 
           offset for compressed archives.
 
-2011-12-09  Hans Beckerus <hans.beckerus@gmail.com>
+2011-12-09  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Discarded previous optimization. 
 
-2011-12-09  Hans Beckerus <hans.beckerus@gmail.com>
+2011-12-09  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Removed some unnecessary calls to retrieve volume number
           reducing folder load time.
 
         * Fixed an issue with password lookup for .rNN style volumes.
 
-2011-12-07  Hans Beckerus <hans.beckerus@gmail.com>
+2011-12-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a problem with fake ISO extension for image files not inside
           an archive. This bug should only affect versions after 1.13.3.
@@ -569,35 +573,35 @@ rar2fs ChangeLog file.
           files, listed as a fake ISO extension, are handled when not
           located inside an archive. See rar2fs(1) man page for details.
 
-2011-12-05  Hans Beckerus <hans.beckerus@gmail.com>
+2011-12-05  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added test for existance of member 'st_gen' in 'struct stat'.
 
-2011-11-22  Hans Beckerus <hans.beckerus@gmail.com>
+2011-11-22  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Disabled some obsolete arguments; rar2fs(1) man page updated
           accordingly.
 
         * New file(s): dirlist.h
 
-2011-11-10  Hans Beckerus <hans.beckerus@gmail.com>
+2011-11-10  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Replaced call to pthread_cancel() with pthread_kill()
           for a more graceful termination of the fuse loop thread.
 
-        * Built against unrar source v4.1.3
+        * Built against UnRAR source v4.1.3
 
-2011-11-09  Hans Beckerus <hans.beckerus@gmail.com>
+2011-11-09  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Split of fuse_main() to run fuse_loop() in a seperate thread.
 
-2011-11-07  Hans Beckerus <hans.beckerus@gmail.com>
+2011-11-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Corrected an issue with Mac OS X getting stuck on
           pthread_exit(NULL) causing rar2fs to hang forever
           at unmount.
 
-2011-11-06  Hans Beckerus <hans.beckerus@gmail.com>
+2011-11-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed incorrect lookup of libfuse4x.dylib in Makefile.mk
 
@@ -608,11 +612,11 @@ rar2fs ChangeLog file.
 
         * Fixed Mac OS X build problems.
 
-2011-10-28  Hans Beckerus <hans.beckerus@gmail.com>
+2011-10-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added missing include of inttypes.h/stdint.h in platform.h
 
-2011-10-28  Hans Beckerus <hans.beckerus@gmail.com>
+2011-10-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Replaced F_LOCK with F_TLOCK in call to lockf()
 
@@ -622,24 +626,24 @@ rar2fs ChangeLog file.
         * New file(s): debug.h, index.h, platform.h
           Deleted file(s): common.h
 
-2011-10-26  Hans Beckerus <hans.beckerus@gmail.com>
+2011-10-26  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added GNU Autotools build support. To build using the old method
           update config.mk and do 'make -f Makefile.mk'.
 
-2011-09-28  Hans Beckerus <hans.beckerus@gmail.com>
+2011-09-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a problem seen in previous version when loading file
           properties over a Samba/CIFS export. Now using 1 for store
           mode etc.
 
-2011-09-28  Hans Beckerus <hans.beckerus@gmail.com>
+2011-09-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Using the st_nlink (hard link count) field in stat(2) structure
           to reveal current compression method. A 0 indicates store mode
           (-m0) upto a 6 (-m6) being best compression.
 
-2011-09-25  Hans Beckerus <hans.beckerus@gmail.com>
+2011-09-25  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added support for symbolic links. Note that this update only
           affects the back-end file system and not files inside RAR
@@ -647,7 +651,7 @@ rar2fs ChangeLog file.
 
         * Minor code clean-up and improvements.
 
-2011-09-23  Hans Beckerus <hans.beckerus@gmail.com>
+2011-09-23  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a compilation warning about wcsncpy() being called with
           length bigger than size of destination buffer when __wcsncpy_chk_warn
@@ -665,27 +669,27 @@ rar2fs ChangeLog file.
           Unix-style file mode. To change the file mode for _all_ files
           use the 'umask' FUSE option.
 
-2011-08-28  Hans Beckerus <hans.beckerus@gmail.com>
+2011-08-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Ported to OpenSolaris (i386 snv_126 baseline).
 
         * Corrected build problem when FUSE_SRC was not set in config.mk.
 
-2011-08-21  Hans Beckerus <hans.beckerus@gmail.com>
+2011-08-21  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed compilation warning about incompatible pointer type
           passed to scandir(3) for FreeBSD 8.0+ and later.
 
-2011-07-24  Hans Beckerus <hans.beckerus@gmail.com>
+2011-07-24  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.13.0
 
-2011-07-23  Hans Beckerus <hans.beckerus@gmail.com>
+2011-07-23  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * All dynamic settings are now accessed through the data base
           including source and destination path.
 
-2011-05-30  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-30  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added missing support for FUSE 'statfs' callback reported in
           issue #5. It was required to avoid a crash (signal 8) in afpd
@@ -693,7 +697,7 @@ rar2fs ChangeLog file.
           There are however still issues with getting Netatalk to work
           as expected.
 
-2011-05-29  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Got rid of some integer to pointer conversion warnings for
           64-bit platforms reported in issue #3.
@@ -701,13 +705,13 @@ rar2fs ChangeLog file.
         * Fixed broken build for FreeBSD and non x86 based Linux platforms
           reported in issue #2 and #3.
 
-2011-05-27  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-27  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * The code has been adapted to utilize the unrar API as intended
           for extraction of compressed/encryped archives.
           This will remove the need for some of the previously added API
           extensions and will reduce the dependency to what version of
-          the unrar source is used. However, this will instead inflict
+          the UnRAR source is used. However, this will instead inflict
           some extra memory overhead added by the original API callback
           interface.
 
@@ -717,11 +721,11 @@ rar2fs ChangeLog file.
           archives that could fail if the same file is opened during the
           extraction process.
 
-2011-05-17  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-17  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.12.0
 
-2011-05-12  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-12  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Corrected some more malloc() calls that could fail and
           pass unnoticed.
@@ -729,7 +733,7 @@ rar2fs ChangeLog file.
         * Option --hist-size now ranges from 0-75. Use a value of 0 to
           turn this function off. Man page updated accordingly.
 
-2011-05-12  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-12  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added option --iob-size that can be used to tune the total
           size of the I/O buffer. Default size is 4MiB.
@@ -739,7 +743,7 @@ rar2fs ChangeLog file.
         * Added some missing checks for memory allocation failures
           during open() calls.
 
-2011-05-11  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-11  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added option --hist-size that can be used to tune the I/O
           buffer history size. The history can be set as a percentage
@@ -749,45 +753,45 @@ rar2fs ChangeLog file.
         * Reinserted check of .avi and .mkv before attempting an index
           preload. This update some how got lost on the way.
 
-2011-05-08  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Should now work also on 64-bit platforms.
 
         * Corrected an issue with dirname(3) usage that caused very
           strange behavior depending on what platform was used.
 
-2011-05-07  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Corrected a build problem in previous release.
 
-2011-05-07  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * More minor bugs in write support fixed.
 
         * Added support for rename(), eg. 'mv' (move).
 
-2011-05-06  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Corrected some early "flaws" in the write support.
 
         * Added support for chmod() and chown().
 
-2011-05-06  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added some very basic write support to underlying file system.
           Very experimental.
 
-2011-05-05  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-05  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added support for mounting single RAR archives.
 
-2011-05-04  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-04  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Improved logic in the volume part parser(s) to handle
           umlimited (in theory) number of volume files for old
           style .rNN format.
 
-2011-05-02  Hans Beckerus <hans.beckerus@gmail.com>
+2011-05-02  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Resolved some compilation warnings in mkr2i.c that was
           discovered when building on Ubuntu 10.10.
@@ -803,7 +807,7 @@ rar2fs ChangeLog file.
 
         * Fixed a crash when invalidating an empty cache entry.
 
-2011-04-29  Hans Beckerus <hans.beckerus@gmail.com>
+2011-04-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added check to validate that source (root) and target folder
           (mount point) are in fact directories. This check will be
@@ -815,17 +819,17 @@ rar2fs ChangeLog file.
         * Added check that file is of type .avi or .mkv before
           attempting an index preload.
 
-2011-04-28  Hans Beckerus <hans.beckerus@gmail.com>
+2011-04-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Build now forces C99. Also addded -Wall to identify and
           resolve a lot of warnings.
 
-2011-04-27  Hans Beckerus <hans.beckerus@gmail.com>
+2011-04-27  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added missing display of "." and ".." for folders
           inside RAR archives.
 
-2011-04-27  Hans Beckerus <hans.beckerus@gmail.com>
+2011-04-27  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Using tmp file for extraction of "rar inside rar" if glibc
           custom stream support is missing. This will provide support
@@ -833,15 +837,15 @@ rar2fs ChangeLog file.
           compressed and/or encrypted. It might however perform a bit
           slow in some cases compared to using glibc custom streams.
 
-2011-04-24  Hans Beckerus <hans.beckerus@gmail.com>
+2011-04-24  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * FreeBSD port
 
-2011-04-22  Hans Beckerus <hans.beckerus@gmail.com>
+2011-04-22  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added option --no-lib-check
 
-2011-04-22  Hans Beckerus <hans.beckerus@gmail.com>
+2011-04-22  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Code updated to support Mac OS X and MacFUSE.
           Note that this is still very experimental and only tested on
@@ -851,11 +855,11 @@ rar2fs ChangeLog file.
           show up if the root folder was not having an entry of its
           own in the file header (very rare).
 
-2011-04-15  Hans Beckerus <hans.beckerus@gmail.com>
+2011-04-15  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added version.h
 
-2011-04-14  Hans Beckerus <hans.beckerus@gmail.com>
+2011-04-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * New revisioning approach using Major.Minor.PatchLevel instead
           of Major.Minor beta releases.
@@ -864,31 +868,31 @@ rar2fs ChangeLog file.
           tarball and comitted to the project home page download section.
           <http://code.google.com/p/rar2fs/downloads/list>
 
-2011-04-14  Hans Beckerus <hans.beckerus@gmail.com>
+2011-04-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Minor code/Makefile updates.
 
-2011-04-07  Hans Beckerus <hans.beckerus@gmail.com>
+2011-04-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed broken build for platforms not having the cpu_set_t
           type in sched.h (GNU extension).
 
-2011-03-20  Hans Beckerus <hans.beckerus@gmail.com>
+2011-03-20  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-        * Built against unrar source v4.0.7
+        * Built against UnRAR source v4.0.7
 
         * Minor modification of backward jump (history) logic for
           compressed/encrypted archives.
 
-2011-02-15  Hans Beckerus <hans.beckerus@gmail.com>
+2011-02-15  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.08
 
-2011-02-09  Hans Beckerus <hans.beckerus@gmail.com>
+2011-02-09  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a crash (SEGV) issue if some volume files were missing.
 
-2011-02-03  Hans Beckerus <hans.beckerus@gmail.com>
+2011-02-03  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         *  Added new option --img-type.
 
@@ -896,14 +900,14 @@ rar2fs ChangeLog file.
           extensions/types as argument instead of having only hardcoded
           values of ".img" and ".nrg".
 
-2011-01-27  Hans Beckerus <hans.beckerus@gmail.com>
+2011-01-27  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Replaced the --no-filter option with --exclude.
           See manual page for details on how to use this new option.
           Be aware that due to this change .lock files are no longer
           filtered out by default.
 
-2011-01-25  Hans Beckerus <hans.beckerus@gmail.com>
+2011-01-25  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a bug in handling of WAIT_THREAD() that could result
           in that data was not read properly in SMP mode.
@@ -911,7 +915,7 @@ rar2fs ChangeLog file.
         * Added the option --no-smp to turn off SMP support and bind
           process(s) to CPU #0 (Linux only).
 
-2011-01-22  Hans Beckerus <hans.beckerus@gmail.com>
+2011-01-22  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added HAS_GLIBC_CUSTOM_STREAMS_ to control the use of this GNU
           extensions in glibc. This became necessary since many uClibc
@@ -919,13 +923,13 @@ rar2fs ChangeLog file.
           Turning this feature off disables the support for "rar inside rar"
           if the encapsulating file is compressed and/or encrypted.
 
-2011-01-17  Hans Beckerus <hans.beckerus@gmail.com>
+2011-01-17  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.07
 
-2011-01-14  Hans Beckerus <hans.beckerus@gmail.com>
+2011-01-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-        * Built against unrar source v4.0 beta 4
+        * Built against UnRAR source v4.0 beta 4
 
         * Added a sliding window to the IO buffer to allow for at least
           some sort of backward read support.
@@ -966,12 +970,12 @@ rar2fs ChangeLog file.
 
         * Minor source code clean up. Still lots left to do.
 
-2010-05-23  Hans Beckerus <hans.beckerus@gmail.com>
+2010-05-23  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * First release candidate(s) only published at opentvix.org and
           xtreamer.net (no source)
 
-2009-09-06  Hans Beckerus <hans.beckerus@gmail.com>
+2009-09-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * First version
 

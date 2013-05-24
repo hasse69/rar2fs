@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2013 Hans Beckerus (hans.beckerus@gmail.com)
+    Copyright (C) 2009-2013 Hans Beckerus (hans.beckerus#AT#gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -667,13 +667,15 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                         if (vol != op->vno) {
                                 /* close/open */
                                 op->vno = vol;
-                                if (op->volHdl && op->volHdl[vol].fp) {
+                                if (op->volHdl) {
                                         vol_p = &op->volHdl[vol];
-                                        fp = vol_p->fp;
-                                        src_off = VOL_REAL_SZ - chunk;
-                                        if (src_off != vol_p->pos)
-                                                force_seek = 1;
-                                        goto seek_check;
+                                        if (vol_p->fp) {
+                                                fp = vol_p->fp;
+                                                src_off = VOL_REAL_SZ - chunk;
+                                                if (src_off != vol_p->pos)
+                                                        force_seek = 1;
+                                                goto seek_check;
+                                        }
                                 }
                                 /*
                                  * It is advisable to return 0 (EOF) here
