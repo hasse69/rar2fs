@@ -94,7 +94,12 @@
 #define  EARC_REVSPACE      0x0004U /* reserve space for end of REV file 7 byte record */
 #define  EARC_VOLNUMBER     0x0008U /* store a number of current volume */
 
+/* Internal implementation, depends on archive format version. */
 enum HOST_SYSTEM {
+  /* RAR 5.0 host OS */
+  HOST5_WINDOWS=0,HOST5_UNIX=1,
+
+  /* RAR 3.0 host OS. */
   HOST_MSDOS=0,HOST_OS2=1,HOST_WIN32=2,HOST_UNIX=3,HOST_MACOS=4,
   HOST_BEOS=5,HOST_MAX
 };

@@ -1,5 +1,30 @@
 rar2fs ChangeLog file.
 
+2013-07-03  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Released 1.17.2
+
+2013-06-26  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Updated SVN revision check in configure.ac to work
+          also for later versions of svn for which 
+          .svn/entries does not provide sufficient information.
+
+2013-06-24  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Fixed a problem in configure.ac that would result
+          in newer versions of g++ to fail some link tests.
+          This would in turn cause incorrect switches to be
+          passed to the compiler resulting in failure to 
+          display RAR archive/folder contents in combination
+          with UnRAR source v5.x.x.
+
+2013-06-05  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Fixed a potential bug when determining file types.
+          Only affects RAR5 archives created on UNIX type
+          systems.
+
 2013-05-26  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.17.0

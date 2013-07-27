@@ -289,17 +289,20 @@ if test x"$UNRAR_LIBS" != x; then
     save_CPPFLAGS="$CPPFLAGS"
     CPPFLAGS="$CPPFLAGS $UNRAR_CPPFLAGS"
     save_LDFLAGS=$LDFLAGS
-    LDFLAGS="$LDFLAGS $UNRAR_LDFLAGS $UNRAR_LIBS"
+    LDFLAGS="$LDFLAGS $UNRAR_LDFLAGS"
+    save_LIBS=$LIBS
+    LIBS="$LIBS $UNRAR_LIBS"
     AC_LANG_PUSH([C++])
     AC_MSG_CHECKING([if unrar library needs -DRAR_SMP])
-    AC_TRY_LINK(
-        [
-            #define RAR_SMP
-            #include "rar.hpp"
-        ],
-        [
-            GetNumberOfThreads();
-        ],
+    AC_LINK_IFELSE(
+        [AC_LANG_PROGRAM(
+            [
+                #define RAR_SMP
+                #include "rar.hpp"
+            ],
+            [
+                GetNumberOfThreads();
+            ])],
         [AC_MSG_RESULT([yes])
             UNRAR_CXXFLAGS="$UNRAR_CXXFLAGS -DRAR_SMP"
         ],
@@ -309,11 +312,11 @@ if test x"$UNRAR_LIBS" != x; then
     AC_LANG_POP
     CPPFLAGS="$save_CPPFLAGS"
     LDFLAGS="$save_LDFLAGS"
+    LIBS="$save_LIBS"
 fi
 
-# This assumes svn version >= 1.4
 AC_MSG_CHECKING(for source revision in SVN)
-SVNREV=`$AWK '{if(NR==4){print $0;exit}}' .svn/entries 2>/dev/null`
+SVNREV=$(svn info 2>/dev/null | $GREP Revision: | cut -d' ' -f2 2>/dev/null)
 if test x"$SVNREV" != x; then
     AC_SUBST([CONFIG_STATUS_DEPENDENCIES], ['$(top_srcdir)/.svn/entries'])
     CFLAGS="$CFLAGS -DSVNREV_=$SVNREV"

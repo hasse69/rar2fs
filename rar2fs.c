@@ -1298,16 +1298,22 @@ static int get_vformat(const char *s, int t, int *l, int *p)
 #define IS_CBR(s) (!OPT_SET(OPT_KEY_NO_EXPAND_CBR) && \
                         !strcasecmp((s)+(strlen(s)-4), ".cbr"))
 #define IS_RXX(s) (is_rxx_vol(s))
+#define IS_UNIX_MODE_(l) \
+        ((l)->UnpVer >= 50 \
+                ? (l)->HostOS == HOST5_UNIX \
+                : (l)->HostOS == HOST_UNIX || (l)->HostOS == HOST_BEOS)
 #define IS_RAR_DIR(l) \
         ((l)->UnpVer >= 20 \
                 ? (((l)->Flags&LHD_DIRECTORY)==LHD_DIRECTORY) \
-                : ((l)->HostOS != HOST_UNIX && (l)->HostOS != HOST_BEOS \
-                        ? (l)->FileAttr & 0x10 \
-                        : (l)->FileAttr & S_IFDIR))
+                : (IS_UNIX_MODE_(l) \
+                        ? (l)->FileAttr & S_IFDIR \
+                        : (l)->FileAttr & 0x10))
 #define GET_RAR_MODE(l) \
-        ((l)->HostOS != HOST_UNIX && (l)->HostOS != HOST_BEOS \
-                ? IS_RAR_DIR(l) ? (S_IFDIR|(0777&~umask_)) \
-                : (S_IFREG|(0666&~umask_)) : (l)->FileAttr)
+                (IS_UNIX_MODE_(l) \
+                        ? (l)->FileAttr \
+                        : IS_RAR_DIR(l) \
+                                ? (S_IFDIR|(0777&~umask_)) \
+                                : (S_IFREG|(0666&~umask_)))
 #define GET_RAR_SZ(l) \
         (IS_RAR_DIR(l) ? 4096 : (((l)->UnpSizeHigh * 0x100000000ULL) | \
                 (l)->UnpSize))
