@@ -55,6 +55,8 @@ static dir_elem_t path_cache[PATH_CACHE_SZ];
                         free ((e)->file2_p);\
                 if ((e)->password_p)\
                         free ((e)->password_p);\
+                if ((e)->link_target_p)\
+                        free ((e)->link_target_p);\
                 (e)->name_p = NULL;\
                 (e)->rar_p = NULL;\
                 (e)->file_p = NULL;\
@@ -192,6 +194,8 @@ dir_elem_t *filecache_clone(const dir_elem_t *src)
                         dest->file2_p = strdup(src->file2_p);
                 if (src->password_p)
                         dest->password_p = strdup(src->password_p);
+                if (src->link_target_p)
+                        dest->link_target_p = strdup(src->link_target_p);
                 if (errno != 0) {
                         filecache_freeclone(dest);
                         dest = NULL;

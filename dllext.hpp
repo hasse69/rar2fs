@@ -150,6 +150,13 @@ struct RARArchiveListEx
 {
   char         FileName[1024];
   wchar_t      FileNameW[1024];
+  __extension__
+  union
+  {
+    char       LinkTarget[1024];
+    wchar_t    LinkTargetW[1024];
+  };
+  unsigned int LinkTargetFlags; 
   unsigned int Flags;
   unsigned int PackSize;
   unsigned int PackSizeHigh;
@@ -164,6 +171,12 @@ struct RARArchiveListEx
   unsigned int HeadSize;
   off_t        Offset;
   RARArchiveListEx* next;
+};
+
+struct RARWcb
+{
+    unsigned int bytes;
+    wchar_t data[8192]; // 8k should be enough?
 };
 
 #ifdef __cplusplus
@@ -182,6 +195,7 @@ unsigned int PASCAL RARGetMarkHeaderSize(HANDLE hArcData);
 FileHandle   PASCAL RARGetFileHandle(HANDLE hArcData);
 void         PASCAL RARNextVolumeName(char*, bool);
 void         PASCAL RARVolNameToFirstName(char*, bool);
+void         PASCAL RARGetFileInfo(HANDLE hArcData, const char *FileName, struct RARWcb *wcb);
 
 #ifdef __cplusplus
 }

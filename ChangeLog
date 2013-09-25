@@ -1,5 +1,142 @@
 rar2fs ChangeLog file.
 
+2013-09-25  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Released 1.18.0
+
+        * Fixed a problem seen on eg. Debian 3.1 for which
+          fuse_main() crashed when called with a NULL
+          pointer instead of a valid fuse_operations struct.
+
+2013-09-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Added a second mount attempt in case fuse is throwing
+          an error due to missing support for option -osubtype. 
+          The second time the mount is attempted without the
+          option added internally.
+        
+2013-09-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Corrected a version check error resulting in a 
+          crash when trying to run a rar2fs version compiled
+          using UnRAR source 5.0.11 or later.
+
+2013-09-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Replacing -Wextra with the deprecated -W for old
+          versions of gcc
+
+2013-09-17  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Added check for existance of function fuse_version()
+
+        * Added check for -Wextra support by compiler
+
+2013-09-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Added proper check if backtrace functions are 
+          provided as a separate library. Lack of this check
+          resulted in build failures on FreeBSD.
+
+2013-09-04  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Fixed a broken version check for the official release
+          (non beta) of UnRAR source 5.0.x.
+
+2013-08-10  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Fixed a time (DST) calculation bug
+
+        * Replaced the Unicode to/from UTF-8 translation 
+          function(s)
+
+        * Prepared the code for using iconv.
+          Currently not enabled. Not sure it will ever be.
+
+        * Deleted file(s): utf8.h, utf8.c 
+
+2013-08-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Fixed a bug when identifying host OS for
+          RAR5 archives.
+
+        * Minor code clean-up and bug fixes in the 
+          DLL extensions for RAR5 archives.
+          
+2013-08-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Updated old build support files
+
+        * Prepared the build environment for detecting the
+          availability of iconv. Once in place it should 
+          most likely replace the current UTF-8 conversion
+          routine.
+
+        * Externally filesystem entries are now being
+          translated to UTF-8 irrespective of what current
+          process locale is set to. Internally Unicode is 
+          still used when applicable.
+
+        * New file(s): utf8.h, utf8.c
+
+2013-08-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Fixed a small bug that resulted in a stale
+          mount point even if a mount option was not
+          actually accepted.
+
+        * Added support for UNIX style symbolic links in
+          RAR5 archives (EXPERIMENTAL). 
+
+2013-08-05  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Added support for UNIX style symbolic links in
+          RAR4 (and earlier) archives. RAR5 support still
+          needs some further investigation.
+
+2013-08-05  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Fixed an error in configure.ac when resolving
+          git HEAD that resulted in build failures.
+
+2013-08-04  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Added a new feature that allows presentation of file
+          information inside RAR archives in technical format 
+          (similar to 'unrar lt'). Eg. if there is a file named
+          'foobar' inside an archive it can be listed using 
+          'cat foobar#info'. This is a replacement for both the
+          hard link count hack (compression method) *and* extended 
+          attributes. Both which are still available when ever
+          applicable. 
+
+          Note that this new feature is included only when 
+          compiled/linked towards UnRAR source v5.x.x or later.
+
+        * Fixed a minor bug in the extended attributes that caused
+          wrong compression method to be presented for 
+          "rar inside rar" files.
+
+        * Fixed a problem with MAP_FAILED not being defined if
+          mmap(2) is not supported (very rare).
+
+2013-07-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Added compression method as an extended attribute
+          (plus a few more for debug purposes).
+          For systems that does not provide the extended
+          attribute (xattr) system calls, compression method
+          is still provided as the hard link count of regular
+          files.
+
+2013-07-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Added support for creating symbolic links.
+
+        * Fixed an old bug that allowed files on the underlying
+          file system to be moved/renamed and potentially 
+          "hiding" files inside RAR archives.
+
 2013-07-03  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.17.2

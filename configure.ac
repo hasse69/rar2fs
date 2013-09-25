@@ -122,6 +122,10 @@ else
    AC_CHECK_FUNCS(munmap)
 fi
 
+########################################################
+# Check if backtrace functions needs a lib
+AC_SEARCH_LIBS([backtrace], [execinfo])
+
 withval=
 AC_ARG_WITH([fuse],
    [AS_HELP_STRING([--with-fuse=PATH],
@@ -234,6 +238,11 @@ AC_CHECK_LIB(fuse4x,fuse_new, [FUSE_LIBS="-lfuse4x"],
         ],)
     ],)
 ],)
+save_LIBS="$LIBS"
+LIBS="$FUSE_LIBS"
+# fuse_version() became available for the first time in fuse 2.7
+AC_CHECK_FUNCS(fuse_version)
+LIBS="$save_LIBS"
 LDFLAGS="$save_LDFLAGS"
 AC_SUBST(FUSE_LIBS)
 
@@ -315,6 +324,8 @@ if test x"$UNRAR_LIBS" != x; then
     LIBS="$save_LIBS"
 fi
 
+AM_ICONV
+
 AC_MSG_CHECKING(for source revision in SVN)
 SVNREV=$(svn info 2>/dev/null | $GREP Revision: | cut -d' ' -f2 2>/dev/null)
 if test x"$SVNREV" != x; then
@@ -325,10 +336,10 @@ else
     echo no
 fi
 AC_MSG_CHECKING(for commit hash in git repo)
-HEAD=.git/$(cat .git/HEAD 2>/dev/null | cut -d" " -f2)
-GITREV=$(cut -c1-7 $HEAD 2>/dev/null)
+GITHEAD=.git/$(cat .git/HEAD 2>/dev/null | cut -d" " -f2)
+GITREV=$(cut -c1-7 $GITHEAD 2>/dev/null)
 if test x"$GITREV" != x; then
-    AC_SUBST([CONFIG_STATUS_DEPENDENCIES], ['$HEAD'])
+    AC_SUBST([CONFIG_STATUS_DEPENDENCIES], [$GITHEAD])
     CFLAGS="$CFLAGS -DGITREV_=0x$GITREV"
     echo $GITREV
 else
@@ -377,6 +388,26 @@ AC_TRY_COMPILE([],[],
     ],
     [AC_MSG_RESULT([no])
         CFLAGS="$save_CFLAGS"
+    ]
+)
+ac_c_werror_flag=
+AC_LANG_POP
+
+# Check how compiler handles -Wextra
+# Note that AC_LANG_WERROR is not used here since it is more or less useless
+# until its effect can be undone. Instead $ac_c_werror_flag is manipulated
+# directly. Dirty but effective!
+AC_LANG_PUSH(C)
+ac_c_werror_flag=yes
+save_CFLAGS=$CFLAGS
+CFLAGS="$CFLAGS -Wextra"
+AC_MSG_CHECKING([if compiler supports -Wextra])
+AC_TRY_COMPILE([#include<stdio.h>],[
+    ],
+    [AC_MSG_RESULT([yes])
+    ],
+    [AC_MSG_RESULT([no])
+        CFLAGS="$save_CFLAGS -W"
     ]
 )
 ac_c_werror_flag=

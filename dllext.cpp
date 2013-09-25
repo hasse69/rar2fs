@@ -42,6 +42,10 @@ using namespace std;
 #define HEAD_ENDARC ENDARC_HEAD
 #endif
 
+// Override the St() function/macro since it is a no-op in RARDLL mode
+#undef St
+#define St(x) L""x""
+
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
 static int RarErrorToDll(RAR_EXIT ErrCode);
 #else
@@ -51,7 +55,7 @@ static int RarErrorToDll(int ErrCode);
 struct DataSet
 {
   CommandData Cmd;
-#if RARVER_MAJOR > 4 && (RARVER_MINOR > 0 || RARVER_BETA > 1)
+#if RARVER_MAJOR > 4 && !(RARVER_MINOR == 0 && RARVER_BETA == 1)
   Archive Arc;
   CmdExtract Extract;
 #else
@@ -68,6 +72,7 @@ struct DataSet
 #endif
 };
 
+
 HANDLE PASCAL RARInitArchive(struct RAROpenArchiveData *r, FileHandle fh)
 {
   RAROpenArchiveDataEx rx;
@@ -82,6 +87,7 @@ HANDLE PASCAL RARInitArchive(struct RAROpenArchiveData *r, FileHandle fh)
   r->CmtState=rx.CmtState;
   return(hArc);
 }
+
 
 HANDLE PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *r, FileHandle fh)
 {
@@ -248,19 +254,45 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
            }
            FileCount++;
 
+           N->Flags = Arc.FileHead.Flags;
+           N->LinkTargetFlags = 0;
+
 #if RARVER_MAJOR < 5
-           strncpyz(N->FileName,Arc.FileHead.FileName,ASIZE(N->FileName));
            if (*Arc.FileHead.FileNameW)
+           {
              wcsncpy(N->FileNameW,Arc.FileHead.FileNameW,ASIZE(N->FileNameW));
+             *N->FileName = '\0';
+             N->Flags |= LHD_UNICODE; // Make sure UNICODE is set
+           }
            else
            {
-             CharToWide(Arc.FileHead.FileName,N->FileNameW);
+             strncpyz(N->FileName,Arc.FileHead.FileName,ASIZE(N->FileName));
+             *N->FileNameW = (wchar)0;
            }
 #else
-           wcsncpy(N->FileNameW,Arc.FileHead.FileName,ASIZE(N->FileNameW));
-           WideToChar(N->FileNameW,N->FileName,ASIZE(N->FileName));
+           if (Arc.FileHead.Flags & LHD_UNICODE)
+           {
+             wcsncpy(N->FileNameW,Arc.FileHead.FileName,ASIZE(N->FileNameW));
+             *N->FileName = '\0';
+           }
+           else
+           {
+               if (Arc.Format < RARFMT50)
+               {
+                 // Final translation can be done here. Since there are no UNICODE
+                 // characters it is basically ASCII and the user do not need to
+                 // worry about character coding etc.
+                 WideToChar(Arc.FileHead.FileName,N->FileName,ASIZE(N->FileName)); 
+                 *N->FileNameW = (wchar)0;
+               }
+               else
+               {
+                 wcsncpy(N->FileNameW,Arc.FileHead.FileName,ASIZE(N->FileNameW));
+                 *N->FileName = '\0';
+                 N->Flags |= LHD_UNICODE; // Make sure UNICODE is set
+               }
+           }
 #endif
-           N->Flags = Arc.FileHead.Flags;
 #if RARVER_MAJOR > 4
            // Map some 5.0 properties to old-style flags if applicable
            if (Arc.Format >= RARFMT50)
@@ -278,43 +310,51 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
            }
 #endif
            N->PackSize = Arc.FileHead.PackSize;
-#if RARVER_MAJOR < 5
-           N->PackSizeHigh = Arc.FileHead.HighPackSize;
-#else
-           N->PackSizeHigh = Arc.FileHead.PackSize>>32;
-#endif
            N->UnpSize = Arc.FileHead.UnpSize;
 #if RARVER_MAJOR < 5
+           N->PackSizeHigh = Arc.FileHead.HighPackSize;
            N->UnpSizeHigh = Arc.FileHead.HighUnpSize;
-#else
-           N->UnpSizeHigh = Arc.FileHead.UnpSize>>32;
-#endif
            N->HostOS = Arc.FileHead.HostOS;
-#if RARVER_MAJOR < 5
            N->FileCRC = Arc.FileHead.FileCRC;
            N->FileTime = Arc.FileHead.FileTime;
+           N->UnpVer = Arc.FileHead.UnpVer;
+           N->Method = Arc.FileHead.Method;
 #else
+           N->PackSizeHigh = Arc.FileHead.PackSize>>32;
+           N->UnpSizeHigh = Arc.FileHead.UnpSize>>32;
+           N->HostOS = Arc.FileHead.HSType == HSYS_WINDOWS ? HOST_WIN32 : HOST_UNIX;
            N->FileCRC = Arc.FileHead.FileHash.CRC32;
            N->FileTime = Arc.FileHead.mtime.GetDos();
-#endif
-
-#if RARVER_MAJOR < 5
-           N->UnpVer = Arc.FileHead.UnpVer;
-#else
            if (Arc.Format>=RARFMT50)
              N->UnpVer=Arc.FileHead.UnpVer==0 ? 50 : 200; // If it is not 0, just set it to something big.
            else
              N->UnpVer=Arc.FileHead.UnpVer;
-#endif
-
-#if RARVER_MAJOR < 5
-           N->Method = Arc.FileHead.Method;
-#else
            N->Method = Arc.FileHead.Method + 0x30;
 #endif
            N->FileAttr = Arc.FileHead.FileAttr;
            N->HeadSize = Arc.FileHead.HeadSize;
            N->Offset = Arc.CurBlockPos;
+
+           if (N->HostOS==HOST_UNIX && (N->FileAttr & 0xF000)==0xA000)
+           {
+	     if (N->UnpVer < 50)
+             {
+               int DataSize=Min(N->PackSize,sizeof(N->LinkTarget)-1);
+               Arc.Read(N->LinkTarget,DataSize);
+               N->LinkTarget[DataSize]=0;
+             }
+#if RARVER_MAJOR > 4
+             else
+             {
+               // Sanity check only that 'RedirType' match 'FileAttr'
+               if (Arc.FileHead.RedirType == FSREDIR_UNIXSYMLINK)
+               {
+                 wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
+                 N->LinkTargetFlags |= LHD_UNICODE; // Make sure UNICODE is set
+               }
+             } 
+#endif
+           }
 
            if (FileDataEnd)
              *FileDataEnd = Arc.NextBlockPos;
@@ -413,6 +453,55 @@ void PASCAL RARVolNameToFirstName(char* arch, bool oldstylevolume)
 #endif
 }
 
+#if RARVER_MAJOR > 4
+static size_t ListFileHeader(wchar *,Archive &);
+#endif
+void PASCAL RARGetFileInfo(HANDLE hArcData, const char *FileName, struct RARWcb *wcb)
+{
+#if RARVER_MAJOR > 4
+  char FileNameUtf[NM];
+
+  try {
+     DataSet *Data=(DataSet *)hArcData;
+     Archive& Arc = Data->Arc;
+
+     while(Arc.ReadHeader()>0)
+     {
+       if (Arc.BrokenHeader)
+         break;
+       int HeaderType=Arc.GetHeaderType();
+       if (HeaderType==HEAD_ENDARC)
+       {
+         break;
+       }
+       switch(HeaderType)
+       {
+         case HEAD_FILE:
+           WideToUtf(Data->Arc.FileHead.FileName,FileNameUtf,ASIZE(FileNameUtf));
+           if (!strcmp(FileNameUtf, FileName))
+           {
+             wcb->bytes = ListFileHeader(wcb->data, Data->Arc);
+             return;
+           }
+         default:
+           break;
+       }
+       Arc.SeekToNext();
+     }
+  }
+  catch (RAR_EXIT ErrCode)
+  {
+    cerr << "RarListFile() caught error "
+         << RarErrorToDll(ErrCode)
+         << endl;
+  }
+#else
+  (void)hArcData;
+  (void)FileName;
+  wcb->bytes = 0;
+#endif
+}
+
 
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
 static int RarErrorToDll(RAR_EXIT ErrCode)
@@ -463,4 +552,281 @@ static int RarErrorToDll(int ErrCode)
 #endif
   return(ERAR_UNKNOWN);
 }
+
+
+#if RARVER_MAJOR > 4
+// For compatibility with existing translations we use %s to print Unicode
+// strings in format strings and convert them to %ls here. %s could work
+// without such conversion in Windows, but not in Unix wprintf.
+// Note that this function cannot be declared static in some early versions
+// of UnRAR source 5.x.x since it is already declared extern by 
+// unrar/strfn.hpp!
+#if RARVER_MINOR > 0 || (RARVER_BETA == 0 || RARVER_BETA > 7)
+void static PrintfPrepareFmt(const wchar *Org,wchar *Cvt,size_t MaxSize)
+#else
+void PrintfPrepareFmt(const wchar *Org,wchar *Cvt,size_t MaxSize)
+#endif
+{
+  uint Src=0,Dest=0;
+  while (Org[Src]!=0 && Dest<MaxSize-1)
+  {
+    if (Org[Src]=='%' && (Src==0 || Org[Src-1]!='%'))
+    {
+      uint SPos=Src+1;
+      // Skipping a possible width specifier like %-50s.
+      while (IsDigit(Org[SPos]) || Org[SPos]=='-')
+        SPos++;
+      if (Org[SPos]=='s' && Dest<MaxSize-(SPos-Src+1))
+      {
+        while (Src<SPos)
+          Cvt[Dest++]=Org[Src++];
+        Cvt[Dest++]='l';
+      }
+    }
+
+    Cvt[Dest++]=Org[Src++];
+  }
+  Cvt[Dest]=0;
+}
+
+
+#undef St
+#define St(StringId) L""StringId""
+
+static int msprintf(wchar *wcs, const wchar *fmt,...)
+{
+  va_list arglist;
+  int len;
+  // This buffer is for format string only, not for entire output,
+  // so it can be short enough.
+  wchar fmtw[1024];
+  va_start(arglist,fmt);
+  PrintfPrepareFmt(fmt,fmtw,ASIZE(fmtw));
+  len = vswprintf(wcs,1024,fmtw,arglist);
+  len = len == -1 ? 0 : len;
+  va_end(arglist);
+  return len;
+}
+
+
+// This function is stolen with pride as-is from UnRAR source since
+// it is not available in SILENT/RARDLL mode.
+static void ListFileAttr(uint A,HOST_SYSTEM_TYPE HostType,wchar *AttrStr,size_t AttrSize)
+{
+  switch(HostType)
+  {
+    case HSYS_WINDOWS:
+      swprintf(AttrStr,AttrSize,L"%c%c%c%c%c%c%c",
+              (A & 0x2000) ? 'I' : '.',  // Not content indexed.
+              (A & 0x0800) ? 'C' : '.',  // Compressed.
+              (A & 0x0020) ? 'A' : '.',  // Archive.
+              (A & 0x0010) ? 'D' : '.',  // Directory.
+              (A & 0x0004) ? 'S' : '.',  // System.
+              (A & 0x0002) ? 'H' : '.',  // Hidden.
+              (A & 0x0001) ? 'R' : '.'); // Read-only.
+      break;
+    case HSYS_UNIX:
+      switch (A & 0xF000)
+      {
+        case 0x4000:
+          AttrStr[0]='d';
+          break;
+        case 0xA000:
+          AttrStr[0]='l';
+          break;
+        default:
+          AttrStr[0]='-';
+          break;
+      }
+      swprintf(AttrStr+1,AttrSize-1,L"%c%c%c%c%c%c%c%c%c",
+              (A & 0x0100) ? 'r' : '-',
+              (A & 0x0080) ? 'w' : '-',
+              (A & 0x0040) ? ((A & 0x0800) ? 's':'x'):((A & 0x0800) ? 'S':'-'),
+              (A & 0x0020) ? 'r' : '-',
+              (A & 0x0010) ? 'w' : '-',
+              (A & 0x0008) ? ((A & 0x0400) ? 's':'x'):((A & 0x0400) ? 'S':'-'),
+              (A & 0x0004) ? 'r' : '-',
+              (A & 0x0002) ? 'w' : '-',
+              (A & 0x0001) ? 'x' : '-');
+      break;
+    case HSYS_UNKNOWN:
+      wcscpy(AttrStr,L"?");
+      break;
+  }
+}
+
+// This is a variant of ListFileHeader() function in UnRAR source  
+// (somewhat simplfied) since that function is not available in 
+// SILENT/RARDLL mode.
+// This function outputs the header information in technical format
+// to a wcs buffer instead of a file pointer (stderr/stdout).
+static size_t ListFileHeader(wchar *wcs,Archive &Arc)
+{
+  FileHeader &hd=Arc.FileHead;
+  wchar *Name=hd.FileName;
+  RARFORMAT Format=Arc.Format;
+
+  void *wcs_start = (void *)wcs;
+
+  wchar UnpSizeText[20],PackSizeText[20];
+  if (hd.UnpSize==INT64NDF)
+    wcscpy(UnpSizeText,L"?");
+  else
+    itoa(hd.UnpSize,UnpSizeText);
+  itoa(hd.PackSize,PackSizeText);
+
+  wchar AttrStr[30];
+  ListFileAttr(hd.FileAttr,hd.HSType,AttrStr,ASIZE(AttrStr));
+
+  wchar RatioStr[10];
+
+  if (hd.SplitBefore && hd.SplitAfter)
+    wcscpy(RatioStr,L"<->");
+  else
+    if (hd.SplitBefore)
+      wcscpy(RatioStr,L"<--");
+    else
+      if (hd.SplitAfter)
+        wcscpy(RatioStr,L"-->");
+      else
+        swprintf(RatioStr,ASIZE(RatioStr),L"%d%%",ToPercentUnlim(hd.PackSize,hd.UnpSize));
+
+  wchar DateStr[50];
+  hd.mtime.GetText(DateStr,ASIZE(DateStr),true,true);
+  wcs += msprintf(wcs, L"\n%12s: %s",St(MListName),Name);
+  bool FileBlock=hd.HeaderType==HEAD_FILE;
+
+  const wchar *Type=FileBlock ? (hd.Dir?St(MListDir):St(MListFile)):St(MListService);
+
+  switch(hd.RedirType)
+  {
+    case FSREDIR_UNIXSYMLINK:
+      Type=St(MListUSymlink); break;
+    case FSREDIR_WINSYMLINK:
+      Type=St(MListWSymlink); break;
+    case FSREDIR_JUNCTION:
+      Type=St(MListJunction); break;
+    case FSREDIR_HARDLINK:
+      Type=St(MListHardlink); break;
+    case FSREDIR_FILECOPY:
+      Type=St(MListCopy);     break;
+    case FSREDIR_NONE:
+      break;
+  }
+  wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListType),Type);
+
+  if (hd.RedirType!=FSREDIR_NONE)
+  {
+    if (Format==RARFMT15)
+    {
+      char LinkTargetA[NM];
+      if (Arc.FileHead.Encrypted)
+      {
+        // Link data are encrypted. We would need to ask for password
+        // and initialize decryption routine to display the link target.
+        strncpyz(LinkTargetA,"*<-?->",ASIZE(LinkTargetA));
+      }
+      else
+      {
+        int DataSize=(int)Min(hd.PackSize,ASIZE(LinkTargetA)-1);
+        Arc.Read(LinkTargetA,DataSize);
+        LinkTargetA[DataSize > 0 ? DataSize : 0] = 0;
+      }
+      wchar LinkTarget[NM];
+      CharToWide(LinkTargetA,LinkTarget,ASIZE(LinkTarget));
+      wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListTarget),LinkTarget);
+    }
+    else
+      wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListTarget),hd.RedirName);
+  }
+
+  if (!hd.Dir)
+  {
+    wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListSize),UnpSizeText);
+    wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListPacked),PackSizeText);
+    wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListRatio),RatioStr);
+  }
+  if (hd.mtime.IsSet())
+    wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListMtime),DateStr);
+  if (hd.ctime.IsSet())
+  {
+    hd.ctime.GetText(DateStr,ASIZE(DateStr),true,true);
+    wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListCtime),DateStr);
+  }
+  if (hd.atime.IsSet())
+  {
+    hd.atime.GetText(DateStr,ASIZE(DateStr),true,true);
+    wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListAtime),DateStr);
+  }
+  wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListAttr),AttrStr);
+  if (hd.FileHash.Type==HASH_CRC32)
+    wcs += msprintf(wcs, L"\n%12ls: %8.8X",
+      hd.UseHashKey ? L"CRC32 MAC":hd.SplitAfter ? L"Pack-CRC32":L"CRC32",
+      hd.FileHash.CRC32);
+  if (hd.FileHash.Type==HASH_BLAKE2)
+  {
+    wchar BlakeStr[BLAKE2_DIGEST_SIZE*2+1];
+    BinToHex(hd.FileHash.Digest,BLAKE2_DIGEST_SIZE,NULL,BlakeStr,ASIZE(BlakeStr));
+    wcs += msprintf(wcs, L"\n%12ls: %ls",
+      hd.UseHashKey ? L"BLAKE2 MAC":hd.SplitAfter ? L"Pack-BLAKE2":L"BLAKE2",
+      BlakeStr);
+  }
+
+  const wchar *HostOS=L"";
+  if (Format==RARFMT50 && hd.HSType!=HSYS_UNKNOWN)
+    HostOS=hd.HSType==HSYS_WINDOWS ? L"Windows":L"Unix";
+  if (Format==RARFMT15)
+  {
+    static const wchar *RarOS[]={
+      L"DOS",L"OS/2",L"Windows",L"Unix",L"Mac OS",L"BeOS",L"WinCE",L"",L"",L""
+    };
+    if (hd.HostOS<ASIZE(RarOS))
+      HostOS=RarOS[hd.HostOS];
+  }
+  if (*HostOS!=0)
+    wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListHostOS),HostOS);
+
+  wcs += msprintf(wcs, L"\n%12ls: RAR %ls(v%d) -m%d -md=%d%s",St(MListCompInfo),
+          Format==RARFMT15 ? L"3.0":L"5.0",hd.UnpVer,hd.Method,
+          hd.WinSize>=0x100000 ? hd.WinSize/0x100000:hd.WinSize/0x400,
+          hd.WinSize>=0x100000 ? L"M":L"K");
+
+  if (hd.Solid || hd.Encrypted)
+  {
+    wcs += msprintf(wcs, L"\n%12ls: ",St(MListFlags));
+    if (hd.Solid)
+      wcs += msprintf(wcs, L"%ls ",St(MListSolid));
+    if (hd.Encrypted)
+      wcs += msprintf(wcs, L"%ls ",St(MListEnc));
+  }
+
+  if (hd.Version)
+  {
+    uint Version=ParseVersionFileName(Name,false);
+    if (Version!=0)
+      wcs += msprintf(wcs, L"\n%12ls: %u",St(MListFileVer),Version);
+  }
+
+  if (hd.UnixOwnerSet)
+  {
+    wcs += msprintf(wcs, L"\n%12ls: ",L"Unix owner");
+    if (*hd.UnixOwnerName!=0)
+      wcs += msprintf(wcs, L"%ls:",GetWide(hd.UnixOwnerName));
+    if (*hd.UnixGroupName!=0)
+      wcs += msprintf(wcs, L"%ls",GetWide(hd.UnixGroupName));
+    if ((*hd.UnixOwnerName!=0 || *hd.UnixGroupName!=0) && (hd.UnixOwnerNumeric || hd.UnixGroupNumeric))
+      wcs += msprintf(wcs, L"  ");
+    if (hd.UnixOwnerNumeric)
+      wcs += msprintf(wcs, L"#%d:",hd.UnixOwnerID);
+    if (hd.UnixGroupNumeric)
+      wcs += msprintf(wcs, L"#%d:",hd.UnixGroupID);
+  }
+
+  wcs += msprintf(wcs, L"\n\n");
+  // The below will cover 4 bytes NULL termination
+  return ((char *)wcs - (char *)wcs_start);
+}
+
+#endif
+
 
