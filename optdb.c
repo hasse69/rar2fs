@@ -136,12 +136,14 @@ int optdb_save(int opt, const char *s)
                 break;
         case OPT_KEY_SEEK_LENGTH:
         case OPT_KEY_HIST_SIZE:
-                (void)strtoul(s1, &endptr, 10);
+        {
+                NO_UNUSED_RESULT strtoul(s1, &endptr, 10);
                 if (*endptr)
                         return 1;
                 CLR_OPT_(opt);
                 ADD_OPT_(opt, s1, OPT_INT_);
                 break;
+        }
         case OPT_KEY_SRC:
         case OPT_KEY_DST:
                 CLR_OPT_(opt);

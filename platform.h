@@ -128,6 +128,12 @@ typedef bool _Bool;
 # define fdatasync(fd) fsync(fd)
 #endif
 
+/* Not very likely, but just to be safe... */
+#ifndef HAVE_MMAP
+# undef MAP_FAILED
+# define MAP_FAILED      ((void *) -1)
+#endif
+
 #endif
 
 
