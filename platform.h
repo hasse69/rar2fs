@@ -49,6 +49,7 @@
 #endif
 
 #ifdef HAVE_INTTYPES_H
+#define __STDC_FORMAT_MACROS /* should only be needed for C++ */
 # include <inttypes.h>
 #endif
 #ifdef HAVE_STDINT_H

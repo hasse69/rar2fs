@@ -36,12 +36,14 @@
  *****************************************************************************
  *
  ****************************************************************************/
-static inline int swap(struct dir_entry_list *A, struct dir_entry_list *B)
-{
-        if (strcmp(A->entry.name, B->entry.name) > 0) {
+static inline int swap(struct dir_entry_list *A, struct dir_entry_list *B) {
+        int swap = strcmp(A->entry.name, B->entry.name);
+        swap = !swap ? A->entry.type > B->entry.type : swap;
+        if (swap > 0) {
                 const struct dir_entry TMP = B->entry;
                 B->entry = A->entry;
                 A->entry = TMP;
+
                 return 1;
         }
         return 0;

@@ -41,7 +41,6 @@ struct dir_elem {
         char *rar_p;
         char *file_p;
         char *file2_p;
-        char *password_p;
         char *link_target_p;
         struct stat stat;
         uint32_t dir_hash;
@@ -68,7 +67,8 @@ struct dir_elem {
                         unsigned int mmap:2;
                         unsigned int force_dir:1;
                         unsigned int vno_in_header:1;
-                        unsigned int :21;
+                        unsigned int encrypted:1;
+                        unsigned int :20;
                         unsigned int direct_io:1;
                         unsigned int avi_tested:1;
                         unsigned int save_eof:1;
@@ -76,7 +76,8 @@ struct dir_elem {
                         unsigned int save_eof:1;
                         unsigned int avi_tested:1;
                         unsigned int direct_io:1;
-                        unsigned int :21;
+                        unsigned int :20;
+                        unsigned int encrypted:1;
                         unsigned int vno_in_header:1;
                         unsigned int force_dir:1;
                         unsigned int mmap:2;

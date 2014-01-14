@@ -73,22 +73,6 @@ struct DataSet
 };
 
 
-HANDLE PASCAL RARInitArchive(struct RAROpenArchiveData *r, FileHandle fh)
-{
-  RAROpenArchiveDataEx rx;
-  memset(&rx,0,sizeof(rx));
-  rx.ArcName=r->ArcName;
-  rx.OpenMode=r->OpenMode;
-  rx.CmtBuf=r->CmtBuf;
-  rx.CmtBufSize=r->CmtBufSize;
-  HANDLE hArc=RARInitArchiveEx(&rx, fh);
-  r->OpenResult=rx.OpenResult;
-  r->CmtSize=rx.CmtSize;
-  r->CmtState=rx.CmtState;
-  return(hArc);
-}
-
-
 HANDLE PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *r, FileHandle fh)
 {
   DataSet *Data=NULL;
@@ -125,14 +109,18 @@ HANDLE PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *r, FileHandle fh)
 #endif
     Data->Cmd.Overwrite=OVERWRITE_ALL;
     Data->Cmd.VersionControl=1;
+    Data->Cmd.Callback=r->Callback;
+    Data->Cmd.UserData=r->UserData;
     ((FileExt*)&Data->Arc)->SetHandle(fh);
     ((FileExt*)&Data->Arc)->SkipHandle();
+    int64 SavePos = Data->Arc.Tell();   // IsArchive() might destroy file position!
     if (!Data->Arc.IsArchive(false))
     {
       r->OpenResult=Data->Cmd.DllError!=0 ? Data->Cmd.DllError:ERAR_BAD_ARCHIVE;
       delete Data;
       return(NULL);
     }
+    Data->Arc.Seek(SavePos,SEEK_SET);  // Restore file position!
 #if RARVER_MAJOR < 5
     r->Flags=Data->Arc.MainHead.Flags;
 
@@ -228,156 +216,92 @@ int PASCAL RARFreeArchive(HANDLE hArcData)
 }
 
 
-int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDataEnd)
+int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDataEnd, int *ResultCode)
 {
-  uint FileCount=0;
-  try {
-     DataSet *Data=(DataSet *)hArcData;
-     Archive& Arc = Data->Arc;
+  DataSet *Data = (DataSet *)hArcData;
+  Archive& Arc = Data->Arc;
+  struct RARHeaderDataEx h;
+  RARArchiveListEx* N_ = N;
 
-     while(Arc.ReadHeader()>0)
-     {
-       if (Arc.BrokenHeader)
-         break;
-       int HeaderType=Arc.GetHeaderType();
-       if (HeaderType==HEAD_ENDARC)
-       {
-         break;
-       }
-       switch(HeaderType)
-       {
-         case HEAD_FILE:
-           if (FileCount)
-           {
-             N->next = new RARArchiveListEx;
-             N = N->next;
-           }
-           FileCount++;
-
-           N->Flags = Arc.FileHead.Flags;
-           N->LinkTargetFlags = 0;
-
-#if RARVER_MAJOR < 5
-           if (*Arc.FileHead.FileNameW)
-           {
-             wcsncpy(N->FileNameW,Arc.FileHead.FileNameW,ASIZE(N->FileNameW));
-             *N->FileName = '\0';
-             N->Flags |= LHD_UNICODE; // Make sure UNICODE is set
-           }
-           else
-           {
-             strncpyz(N->FileName,Arc.FileHead.FileName,ASIZE(N->FileName));
-             *N->FileNameW = (wchar)0;
-           }
-#else
-           if (Arc.FileHead.Flags & LHD_UNICODE)
-           {
-             wcsncpy(N->FileNameW,Arc.FileHead.FileName,ASIZE(N->FileNameW));
-             *N->FileName = '\0';
-           }
-           else
-           {
-               if (Arc.Format < RARFMT50)
-               {
-                 // Final translation can be done here. Since there are no UNICODE
-                 // characters it is basically ASCII and the user do not need to
-                 // worry about character coding etc.
-                 WideToChar(Arc.FileHead.FileName,N->FileName,ASIZE(N->FileName)); 
-                 *N->FileNameW = (wchar)0;
-               }
-               else
-               {
-                 wcsncpy(N->FileNameW,Arc.FileHead.FileName,ASIZE(N->FileNameW));
-                 *N->FileName = '\0';
-                 N->Flags |= LHD_UNICODE; // Make sure UNICODE is set
-               }
-           }
-#endif
-#if RARVER_MAJOR > 4
-           // Map some 5.0 properties to old-style flags if applicable
-           if (Arc.Format >= RARFMT50)
-           {
-             unsigned int mask = LHD_SPLIT_BEFORE|LHD_SPLIT_AFTER|LHD_PASSWORD|LHD_DIRECTORY;
-             N->Flags &= ~mask;
-             if (Arc.FileHead.SplitBefore)
-               N->Flags |= LHD_SPLIT_BEFORE;
-             if (Arc.FileHead.SplitAfter)
-               N->Flags |= LHD_SPLIT_AFTER;
-             if (Arc.FileHead.Encrypted)
-               N->Flags |= LHD_PASSWORD;
-             if (Arc.FileHead.Dir)
-               N->Flags |= LHD_DIRECTORY;
-           }
-#endif
-           N->PackSize = Arc.FileHead.PackSize;
-           N->UnpSize = Arc.FileHead.UnpSize;
-#if RARVER_MAJOR < 5
-           N->PackSizeHigh = Arc.FileHead.HighPackSize;
-           N->UnpSizeHigh = Arc.FileHead.HighUnpSize;
-           N->HostOS = Arc.FileHead.HostOS;
-           N->FileCRC = Arc.FileHead.FileCRC;
-           N->FileTime = Arc.FileHead.FileTime;
-           N->UnpVer = Arc.FileHead.UnpVer;
-           N->Method = Arc.FileHead.Method;
-#else
-           N->PackSizeHigh = Arc.FileHead.PackSize>>32;
-           N->UnpSizeHigh = Arc.FileHead.UnpSize>>32;
-           N->HostOS = Arc.FileHead.HSType == HSYS_WINDOWS ? HOST_WIN32 : HOST_UNIX;
-           N->FileCRC = Arc.FileHead.FileHash.CRC32;
-           N->FileTime = Arc.FileHead.mtime.GetDos();
-           if (Arc.Format>=RARFMT50)
-             N->UnpVer=Arc.FileHead.UnpVer==0 ? 50 : 200; // If it is not 0, just set it to something big.
-           else
-             N->UnpVer=Arc.FileHead.UnpVer;
-           N->Method = Arc.FileHead.Method + 0x30;
-#endif
-           N->FileAttr = Arc.FileHead.FileAttr;
-           N->HeadSize = Arc.FileHead.HeadSize;
-           N->Offset = Arc.CurBlockPos;
-
-           if (N->HostOS==HOST_UNIX && (N->FileAttr & 0xF000)==0xA000)
-           {
-	     if (N->UnpVer < 50)
-             {
-               int DataSize=Min(N->PackSize,sizeof(N->LinkTarget)-1);
-               Arc.Read(N->LinkTarget,DataSize);
-               N->LinkTarget[DataSize]=0;
-             }
-#if RARVER_MAJOR > 4
-             else
-             {
-               // Sanity check only that 'RedirType' match 'FileAttr'
-               if (Arc.FileHead.RedirType == FSREDIR_UNIXSYMLINK)
-               {
-                 wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
-                 N->LinkTargetFlags |= LHD_UNICODE; // Make sure UNICODE is set
-               }
-             } 
-#endif
-           }
-
-           if (FileDataEnd)
-             *FileDataEnd = Arc.NextBlockPos;
-           break;
-
-         default:
-           break;
-       }
-       Arc.SeekToNext();
-     }
-     N->next = NULL;
-     return FileCount;
-  }
-#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
-  catch (RAR_EXIT ErrCode)
-#else
-  catch (int ErrCode)
-#endif
+  try
   {
+    *ResultCode = 0;
+    uint FileCount = 0;
+    while (1)
+    {
+      int RHCode = 0;
+      int PFCode = 0;
+      memset(&h, 0, sizeof(h));
+      RHCode = RARReadHeaderEx(hArcData,&h);
+      if (RHCode)
+      {
+        *ResultCode = RHCode;
+        break;
+      }
+
+      if (FileCount)
+      {
+        N->next = new RARArchiveListEx;
+        N = N->next;
+      }
+      FileCount++;
+      memcpy(&N->hdr, &h, sizeof(h));
+      N->HeadSize = Arc.FileHead.HeadSize;
+      N->Offset = Arc.CurBlockPos;
+      N->hdr.Flags = Arc.FileHead.Flags;
+#if RARVER_MAJOR > 4
+      // Map some RAR5 properties to old-style flags if applicable
+      if (Arc.Format >= RARFMT50)
+      {
+        unsigned int mask = LHD_SPLIT_BEFORE|LHD_SPLIT_AFTER|LHD_PASSWORD|LHD_DIRECTORY;
+        N->hdr.Flags &= ~mask;
+        if (Arc.FileHead.SplitBefore)
+        N->hdr.Flags |= LHD_SPLIT_BEFORE;
+        if (Arc.FileHead.SplitAfter)
+          N->hdr.Flags |= LHD_SPLIT_AFTER;
+        if (Arc.FileHead.Encrypted)
+          N->hdr.Flags |= LHD_PASSWORD;
+        if (Arc.FileHead.Dir)
+          N->hdr.Flags |= LHD_DIRECTORY;
+      }
+#endif
+
+      N->LinkTargetFlags = 0;
+      if (N->hdr.HostOS==HOST_UNIX && (N->hdr.FileAttr & 0xF000)==0xA000)
+      {
+        if (N->hdr.UnpVer < 50)
+        {
+          int DataSize=Min(N->hdr.PackSize,sizeof(N->LinkTarget)-1);
+          Arc.Read(N->LinkTarget,DataSize);
+          N->LinkTarget[DataSize]=0;
+        }
+#if RARVER_MAJOR > 4
+        else
+        {
+          // Sanity check only that 'RedirType' match 'FileAttr'
+          if (Arc.FileHead.RedirType == FSREDIR_UNIXSYMLINK)
+          {
+            wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
+            N->LinkTargetFlags |= LHD_UNICODE; // Make sure UNICODE is set
+          }
+        }
+#endif
+      }
+
+      if (FileDataEnd)
+        *FileDataEnd = Arc.NextBlockPos;
+
+      // Skip to next header
+      PFCode = RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
+      if (PFCode)
+      {
+        *ResultCode = PFCode;
+        break;
+      }
+    }
+
     N->next = NULL;
-    cerr << "RarListArchiveEx() caught error "
-         << RarErrorToDll(ErrCode)
-         << endl;
+    return FileCount;
   }
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
   catch (std::bad_alloc) // Catch 'new' exception.
@@ -385,8 +309,10 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
     if (N->next != NULL)
       delete N->next;
     N->next = NULL;
+    cerr << "RARListArchiveEx() caught std:bac_alloc error" << endl;
   }
 #endif
+  RARFreeListEx(N_);
   return 0;
 }
 
@@ -460,40 +386,25 @@ void PASCAL RARGetFileInfo(HANDLE hArcData, const char *FileName, struct RARWcb 
 {
 #if RARVER_MAJOR > 4
   char FileNameUtf[NM];
+  DataSet *Data = (DataSet *)hArcData;
+  Archive& Arc = Data->Arc;
+  struct RARHeaderDataEx h;
 
-  try {
-     DataSet *Data=(DataSet *)hArcData;
-     Archive& Arc = Data->Arc;
-
-     while(Arc.ReadHeader()>0)
-     {
-       if (Arc.BrokenHeader)
-         break;
-       int HeaderType=Arc.GetHeaderType();
-       if (HeaderType==HEAD_ENDARC)
-       {
-         break;
-       }
-       switch(HeaderType)
-       {
-         case HEAD_FILE:
-           WideToUtf(Data->Arc.FileHead.FileName,FileNameUtf,ASIZE(FileNameUtf));
-           if (!strcmp(FileNameUtf, FileName))
-           {
-             wcb->bytes = ListFileHeader(wcb->data, Data->Arc);
-             return;
-           }
-         default:
-           break;
-       }
-       Arc.SeekToNext();
-     }
-  }
-  catch (RAR_EXIT ErrCode)
+  memset(&h, 0, sizeof(h));
+  wcb->bytes = 0;
+  while (1) 
   {
-    cerr << "RarListFile() caught error "
-         << RarErrorToDll(ErrCode)
-         << endl;
+    if (!RARReadHeaderEx(hArcData, &h))
+    {
+      WideToUtf(Arc.FileHead.FileName,FileNameUtf,ASIZE(FileNameUtf));
+      if (!strcmp(FileNameUtf, FileName))
+      {
+        wcb->bytes = ListFileHeader(wcb->data, Arc);
+        return;
+      }
+      // Skip to next header
+      (void)RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
+    }
   }
 #else
   (void)hArcData;
@@ -728,7 +639,7 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
       }
       else
       {
-        int DataSize=(int)Min(hd.PackSize,ASIZE(LinkTargetA)-1);
+        int DataSize=(int)Min((size_t)hd.PackSize,ASIZE(LinkTargetA)-1);
         Arc.Read(LinkTargetA,DataSize);
         LinkTargetA[DataSize > 0 ? DataSize : 0] = 0;
       }

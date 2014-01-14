@@ -1,5 +1,84 @@
 rar2fs ChangeLog file.
 
+2014-01-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Released 1.19.1
+       
+        * [rar2fs #22]
+
+          Corrected an issue with "RAR inside RAR" in combination
+          with libunrar5 and lack of support for fmemopen()
+          (common for e.g. many uClibc based systems).
+
+2014-01-13  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Validation of UnRAR source version did not work
+          as expected.
+
+2014-01-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Released 1.19.0
+
+2013-11-11  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #20]
+
+          Corrected some issues in configure.ac since it failed to
+          properly configure the package for static linkage.
+
+2013-11-04  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #19]
+
+          Added a missing close of the handle obtained when mounting an
+          archive instead of a directory. Besides the fact that it should
+          not be left open, it seems to have also affected the behavior of
+          libunrar for RAR5 archives in such a way that the extraction 
+          process stopped working completely.
+
+2013-10-26  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Now using PRIu64 (C99) when printing 64-bit values 
+
+2013-10-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Fixed an error that caused failures to recognize the 
+          option '--iob-size'.
+
+2013-10-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Redesigned handling of encrypted archives completely.
+          Now using UnRAR library callback API to set password.
+
+        * A password can now be provided in wide-character format.
+
+        * Password files may now be prefixed with a '.' to hide it
+          from simple list operations in traditional UNIX style.
+          rar2fs(1) man page updated accordingly.
+          
+        * Trying to access a file that is encrypted and for which
+          no valid password is provided will give EPERM.
+
+        * Removed option '--no-passwd' since there is no 
+          longer a small performance penalty involved by having
+          this support enabled for non-encrypted archives.
+          This option was removed from the rar2fs(1) man page
+          since long time back.
+
+        * Now taking better use of the provided methods
+          in UnRAR library API when listing archives.
+
+        * Minor improvements in the handling of old style
+          (.rNN) volumes.
+           
+2013-10-10  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #17]
+
+          Corrected a problem with password protected archives that
+          resulted in a crash when files were encrypted but file names
+          were not.
+
 2013-09-25  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.18.0
@@ -28,13 +107,13 @@ rar2fs ChangeLog file.
 
 2013-09-17  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-        * Added check for existance of function fuse_version()
+        * Added check for existence of function fuse_version()
 
         * Added check for -Wextra support by compiler
 
 2013-09-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-        * Added proper check if backtrace functions are 
+        * Added proper check if back-trace functions are 
           provided as a separate library. Lack of this check
           resulted in build failures on FreeBSD.
 
@@ -188,7 +267,7 @@ rar2fs ChangeLog file.
 
         * Added creation of $(DESTDIR)/$(sbindir) in 
           Makefile.am before attempting to install the
-          mount helper utility softlink. 
+          mount helper utility soft-link. 
           Thanks to ssuominen for the patch. 
         
         * Fixed a memory corruption bug when using libunrar5
@@ -205,7 +284,7 @@ rar2fs ChangeLog file.
 
 2013-05-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-        * Removed an incorret assert()
+        * Removed an incorrect assert()
 
         * Fixed a compilation problem introduced in last version
           for UnRAR source releases earlier than v5.0.x
@@ -218,7 +297,7 @@ rar2fs ChangeLog file.
 2013-05-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Built and tested against UnRAR source v5.0.2.
-          This update requires a new invokation of autoreconf 
+          This update requires a new invocation of autoreconf 
           to properly update the configure script and Makefile(s).
           This should resolve issue #14.
    
@@ -255,9 +334,9 @@ rar2fs ChangeLog file.
 
 2013-03-13  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-        * Added an uninstall hook in Makefile.am to make sure
+        * Added an un-install hook in Makefile.am to make sure
           also the mount helper/script is removed when doing
-          "make uninstall".
+          "make un-install".
 
 2013-03-13  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
@@ -363,7 +442,7 @@ rar2fs ChangeLog file.
 
 2013-01-30  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-        * Removed the limititation that main archive must
+        * Removed the limitation that main archive must
           not be a volume when encapsulating other RAR
           files for proper display/extraction.
 
@@ -402,12 +481,12 @@ rar2fs ChangeLog file.
           signal handler for SIGCHLD. 
 
         * File type detection in scandir() improved to reduce 
-          the already low probability of ambigious entries
+          the already low probability of ambiguous entries
           even further. Still there is not a 100% guarantee,
           but very close.
 
         * Optimizations in the folder processing by removing
-          some extranous calls to strlen()/strdup() etc.
+          some extraneous calls to strlen()/strdup() etc.
 
         * Fixed an issue when the root folder entry was
           located in the end of the archive header.
@@ -741,7 +820,7 @@ rar2fs ChangeLog file.
 
 2011-12-05  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-        * Added test for existance of member 'st_gen' in 'struct stat'.
+        * Added test for existence of member 'st_gen' in 'struct stat'.
 
 2011-11-22  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
@@ -759,7 +838,7 @@ rar2fs ChangeLog file.
 
 2011-11-09  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-        * Split of fuse_main() to run fuse_loop() in a seperate thread.
+        * Split of fuse_main() to run fuse_loop() in a separate thread.
 
 2011-11-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
@@ -874,7 +953,7 @@ rar2fs ChangeLog file.
 2011-05-27  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * The code has been adapted to utilize the unrar API as intended
-          for extraction of compressed/encryped archives.
+          for extraction of compressed/encrypted archives.
           This will remove the need for some of the previously added API
           extensions and will reduce the dependency to what version of
           the UnRAR source is used. However, this will instead inflict
@@ -903,7 +982,7 @@ rar2fs ChangeLog file.
 
         * Added option --iob-size that can be used to tune the total
           size of the I/O buffer. Default size is 4MiB.
-          It is also possible to keep the old hardcoded buffer and
+          It is also possible to keep the old hard-coded buffer and
           history size using the -DUSE_STATIC_IOB_ flag.
 
         * Added some missing checks for memory allocation failures
@@ -917,7 +996,7 @@ rar2fs ChangeLog file.
           the total buffer, currently 2MiB.
 
         * Reinserted check of .avi and .mkv before attempting an index
-          preload. This update some how got lost on the way.
+          pre-load. This update some how got lost on the way.
 
 2011-05-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
@@ -954,7 +1033,7 @@ rar2fs ChangeLog file.
 2011-05-04  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Improved logic in the volume part parser(s) to handle
-          umlimited (in theory) number of volume files for old
+          unlimited (in theory) number of volume files for old
           style .rNN format.
 
 2011-05-02  Hans Beckerus <hans.beckerus#AT#gmail.com>
@@ -983,11 +1062,11 @@ rar2fs ChangeLog file.
         * Several Mac OS X and FreeBSD build issues corrected.
 
         * Added check that file is of type .avi or .mkv before
-          attempting an index preload.
+          attempting an index pre-load.
 
 2011-04-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-        * Build now forces C99. Also addded -Wall to identify and
+        * Build now forces C99. Also added -Wall to identify and
           resolve a lot of warnings.
 
 2011-04-27  Hans Beckerus <hans.beckerus#AT#gmail.com>
@@ -1031,7 +1110,7 @@ rar2fs ChangeLog file.
           of Major.Minor beta releases.
           Stable releases will be denoted by a patch level of 0.
           Each stable release will then be archived using a compressed
-          tarball and comitted to the project home page download section.
+          tarball and committed to the project home page download section.
           <http://code.google.com/p/rar2fs/downloads/list>
 
 2011-04-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
@@ -1063,7 +1142,7 @@ rar2fs ChangeLog file.
         *  Added new option --img-type.
 
         * Changed option --fake-iso to now accept a list of file
-          extensions/types as argument instead of having only hardcoded
+          extensions/types as argument instead of having only hard-coded
           values of ".img" and ".nrg".
 
 2011-01-27  Hans Beckerus <hans.beckerus#AT#gmail.com>
@@ -1099,7 +1178,7 @@ rar2fs ChangeLog file.
 
         * Added a sliding window to the IO buffer to allow for at least
           some sort of backward read support.
-          The window is currently hardcoded to half the I/O buffer size
+          The window is currently hard-coded to half the I/O buffer size
           (4/2 = 2MiB) and for that reason the I/O buffer size had to be
           increased from 2MiB to 4MiB.
 
@@ -1114,7 +1193,7 @@ rar2fs ChangeLog file.
           archive password).
 
         * Use of external unrar program no longer required.
-          Can still be choosen instead of internal routines using the
+          Can still be chosen instead of internal routines using the
           --unrar-path option.
 
         * Minor memory leak fixed when parsing folders inside archives.

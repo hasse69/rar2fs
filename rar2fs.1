@@ -15,10 +15,13 @@ and access (read only) the contents as plain files/directories. Other files loca
 directory are handled transparently. Both compressed and non-compressed (store) archives/volumes are supported but full media seek support (aka. indexing) is only available for non-compressed plaintext archives. If a RAR volume is selected as
 .I source
 the file specified must be the first in the set.
+
 Since rar2fs is non-interactive, passwords that are required to decrypt encrypted archives should be stored in a file with the same name
 as the main archive/volume file but with a
 .I .pwd
-extension. Be aware that a password must be stored in plaintext format and is thus not protected in any way from unauthorized access.
+extension. It may also be prefixed with a dot
+.B '.'
+character to hide it from simple list operations in traditional UNIX style. The latter variant has less precedence than the former. Be aware that a password must be stored in plaintext format and is thus not protected in any way from unauthorized access.
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
@@ -94,7 +97,7 @@ replaces the obsoleted
 .I --seek-depth=0 
 option which is no longer supported. The
 .I --seek-depth 
-option is however still accepted as a dummy for backwards compatibility but provides no functionality. To aquire more levels of nesting stacking of rar2fs file systems is needed.
+option is however still accepted as a dummy for backwards compatibility but provides no functionality. To acquire more levels of nesting stacking of rar2fs file systems is needed.
 
 .TP
 .B --exclude="<file>[;<file>;...]"
@@ -166,7 +169,7 @@ The I/O buffer history is a sliding window within the I/O buffer that is guarant
 .B --no-expand-cbr
 disable support for comic book RAR archives 
 
-Default is to always expand comic book RAR archives. In the case that comic book readers are used that expect to find the orignal 
+Default is to always expand comic book RAR archives. In the case that comic book readers are used that expect to find the original 
 .I .cbr
 archive this option can be used to keep such files intact.
 .br

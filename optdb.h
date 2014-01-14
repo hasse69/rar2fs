@@ -50,9 +50,9 @@ enum {
         OPT_KEY_SHOW_COMP_IMG,
         OPT_KEY_SEEK_LENGTH,
         OPT_KEY_SEEK_DEPTH,
-        OPT_KEY_NO_PASSWD,
+        OPT_KEY_NO_PASSWD, /* Obsolete */
         OPT_KEY_NO_SMP,
-        OPT_KEY_UNRAR_PATH,
+        OPT_KEY_UNRAR_PATH, /* Obsolete */
         OPT_KEY_NO_LIB_CHECK,
         OPT_KEY_HIST_SIZE,
         OPT_KEY_BUF_SIZE,

@@ -1,0 +1,20 @@
+rar2fs is a FUSE based file system that can mount a source RAR archive/volume
+or a directory containing any number of RAR archives and read the contents as
+regular files on-the-fly. Non-archived files located in the source directory
+are handled transparently. Both compressed and non-compressed 
+archives/volumes are supported but full media seek support (aka. indexing) is
+only available for non-compressed plaintext archives. In general support for
+compressed and/or encrypted archives is "best effort", highly depending on
+what type of information the archive contains and by what method it is 
+accessed.
+
+Encrypted archives are supported but since rar2fs is completely
+non-interactive it requires the archive password to be stored on the local
+file system in a file in plaintext format. This of course is a major security
+limitation in itself. If you really need to use this feature, use it wisely.
+The author(s) of rar2fs can and will not be held responsible for encrypted
+information being exposed due to this limitation. If security is really an
+issue some encryption on file system level should be considered instead.
+A FUSE based encryption file system, such as encfs, has proven to work very
+well together with rar2fs.
+

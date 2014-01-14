@@ -129,6 +129,7 @@ typedef struct RARArchiveListEx RARArchiveListEx;
 }
 #endif
 
+#if 0
 struct RARArchiveList
 {
   char         FileName[260];
@@ -145,29 +146,18 @@ struct RARArchiveList
   off_t        Offset;
   RARArchiveList* next;
 };
+#endif
 
 struct RARArchiveListEx
 {
-  char         FileName[1024];
-  wchar_t      FileNameW[1024];
+  struct RARHeaderDataEx hdr;
   __extension__
   union
   {
     char       LinkTarget[1024];
     wchar_t    LinkTargetW[1024];
   };
-  unsigned int LinkTargetFlags; 
-  unsigned int Flags;
-  unsigned int PackSize;
-  unsigned int PackSizeHigh;
-  unsigned int UnpSize;
-  unsigned int UnpSizeHigh;
-  unsigned int HostOS;
-  unsigned int FileCRC;
-  unsigned int FileTime;
-  unsigned int UnpVer;
-  unsigned int Method;
-  unsigned int FileAttr;
+  unsigned int LinkTargetFlags;
   unsigned int HeadSize;
   off_t        Offset;
   RARArchiveListEx* next;
@@ -183,12 +173,9 @@ struct RARWcb
 extern "C" {
 #endif
 
-HANDLE       PASCAL RARInitArchive(struct RAROpenArchiveData *ArchiveData, FileHandle);
 HANDLE       PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *ArchiveData, FileHandle);
 int          PASCAL RARFreeArchive(HANDLE hArcData);
-int          PASCAL RARListArchive(HANDLE hArcData, RARArchiveList* fList, off_t* FileDataEnd);
-int          PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* fList, off_t* FileDataEnd);
-void         PASCAL RARFreeList(RARArchiveList* fList);
+int          PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* fList, off_t* FileDataEnd, int *ResultCode);
 void         PASCAL RARFreeListEx(RARArchiveListEx* fList);
 unsigned int PASCAL RARGetMainHeaderSize(HANDLE hArcData);
 unsigned int PASCAL RARGetMarkHeaderSize(HANDLE hArcData);

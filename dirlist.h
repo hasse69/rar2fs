@@ -32,8 +32,8 @@
 #include <platform.h>
 
 /* Directory entry types */
-#define DIR_E_RAR 0
-#define DIR_E_NRM 1
+#define DIR_E_NRM 0
+#define DIR_E_RAR 1
 
 typedef struct dir_entry_list dir_entry_list;
 

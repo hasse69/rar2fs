@@ -168,10 +168,6 @@ struct io_handle {
                         perror("write"); \
         } while (0)
 
-/* Obsolete function(s) */
-/*#define ENABLE_OBSOLETE_ARGS*/
-#define USE_RAR_PASSWORD
-
 #define IS_ISO(s) (!strcasecmp((s)+(strlen(s)-4), ".iso"))
 #define IS_AVI(s) (!strcasecmp((s)+(strlen(s)-4), ".avi"))
 #define IS_MKV(s) (!strcasecmp((s)+(strlen(s)-4), ".mkv"))
@@ -192,14 +188,19 @@ int fs_terminated = 0;
 int fs_loop = 0;
 mode_t umask_ = 0022;
 
-static int extract_rar(char *arch, const char *file, char *passwd, FILE *fp,
-                        void *arg);
+static int extract_rar(char *arch, const char *file, FILE *fp, void *arg);
 
-struct eof_data {
+struct eof_cb_arg {
         off_t toff;
         off_t coff;
         size_t size;
         int fd;
+        char *arch;
+};
+
+struct extract_cb_arg {
+        char *arch;
+        void *arg;
 };
 
 static int extract_index(const dir_elem_t *entry_p, off_t offset);
@@ -212,6 +213,43 @@ static const char *file_cmd[] = {
 };
 #endif
 
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static wchar_t *get_password(const char *file, wchar_t *buf, size_t len)
+{
+        if (file) {
+                size_t l = strlen(file);
+                char *F = alloca(l + 2); /* might try . below */
+                strcpy(F, file);
+                strcpy(F + (l - 4), ".pwd");
+                FILE *fp = fopen(F, "r");
+                if (!fp) {
+                        char *tmp1 = strdup(file);
+                        strcpy(F, dirname(tmp1));
+                        free(tmp1);
+                        strcat(F, "/.");
+                        tmp1 = strdup(file);
+                        strcat(F, basename(tmp1));
+                        free(tmp1);
+                        strcpy(F + (l - 3), ".pwd");
+                        fp = fopen(F, "r");
+                }
+                if (fp) {
+                        buf = fgetws(buf, len, fp);
+                        if (buf) {
+                                wchar_t *eol = wcspbrk(buf, L"\r\n");
+                                if (eol != NULL)
+                                        *eol=0;
+                        }
+                        fclose(fp);
+                        return buf;
+                }
+        }
+        return NULL;
+}
 
 /*!
  *****************************************************************************
@@ -401,13 +439,13 @@ static void *extract_to(const char *file, off_t sz, const dir_elem_t *entry_p,
         if (pipe(out_pipe) != 0)      /* make a pipe */
                 return MAP_FAILED;
 
-        printd(3, "Extracting %llu bytes resident in %s\n", sz, entry_p->rar_p);
+        printd(3, "Extracting %" PRIu64 "bytes resident in %s\n", sz, entry_p->rar_p);
         pid_t pid = fork();
         if (pid == 0) {
                 int ret;
                 close(out_pipe[0]);
-                ret = extract_rar(entry_p->rar_p, file, entry_p->password_p,
-                                        NULL, (void *)(uintptr_t) out_pipe[1]);
+                ret = extract_rar(entry_p->rar_p, file, NULL,
+                                        (void *)(uintptr_t) out_pipe[1]);
                 close(out_pipe[1]);
                 _exit(ret);
         } else if (pid < 0) {
@@ -462,7 +500,7 @@ static void *extract_to(const char *file, off_t sz, const dir_elem_t *entry_p,
                 return MAP_FAILED;
         }
 
-        printd(4, "Read %llu bytes from PIPE %d\n", off, out_pipe[0]);
+        printd(4, "Read %" PRIu64 "bytes from PIPE %d\n", off, out_pipe[0]);
         close(out_pipe[0]);
 
         if (tmp) {
@@ -482,9 +520,6 @@ static void *extract_to(const char *file, off_t sz, const dir_elem_t *entry_p,
  *****************************************************************************
  *
  ****************************************************************************/
-
-#define UNRAR_ unrar_path, unrar_path
-
 static FILE *popen_(const dir_elem_t *entry_p, pid_t *cpid, void **mmap_addr,
                 FILE **mmap_fp, int *mmap_fd)
 {
@@ -492,9 +527,7 @@ static FILE *popen_(const dir_elem_t *entry_p, pid_t *cpid, void **mmap_addr,
         FILE *fp = NULL;
         int fd = -1;
         int pfd[2] = {-1,};
-#ifdef ENABLE_OBSOLETE_ARGS
-        char *unrar_path = OPT_STR(OPT_KEY_UNRAR_PATH, 0);
-#endif
+
         if (entry_p->flags.mmap) {
                 fd = open(entry_p->rar_p, O_RDONLY);
                 if (fd == -1) {
@@ -558,33 +591,11 @@ static FILE *popen_(const dir_elem_t *entry_p, pid_t *cpid, void **mmap_addr,
                 int ret;
                 setpgid(getpid(), 0);
                 close(pfd[0]);  /* Close unused read end */
-
-#ifdef ENABLE_OBSOLETE_ARGS
-                /* This is the child process.  Execute the shell command. */
-                if (unrar_path && !entry_p->flags.mmap) {
-                        fflush(stdout);
-                        dup2(pfd[1], STDOUT_FILENO);
-                        /* anything sent to stdout should now go down the pipe */
-                        if (entry_p->password_p) {
-                                char parg[MAXPASSWORD + 2];
-                                printd(3, parg, MAXPASSWORD + 2, "%s%s", "-p",
-                                        entry_p->password_p);
-                                execl(UNRAR_, parg, "P", "-inul", entry_p->rar_p,
-                                                entry_p->file_p, NULL);
-                        } else {
-                                execl(UNRAR_, "P", "-inul", entry_p->rar_p,
-                                                entry_p->file_p, NULL);
-                        }
-                        /* Should never come here! */
-                        _exit(EXIT_FAILURE);
-                }
-#endif
                 ret = extract_rar(entry_p->rar_p,
                                   entry_p->flags.mmap
                                         ? entry_p->file2_p
                                         : entry_p->file_p,
-                                  entry_p->password_p, fp,
-                                  (void *)(uintptr_t) pfd[1]);
+                                  fp, (void *)(uintptr_t) pfd[1]);
                 close(pfd[1]);
                 _exit(ret);
         } else if (pid < 0) {
@@ -617,8 +628,6 @@ error:
 
         return NULL;
 }
-
-#undef UNRAR_
 
 /*!
  *****************************************************************************
@@ -730,8 +739,8 @@ static int lread_raw(char *buf, size_t size, off_t offset,
 
         op->seq++;
 
-        printd(3, "PID %05d calling %s(), seq = %d, offset=%llu\n", getpid(),
-               __func__, op->seq, offset);
+        printd(3, "PID %05d calling %s(), seq = %d, offset=%" PRIu64 "\n",
+               getpid(), __func__, op->seq, offset);
 
         size_t chunk;
         int tot = 0;
@@ -824,8 +833,8 @@ static int lread_raw(char *buf, size_t size, off_t offset,
 seek_check:
                         if (force_seek || offset != op->pos) {
                                 src_off = VOL_REAL_SZ - chunk;
-                                printd(3, "SEEK src_off = %llu, "
-                                                "VOL_REAL_SZ = %llu\n",
+                                printd(3, "SEEK src_off = %" PRIu64 ", "
+                                                "VOL_REAL_SZ = %" PRIu64 "\n",
                                                 src_off, VOL_REAL_SZ);
                                 fseeko(fp, src_off, SEEK_SET);
                                 force_seek = 0;
@@ -837,12 +846,12 @@ seek_check:
                         chunk = size;
                         if (!offset || offset != op->pos) {
                                 src_off = offset + op->entry_p->offset;
-                                printd(3, "SEEK src_off = %llu\n", src_off);
+                                printd(3, "SEEK src_off = %" PRIu64 "\n", src_off);
                                 fseeko(fp, src_off, SEEK_SET);
                         }
                 }
                 n = fread(buf, 1, chunk, fp);
-                printd(3, "Read %d bytes from vol=%d, base=%d\n", n, op->vno,
+                printd(3, "Read %zu bytes from vol=%d, base=%d\n", n, op->vno,
                        op->entry_p->vno_base);
                 if (n != chunk) {
                         size = n;
@@ -917,7 +926,7 @@ static int lread_rar_idx(char *buf, size_t size, off_t offset,
         size = (off + size) > s
                 ? size - ((off + size) - s)
                 : size;
-        printd(3, "Copying %zu bytes from preloaded offset @ %llu\n",
+        printd(3, "Copying %zu bytes from preloaded offset @ %" PRIu64 "\n",
                                                 size, offset);
         if (op->buf->idx.mmap) {
                 memcpy(buf, op->buf->idx.data_p->bytes + off, size);
@@ -942,7 +951,7 @@ static void dump_buf(int seq, FILE *fp, char *buf, off_t offset, size_t size)
         size_t size_saved = size;
 
         memset(out, 0, 128);
-        fprintf(fp, "seq=%d offset: %llu   size: %zu   buf: %p", seq, offset, size, buf);
+        fprintf(fp, "seq=%d offset: %" PRIu64 "   size: %zu   buf: %p", seq, offset, size, buf);
         size = size > 64 ? 64 : size;
         if (fp) {
                 for (i = 0; i < size; i++) {
@@ -1005,7 +1014,8 @@ static int lread_rar(char *buf, size_t size, off_t offset,
         op->seq++;
 
         printd(3,
-               "PID %05d calling %s(), seq = %d, size=%zu, offset=%llu/%llu\n",
+               "PID %05d calling %s(), seq = %d, size=%zu, offset=%" 
+               PRIu64 "/%" PRIu64 "\n",
                getpid(), __func__, op->seq, size, offset, op->pos);
 
         if ((off_t)(offset + size) >= op->entry_p->stat.st_size) {
@@ -1026,12 +1036,12 @@ check_idx:
                 }
                 /* Check for backward read */
                 if (offset < op->pos) {
-                        printd(3, "seq=%d    history access    offset=%llu"
-                                                " size=%zu  op->pos=%llu"
+                        printd(3, "seq=%d    history access    offset=%" PRIu64 
+                                                " size=%zu  op->pos=%" PRIu64
                                                 "  split=%d\n",
-                                                op->seq,offset,size,
+                                                op->seq,offset, size,
                                                 op->pos,
-                                                (offset + size) > op->pos);
+                                                (offset + (off_t)size) > op->pos);
                         if ((uint32_t)(op->pos - offset) <= IOB_HIST_SZ) {
                                 size_t pos = offset & (IOB_SZ-1);
                                 size_t chunk = (off_t)(offset + size) > op->pos
@@ -1043,8 +1053,8 @@ check_idx:
                                 offset += tmp;
                                 n += tmp;
                         } else {
-                                printd(1, "%s: Input/output error   offset=%llu"
-                                                        "  pos=%llu\n",
+                                printd(1, "%s: Input/output error   offset=%" PRIu64 
+                                                        "  pos=%" PRIu64 "\n",
                                                         __func__,
                                                         offset, op->pos);
                                 n = -EIO;
@@ -1056,8 +1066,8 @@ check_idx:
                  */
                 } else if ((((offset - op->pos) / (op->entry_p->stat.st_size * 1.0) * 100) > 95.0 &&
                                 op->seq < 10)) {
-                        printd(3, "seq=%d    long jump hack1    offset=%llu,"
-                                                " size=%zu, buf->offset=%llu\n",
+                        printd(3, "seq=%d    long jump hack1    offset=%" PRIu64 ","
+                                                " size=%zu, buf->offset=%" PRIu64 "\n",
                                                 op->seq, offset, size,
                                                 op->buf->offset);
                         op->seq--;      /* pretend it never happened */
@@ -1103,8 +1113,15 @@ check_idx:
          * This should not be happening frequently. If it does it is an
          * indication that the I/O buffer is set too small.
          */
-        if ((off_t)(offset + size) > op->buf->offset)
+        if ((off_t)(offset + size) > op->buf->offset) {
                 sync_thread_read(op->pfd1, op->pfd2);
+                /* If there is still no data assume something went wrong.
+                 * Also assume that, if the file is encrypted, the reason
+                 * for the error is a missing or invalid password!
+                 */
+                if (!op->buf->offset) 
+                        return op->entry_p->flags.encrypted ? -EPERM : -EIO;
+        }
         if ((off_t)(offset + size) > op->buf->offset) {
                 if (offset >= op->buf->offset) {
                         /*
@@ -1121,8 +1138,8 @@ check_idx:
                         if (op->seq < 15 && ((offset + size) - op->buf->offset)
                                         > (IOB_SZ - IOB_HIST_SZ)) {
                                 dir_elem_t *e_p; /* "real" cache entry */ 
-                                printd(3, "seq=%d    long jump hack2    offset=%llu,"
-                                                " size=%zu, buf->offset=%llu\n",
+                                printd(3, "seq=%d    long jump hack2    offset=%" PRIu64 ","
+                                                " size=%zu, buf->offset=%" PRIu64 "\n",
                                                 op->seq, offset, size,
                                                 op->buf->offset);
                                 op->seq--;      /* pretend it never happened */
@@ -1234,7 +1251,7 @@ static int lread(const char *path, char *buffer, size_t size, off_t offset,
 {
         int res;
 
-        ENTER_("%s   size = %zu, offset = %llu", path, size, offset);
+        ENTER_("%s   size = %zu, offset = %" PRIu64, path, size, offset);
 
         (void)path;             /* touch */
 
@@ -1279,7 +1296,7 @@ static int lopen(const char *path, struct fuse_file_info *fi)
 #define DUMP_STAT4_(m) \
         fprintf(stderr, "%10s = %u\n", #m , (unsigned int)stbuf->m)
 #define DUMP_STAT8_(m) \
-        fprintf(stderr, "%10s = %llu\n", #m , (unsigned long long)stbuf->m)
+        fprintf(stderr, "%10s = %" PRIu64 "\n", #m , (unsigned long long)stbuf->m)
 
 static void dump_stat(struct stat *stbuf)
 {
@@ -1334,6 +1351,7 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
                 if (!(d.Flags & MHD_VOLUME)) {
                         files = 1;
                         list = dir_entry_add(list, d.ArcName, NULL, DIR_E_NRM);
+                        RARCloseArchive(hdl);
                         break;
                 }
                 if (!files && !(d.Flags & MHD_FIRSTVOLUME))
@@ -1352,7 +1370,7 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
  *****************************************************************************
  *
  ****************************************************************************/
-static int is_rxx_vol(const char *name)
+static inline int is_rxx_vol(const char *name)
 {
         size_t len = strlen(name);
         if (name[len - 4] == '.' && 
@@ -1465,7 +1483,7 @@ static int get_vformat(const char *s, int t, int *l, int *p)
 static int CALLBACK index_callback(UINT msg, LPARAM UserData,
                 LPARAM P1, LPARAM P2)
 {
-        struct eof_data *eofd = (struct eof_data *)UserData;
+        struct eof_cb_arg *eofd = (struct eof_cb_arg *)UserData;
 
         if (msg == UCM_PROCESSDATA) {
                 /*
@@ -1495,7 +1513,10 @@ static int CALLBACK index_callback(UINT msg, LPARAM UserData,
         }
         if (msg == UCM_CHANGEVOLUME)
                 return access((char *)P1, F_OK);
-
+        if (msg == UCM_NEEDPASSWORDW)
+                if (!get_password(eofd->arch, (wchar_t *)P1, P2))
+                        return -1;
+               
         return 1;
 }
 
@@ -1516,10 +1537,14 @@ static int extract_index(const dir_elem_t *entry_p, off_t offset)
         struct idx_head head = {R2I_MAGIC, 0, 0, 0, 0};
         char *r2i;
 
-        struct eof_data eofd;
+        struct eof_cb_arg eofd;
         eofd.toff = offset;
         eofd.coff = 0;
         eofd.size = 0;
+        eofd.arch = d.ArcName;
+
+        d.Callback = index_callback;
+        d.UserData = (LPARAM)&eofd;
 
         ABS_ROOT(r2i, entry_p->name_p);
         strcpy(&r2i[strlen(r2i) - 3], "r2i");
@@ -1534,11 +1559,7 @@ static int extract_index(const dir_elem_t *entry_p, off_t offset)
         if (!hdl || d.OpenResult)
                 goto index_error;
 
-        if (entry_p->password_p && strlen(entry_p->password_p))
-                RARSetPassword(hdl, entry_p->password_p);
-
         header.CmtBufSize = 0;
-        RARSetCallback(hdl, index_callback, (LPARAM)&eofd);
         while (1) {
                 if (RARReadHeader(hdl, &header))
                         break;
@@ -1575,13 +1596,14 @@ index_error:
 static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
                 LPARAM P1, LPARAM P2)
 {
+        struct extract_cb_arg *cb_arg = (struct extract_cb_arg *)(UserData);
         if (msg == UCM_PROCESSDATA) {
                 /*
                  * We do not need to handle the case that not all data is
                  * written after return from write() since the pipe is not
                  * opened using the O_NONBLOCK flag.
                  */
-                int fd = UserData ? UserData : STDOUT_FILENO;
+                int fd = cb_arg->arg ? (LPARAM)cb_arg->arg : STDOUT_FILENO;
                 if (write(fd, (void *)P1, P2) == -1) {
                         /*
                          * Do not treat EPIPE as an error. It is the normal
@@ -1595,6 +1617,10 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
         }
         if (msg == UCM_CHANGEVOLUME)
                 return access((char *)P1, F_OK);
+        if (msg == UCM_NEEDPASSWORDW) {
+                if (!get_password(cb_arg->arch, (wchar_t *)P1, P2))
+                        return -1;
+        }
 
         return 1;
 }
@@ -1603,8 +1629,7 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
  *****************************************************************************
  *
  ****************************************************************************/
-static int extract_rar(char *arch, const char *file, char *passwd, FILE *fp,
-                void *arg)
+static int extract_rar(char *arch, const char *file, FILE *fp, void *arg)
 {
         int ret = 0;
         struct RAROpenArchiveDataEx d;
@@ -1612,16 +1637,18 @@ static int extract_rar(char *arch, const char *file, char *passwd, FILE *fp,
         d.ArcName = arch;
         d.OpenMode = RAR_OM_EXTRACT;
 
+        struct extract_cb_arg cb_arg;
+        cb_arg.arch = arch; 
+        cb_arg.arg = arg; 
+
+        d.Callback = extract_callback;
+        d.UserData = (LPARAM)&cb_arg;
         struct RARHeaderData header;
         HANDLE hdl = fp ? RARInitArchiveEx(&d, fp) : RAROpenArchiveEx(&d);
         if (d.OpenResult)
                 goto extract_error;
 
-        if (passwd && strlen(passwd))
-                RARSetPassword(hdl, passwd);
-
         header.CmtBufSize = 0;
-        RARSetCallback(hdl, extract_callback, (LPARAM) (arg));
         while (1) {
                 if (RARReadHeader(hdl, &header))
                         break;
@@ -1643,35 +1670,9 @@ extract_error:
                 else
                         RARFreeArchive(hdl);
         }
+
         return ret;
 }
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-#ifdef USE_RAR_PASSWORD
-static char *get_password(const char *file, char *buf)
-{
-        if (file && !OPT_SET(OPT_KEY_NO_PASSWD)) {
-                size_t l = strlen(file);
-                char *F = alloca(l + 1);
-                strcpy(F, file);
-                strcpy(F + (l - 4), ".pwd");
-                FILE *fp = fopen(F, "r");
-                if (fp) {
-                        char FMT[8];
-                        sprintf(FMT, "%%%ds", MAXPASSWORD);
-                        NO_UNUSED_RESULT fscanf(fp, FMT, buf);
-                        fclose(fp);
-                        return buf;
-                }
-        }
-        return NULL;
-}
-#else
-#define get_password(a, b) (NULL)
-#endif
 
 /*!
  *****************************************************************************
@@ -1681,8 +1682,8 @@ static void set_rarstats(dir_elem_t *entry_p, RARArchiveListEx *alist_p,
                 int force_dir)
 {
         if (!force_dir) {
-                mode_t mode = GET_RAR_MODE(alist_p);
-                entry_p->stat.st_size = GET_RAR_SZ(alist_p);
+                mode_t mode = GET_RAR_MODE(&alist_p->hdr);
+                entry_p->stat.st_size = GET_RAR_SZ(&alist_p->hdr);
                 if (!S_ISDIR(mode) && !S_ISLNK(mode)) {
                         /* Force file to be treated as a 'regular file' */
                         mode = (mode & ~S_IFMT) | S_IFREG;
@@ -1761,7 +1762,7 @@ static void set_rarstats(dir_elem_t *entry_p, RARArchiveListEx *alist_p,
                 unsigned int as_uint_;
         };
 
-        union dos_time_t *dos_time = (union dos_time_t *)&alist_p->FileTime;
+        union dos_time_t *dos_time = (union dos_time_t *)&alist_p->hdr.FileTime;
 
         t.tm_sec = dos_time->second;
         t.tm_min = dos_time->minute;
@@ -1779,8 +1780,6 @@ static void set_rarstats(dir_elem_t *entry_p, RARArchiveListEx *alist_p,
  *****************************************************************************
  *
  ****************************************************************************/
-#define NEED_PASSWORD() \
-        ((d.Flags & MHD_PASSWORD) || (next->Flags & LHD_PASSWORD))
 #define DOS_TO_UNIX_PATH(p) \
         do {\
                 char *s = (p); \
@@ -1798,7 +1797,7 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
                 const dir_elem_t *entry_p, unsigned int mh_flags)
 {
         printd(3, "%llu byte RAR file %s found in archive %s\n",
-               GET_RAR_PACK_SZ(next), entry_p->name_p, arch);
+               GET_RAR_PACK_SZ(&next->hdr), entry_p->name_p, arch);
 
         int result = 1;
         RAROpenArchiveDataEx d2;
@@ -1812,7 +1811,7 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
         off_t msize = 0;
         int mflags = 0;
 
-        if (next->Method == FHD_STORING && 
+        if (next->hdr.Method == FHD_STORING && 
                         !(mh_flags & (MHD_PASSWORD | MHD_VOLUME))) {
                 struct stat st;
                 int fd = fileno(RARGetFileHandle(hdl));
@@ -1822,7 +1821,7 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
 #if defined ( HAVE_FMEMOPEN ) && defined ( HAVE_MMAP )
                 maddr = mmap(0, P_ALIGN_(st.st_size), PROT_READ, MAP_SHARED, fd, 0);
                 if (maddr != MAP_FAILED)
-                        fp = fmemopen(maddr + (next->Offset + next->HeadSize), GET_RAR_PACK_SZ(next), "r");
+                        fp = fmemopen(maddr + (next->Offset + next->HeadSize), GET_RAR_PACK_SZ(&next->hdr), "r");
 #else
                 fp = fopen(entry_p->rar_p, "r");
                 if (fp)
@@ -1832,17 +1831,17 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
                 mflags = 1;
         } else {
 #ifdef HAVE_FMEMOPEN
-                maddr = extract_to(next->FileName, GET_RAR_SZ(next), entry_p, E_TO_MEM);
+                maddr = extract_to(next->hdr.FileName, GET_RAR_SZ(&next->hdr), entry_p, E_TO_MEM);
                 if (maddr != MAP_FAILED)
-                        fp = fmemopen(maddr, GET_RAR_SZ(next), "r");
+                        fp = fmemopen(maddr, GET_RAR_SZ(&next->hdr), "r");
 #else
-                fp = extract_to(next->FileName, GET_RAR_SZ(next), entry_p, E_TO_TMP);
+                fp = extract_to(next->hdr.FileName, GET_RAR_SZ(&next->hdr), entry_p, E_TO_TMP);
                 if (fp == MAP_FAILED) {
                         fp = NULL;
                         printd(1, "Extract to tmpfile failed\n");
                 }
 #endif
-                msize = GET_RAR_SZ(next);
+                msize = GET_RAR_SZ(&next->hdr);
                 mflags = 2;
         }
 
@@ -1851,9 +1850,10 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
         if (!fp || d2.OpenResult || (d2.Flags & MHD_VOLUME))
                 goto file_error;
 
+        int dll_result;
         RARArchiveListEx LL;
         RARArchiveListEx *next2 = &LL;
-        if (!RARListArchiveEx(hdl2, next2, NULL))
+        if (!RARListArchiveEx(hdl2, next2, NULL, &dll_result))
                 goto file_error;
 
         char *tmp1 = strdup(entry_p->name_p);
@@ -1864,26 +1864,22 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
 
         while (next2) {
                 dir_elem_t *entry2_p;
+                DOS_TO_UNIX_PATH(next2->hdr.FileName);
 
-                if (next2->Flags & LHD_UNICODE)
-                        (void)wide_to_char(next2->FileName, next2->FileNameW,
-                                                sizeof(next2->FileName));
-                DOS_TO_UNIX_PATH(next2->FileName);
-
-                printd(3, "File inside archive is %s\n", next2->FileName);
+                printd(3, "File inside archive is %s\n", next2->hdr.FileName);
 
                 /* Skip compressed image files */
                 if (!OPT_SET(OPT_KEY_SHOW_COMP_IMG) &&
-                                next2->Method != FHD_STORING &&
-                                IS_IMG(next2->FileName)) {
+                                next2->hdr.Method != FHD_STORING &&
+                                IS_IMG(next2->hdr.FileName)) {
                         next2 = next2->next;
                         continue;
                 }
 
                 int display = 0;
                 char *rar_file;
-                ABS_MP(rar_file, rar_root, next2->FileName);
-                char *tmp2 = strdup(next2->FileName);
+                ABS_MP(rar_file, rar_root, next2->hdr.FileName);
+                char *tmp2 = strdup(next2->hdr.FileName);
                 char *rar_name = dirname(tmp2);
 
                 if (is_root_path) {
@@ -1908,7 +1904,7 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
                                                 entry2_p = filecache_alloc(mp);
                                                 entry2_p->name_p = strdup(mp);
                                                 entry2_p->rar_p = strdup(arch);
-                                                entry2_p->file_p = strdup(next->FileName);
+                                                entry2_p->file_p = strdup(next->hdr.FileName);
                                                 entry2_p->file2_p = strdup(rar_name);
                                                 entry2_p->flags.force_dir = 1;
                                                 entry2_p->flags.mmap = mflags;
@@ -1949,12 +1945,12 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
                 entry2_p = filecache_alloc(rar_file);
                 entry2_p->name_p = strdup(rar_file);
                 entry2_p->rar_p = strdup(arch);
-                entry2_p->file_p = strdup(next->FileName);
-                entry2_p->file2_p = strdup(next2->FileName);
+                entry2_p->file_p = strdup(next->hdr.FileName);
+                entry2_p->file2_p = strdup(next2->hdr.FileName);
                 entry2_p->offset = (next->Offset + next->HeadSize);
                 entry2_p->flags.mmap = mflags;
                 entry2_p->msize = msize;
-                entry2_p->method = next2->Method;
+                entry2_p->method = next2->hdr.Method;
                 entry2_p->flags.multipart = 0;
                 entry2_p->flags.raw = 0;        /* no raw support yet */
                 entry2_p->flags.save_eof = 0;
@@ -1964,7 +1960,7 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
 cache_hit:
 
                 if (display && buffer) {
-                        char *safe_path = strdup(next2->FileName);
+                        char *safe_path = strdup(next2->hdr.FileName);
                         *buffer = dir_entry_add_hash(
                                         *buffer, basename(safe_path),
                                         &entry2_p->stat, entry2_p->dir_hash,
@@ -1998,8 +1994,23 @@ file_error:
  *****************************************************************************
  *
  ****************************************************************************/
+static int CALLBACK list_callback(UINT msg,LPARAM UserData,LPARAM P1,LPARAM P2)
+{
+        if (msg == UCM_CHANGEVOLUME || msg == UCM_CHANGEVOLUMEW)
+                return -1; /* Do not allow volume switching */
+        if (msg == UCM_NEEDPASSWORDW) {
+                if (!get_password((char *)UserData, (wchar_t *)P1, P2))
+                        return -1;
+        }
+        return 1; 
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 static int listrar(const char *path, struct dir_entry_list **buffer,
-                const char *arch, const char *Password)
+                const char *arch)
 {
         ENTER_("%s   arch=%s", path, arch);
 
@@ -2008,6 +2019,8 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.ArcName = (char *)arch;       /* Horrible cast! But hey... it is the API! */
         d.OpenMode = RAR_OM_LIST;
+        d.Callback = list_callback;
+        d.UserData = (LPARAM)arch;
         HANDLE hdl = RAROpenArchiveEx(&d);
 
         /* Check for fault */
@@ -2016,14 +2029,16 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 return d.OpenResult;
         }
 
-        if (Password)
-                RARSetPassword(hdl, (char *)Password);
-
+        int n_files;
+        int dll_result;
         off_t FileDataEnd;
         RARArchiveListEx L;
         RARArchiveListEx *next = &L;
-        if (!RARListArchiveEx(hdl, next, &FileDataEnd)) {
+        if (!(n_files = RARListArchiveEx(hdl, next, &FileDataEnd, &dll_result))) {
+                RARCloseArchive(hdl);
                 pthread_mutex_unlock(&file_access_mutex);
+                if (dll_result == ERAR_EOPEN || dll_result == ERAR_END_ARCHIVE)
+                        return 0;
                 return 1;
         }
 
@@ -2036,21 +2051,19 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         int is_root_path = (!strcmp(rar_root, path) || !CHRCMP(path, '/'));
 
         while (next) {
-                if (next->Flags & LHD_UNICODE)
-                        (void)wide_to_char(next->FileName, next->FileNameW,
-                                                sizeof(next->FileName));
-                DOS_TO_UNIX_PATH(next->FileName);
+                DOS_TO_UNIX_PATH(next->hdr.FileName);
 
                 /* Skip compressed image files */
                 if (!OPT_SET(OPT_KEY_SHOW_COMP_IMG) &&
-                                next->Method != FHD_STORING &&
-                                IS_IMG(next->FileName)) {
+                                next->hdr.Method != FHD_STORING &&
+                                IS_IMG(next->hdr.FileName)) {
                         next = next->next;
+                        --n_files;
                         continue;
                 }
 
                 int display = 0;
-                char *tmp2 = strdup(next->FileName);
+                char *tmp2 = strdup(next->hdr.FileName);
                 char *rar_name = strdup(dirname(tmp2));
                 free(tmp2);
                 tmp2 = rar_name;
@@ -2077,10 +2090,6 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                                 entry_p->name_p = strdup(mp);
                                                 entry_p->rar_p = strdup(arch);
                                                 entry_p->file_p = strdup(rar_name);
-                                                assert(!entry_p->password_p && "Unexpected handle");
-                                                entry_p->password_p = (NEED_PASSWORD()
-                                                        ? strdup(Password)
-                                                        : entry_p->password_p);
                                                 entry_p->flags.force_dir = 1;
 
                                                 /* Check if part of a volume */
@@ -2116,14 +2125,14 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 char *mp;
                 if (!display) {
                         ABS_MP(mp, (*rar_root ? rar_root : "/"),
-                                        next->FileName);
+                                        next->hdr.FileName);
                 } else {
-                        char *rar_dir = strdup(next->FileName);
+                        char *rar_dir = strdup(next->hdr.FileName);
                         ABS_MP(mp, path, basename(rar_dir));
                         free(rar_dir);
                 }
 
-                if (!IS_RAR_DIR(next) && OPT_SET(OPT_KEY_FAKE_ISO)) {
+                if (!IS_RAR_DIR(&next->hdr) && OPT_SET(OPT_KEY_FAKE_ISO)) {
                         int l = OPT_CNT(OPT_KEY_FAKE_ISO)
                                         ? optdb_find(OPT_KEY_FAKE_ISO, mp)
                                         : optdb_find(OPT_KEY_IMG_TYPE, mp);
@@ -2150,18 +2159,14 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 entry_p = filecache_alloc(mp);
                 entry_p->name_p = strdup(mp);
                 entry_p->rar_p = strdup(arch);
-                entry_p->file_p = strdup(next->FileName);
-                assert(!entry_p->password_p && "Unexpected handle");
-                entry_p->password_p = (NEED_PASSWORD()
-                        ? strdup(Password)
-                        : entry_p->password_p);
+                entry_p->file_p = strdup(next->hdr.FileName);
 
                 /* Check for .rar file inside archive */
                 if (!OPT_SET(OPT_KEY_FLAT_ONLY) && IS_RAR(entry_p->name_p)
-                                        && !IS_RAR_DIR(next)) {
+                                        && !IS_RAR_DIR(&next->hdr)) {
                         /* Only process files split across multiple volumes once */
                         int inval = (d.Flags & MHD_VOLUME) && 
-                                        (next->Flags & LHD_SPLIT_BEFORE);
+                                        (next->hdr.Flags & LHD_SPLIT_BEFORE);
                         if (inval || !listrar_rar(path, buffer, arch, hdl, next, entry_p, d.Flags)) {
                                 /* We are done with this rar file (.rar will never display!) */
                                 filecache_invalidate(mp);
@@ -2170,24 +2175,25 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         }
                 }
 
-                if (next->Method == FHD_STORING && !NEED_PASSWORD() &&
-                                 !IS_RAR_DIR(next)) {
+                if (next->hdr.Method == FHD_STORING && 
+                                !(next->hdr.Flags & LHD_PASSWORD) &&
+                                !IS_RAR_DIR(&next->hdr)) {
                         entry_p->flags.raw = 1;
                         if ((d.Flags & MHD_VOLUME) &&   /* volume ? */
-                                        ((next->Flags & (LHD_SPLIT_BEFORE | LHD_SPLIT_AFTER)))) {
+                                        ((next->hdr.Flags & (LHD_SPLIT_BEFORE | LHD_SPLIT_AFTER)))) {
                                 int len, pos;
 
                                 entry_p->flags.multipart = 1;
-                                entry_p->flags.image = IS_IMG(next->FileName);
+                                entry_p->flags.image = IS_IMG(next->hdr.FileName);
                                 entry_p->vtype = (d.Flags & MHD_NEWNUMBERING) ? 1 : 0;
                                 entry_p->vno_base = get_vformat(arch, entry_p->vtype, &len, &pos);
 
                                 if (len > 0) {
                                         entry_p->vlen = len;
                                         entry_p->vpos = pos;
-                                        if (!IS_RAR_DIR(next)) {
+                                        if (!IS_RAR_DIR(&next->hdr)) {
                                                 entry_p->vsize_real = FileDataEnd;
-                                                entry_p->vsize_first = GET_RAR_PACK_SZ(next);
+                                                entry_p->vsize_first = GET_RAR_PACK_SZ(&next->hdr);
                                                 entry_p->vsize_next = FileDataEnd - (
                                                                 RARGetMarkHeaderSize(hdl) +
                                                                 RARGetMainHeaderSize(hdl) + next->HeadSize);
@@ -2196,7 +2202,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                                  * 1-byte RAR5.x (and later?) volume number in 
                                                  * next main archive header.
                                                  */
-                                                if (next->UnpVer >= 50) {
+                                                if (next->hdr.UnpVer >= 50) {
                                                         if (entry_p->vno_base == 1 || entry_p->vno_base == 128)
                                                                 entry_p->vsize_next -= 1;
                                                         entry_p->flags.vno_in_header = 1;
@@ -2213,12 +2219,11 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         }
                 } else {        /* Folder or Compressed and/or Encrypted */
                         entry_p->flags.raw = 0;
-                        if (!IS_RAR_DIR(next)) {
-                                if (!NEED_PASSWORD())
-                                        entry_p->flags.save_eof =
-                                                OPT_SET(OPT_KEY_SAVE_EOF) ? 1 : 0;
-                                 else
-                                        entry_p->flags.save_eof = 0;
+                        if (!IS_RAR_DIR(&next->hdr)) {
+                                entry_p->flags.save_eof = 
+                                        OPT_SET(OPT_KEY_SAVE_EOF) ? 1 : 0;
+                                if (next->hdr.Flags & LHD_PASSWORD)
+                                        entry_p->flags.encrypted = 1;
                         }
                         /* Check if part of a volume */
                         if (d.Flags & MHD_VOLUME) {
@@ -2234,7 +2239,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                 entry_p->flags.multipart = 0;
                         }
                 }
-                entry_p->method = next->Method;
+                entry_p->method = next->hdr.Method;
                 set_rarstats(entry_p, next, 0);
 
 cache_hit:
@@ -2256,10 +2261,10 @@ cache_hit:
         free(tmp1);
         pthread_mutex_unlock(&file_access_mutex);
 
-        return 0;
+        /* If no files could be processed, throw an error here */
+        return !(n_files > 0);
 }
 
-#undef NEED_PASSWORD
 #undef DOS_TO_UNIX_PATH
 #undef CHRCMP
 
@@ -2327,16 +2332,12 @@ static void syncdir_scan(const char *dir, const char *root)
 {
         struct dirent **namelist;
         unsigned int f;
-        int (*filter[]) (SCANDIR_ARG3) = {f0, f1, f2};
-#ifdef USE_RAR_PASSWORD
-        char tmpbuf[MAXPASSWORD];
-#endif
-        const char *password = NULL;
+        int (*filter[]) (SCANDIR_ARG3) = {f1, f2}; /* f0 not needed */
 
         ENTER_("%s", dir);
 
-        /* skip first filter; not needed */
-        for (f = 1; f < (sizeof(filter) / sizeof(filter[0])); f++) {
+        for (f = 0; f < (sizeof(filter) / sizeof(filter[0])); f++) {
+                int vno = 0;
                 int i = 0;
                 int n = scandir(root, &namelist, filter[f], alphasort);
                 if (n < 0) {
@@ -2344,15 +2345,26 @@ static void syncdir_scan(const char *dir, const char *root)
                         return;
                 }
                 while (i < n) {
-                        int vno = get_vformat(namelist[i]->d_name, !(f - 1),
+                        if (f == 1) {
+                                /* We know this is .rNN format so this should
+                                 * be a bit faster than calling get_vformat().
+                                 */
+                                const size_t SLEN = strlen(namelist[i]->d_name);
+                                if (namelist[i]->d_name[SLEN - 1] == '0' &&
+                                    namelist[i]->d_name[SLEN - 2] == '0') {
+                                        vno = 2;
+                                } else {
+                                        ++vno;
+                                } 
+                        } else {
+                                vno = get_vformat(namelist[i]->d_name, 1, /* new style */
                                                         NULL, NULL);
+                        }
                         if (!OPT_INT(OPT_KEY_SEEK_LENGTH, 0) ||
                                         vno <= OPT_INT(OPT_KEY_SEEK_LENGTH, 0)) {
                                 char *arch;
                                 ABS_MP(arch, root, namelist[i]->d_name);
-                                if (vno == 1 || (vno == 2 && f == 2)) /* "first" file */
-                                        password = get_password(arch, tmpbuf);
-                                (void)listrar(dir, NULL, arch, password);
+                                (void)listrar(dir, NULL, arch);
                         }
                         free(namelist[i]);
                         ++i;
@@ -2394,14 +2406,11 @@ static void readdir_scan(const char *dir, const char *root,
         struct dirent **namelist;
         unsigned int f;
         int (*filter[]) (SCANDIR_ARG3) = {f0, f1, f2};
-#ifdef USE_RAR_PASSWORD
-        char tmpbuf[MAXPASSWORD];
-#endif
-        const char *password = NULL;
 
         ENTER_("%s", dir);
 
         for (f = 0; f < (sizeof(filter) / sizeof(filter[0])); f++) {
+                int vno = 0;
                 int i = 0;
                 int n = scandir(root, &namelist, filter[f], alphasort);
                 if (n < 0) {
@@ -2409,7 +2418,7 @@ static void readdir_scan(const char *dir, const char *root,
                         continue;
                 }
                 while (i < n) {
-                        if (!f) {
+                        if (f == 0) {
                                 char *tmp = namelist[i]->d_name;
                                 char *tmp2 = NULL;
 
@@ -2431,24 +2440,37 @@ static void readdir_scan(const char *dir, const char *root,
 #endif
                                         tmp2 = strdup(tmp);
                                         if (convert_fake_iso(tmp2))
-                                                *next = dir_entry_add(*next, tmp2, NULL, DIR_E_NRM);
+                                                *next = dir_entry_add(*next, tmp,
+                                                               NULL, DIR_E_NRM);
                                 }
                                 *next = dir_entry_add(*next, tmp, NULL, DIR_E_NRM);
                                 if (tmp2 != NULL)
                                         free(tmp2);
                                 goto next_entry;
                         }
-
-                        int vno = get_vformat(namelist[i]->d_name, !(f - 1),
+                        if (f == 2) {
+                                /* We know this is .rNN format so this should
+                                 * be a bit faster than calling get_vformat().
+                                 */
+                                const size_t SLEN = strlen(namelist[i]->d_name);
+                                if (namelist[i]->d_name[SLEN - 1] == '0' &&
+                                    namelist[i]->d_name[SLEN - 2] == '0') {
+                                        vno = 2;
+                                } else {
+                                        ++vno;
+                                }
+                        } else {
+                                vno = get_vformat(namelist[i]->d_name, 1, /* new style */
                                                         NULL, NULL);
+                        }
                         if (!OPT_INT(OPT_KEY_SEEK_LENGTH, 0) ||
                                         vno <= OPT_INT(OPT_KEY_SEEK_LENGTH, 0)) {
                                 char *arch;
                                 ABS_MP(arch, root, namelist[i]->d_name);
-                                if (vno == 1 || (vno == 2 && f == 2))   /* "first" file */
-                                        password = get_password(arch, tmpbuf);
-                                if (listrar(dir, next, arch, password))
-                                        *next = dir_entry_add(*next, namelist[i]->d_name, NULL, DIR_E_NRM);
+                                if (listrar(dir, next, arch))
+                                        *next = dir_entry_add(*next, 
+                                                       namelist[i]->d_name, 
+                                                       NULL, DIR_E_NRM);
                         }
 
 next_entry:
@@ -2487,18 +2509,11 @@ static void syncrar(const char *path)
 {
         ENTER_("%s", path);
 
-#ifdef USE_RAR_PASSWORD
-        char tmpbuf[MAXPASSWORD];
-#endif
-        const char *password = NULL;
-
         int c = 0;
         int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
         struct dir_entry_list *arch_next = arch_list_root.next;
         while (arch_next) {
-                if (!c++)
-                        password = get_password(arch_next->entry.name, tmpbuf);
-                (void)listrar(path, NULL, arch_next->entry.name, password);
+                (void)listrar(path, NULL, arch_next->entry.name);
                 if (c == c_end)
                         break;
                 arch_next = arch_next->next;
@@ -2654,10 +2669,6 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
         (void)offset;           /* touch */
         (void)fi;               /* touch */
 
-#ifdef USE_RAR_PASSWORD
-        char tmpbuf[MAXPASSWORD];
-#endif
-        const char *password = NULL;
         struct dir_entry_list dir_list;      /* internal list root */
         struct dir_entry_list *next = &dir_list;
         dir_list_open(next);
@@ -2685,8 +2696,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 if (multipart) {
                         int vol_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
                         printd(3, "Search for local directory in %s\n", tmp);
-                        password = get_password(tmp, tmpbuf);
-                        while (!listrar(path, &next, tmp, password)) {
+                        while (!listrar(path, &next, tmp)) {
                                 ++vol;
                                 if (vol_end && vol_end < vol)
                                         goto fill_buff;
@@ -2696,8 +2706,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 } else { 
                         if (tmp) {
                                 printd(3, "Search for local directory in %s\n", tmp);
-                                password = get_password(tmp, tmpbuf);
-                                if (!listrar(path, &next, tmp, password)) {
+                                if (!listrar(path, &next, tmp)) {
                                         free(tmp);
                                         goto fill_buff;
                                 }
@@ -2745,10 +2754,6 @@ static int rar2_readdir2(const char *path, void *buffer,
         (void)offset;           /* touch */
         (void)fi;               /* touch */
 
-#ifdef USE_RAR_PASSWORD
-        char tmpbuf[MAXPASSWORD];
-#endif
-        const char *password = NULL;
         struct dir_entry_list dir_list;      /* internal list root */
         struct dir_entry_list *next = &dir_list;
         dir_list_open(next);
@@ -2757,9 +2762,7 @@ static int rar2_readdir2(const char *path, void *buffer,
         int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
         struct dir_entry_list *arch_next = arch_list_root.next;
         while (arch_next) {
-                if (!c++)
-                        password = get_password(arch_next->entry.name, tmpbuf);
-                (void)listrar(path, &next, arch_next->entry.name, password);
+                (void)listrar(path, &next, arch_next->entry.name);
                 if (c == c_end)
                         break;
                 arch_next = arch_next->next;
@@ -3000,6 +3003,8 @@ static int extract_rar_file_info(dir_elem_t *entry_p, struct RARWcb *wcb)
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.ArcName = entry_p->rar_p;
         d.OpenMode = RAR_OM_LIST;
+        d.Callback = list_callback;
+        d.UserData = (LPARAM)entry_p->rar_p;
         HANDLE hdl = RAROpenArchiveEx(&d);
 
         /* Check for fault */
@@ -3046,18 +3051,15 @@ static int extract_rar_file_info(dir_elem_t *entry_p, struct RARWcb *wcb)
                         memset(&d2, 0, sizeof(RAROpenArchiveDataEx));
                         d2.ArcName = NULL;
                         d2.OpenMode = RAR_OM_LIST;
+                        d2.Callback = list_callback;
+                        d2.UserData = (LPARAM)entry_p->rar_p;
 
                         hdl2 = RARInitArchiveEx(&d2, fp);
                         if (d2.OpenResult || (d2.Flags & MHD_VOLUME))
                                 goto file_error;
-
-                        if (entry_p->password_p)
-                                RARSetPassword(hdl2, entry_p->password_p);
                         RARGetFileInfo(hdl2, entry_p->file2_p, wcb);
                 }
         } else {
-                if (entry_p->password_p)
-                        RARSetPassword(hdl, entry_p->password_p);
                 RARGetFileInfo(hdl, entry_p->file_p, wcb);
         }
 
@@ -3087,7 +3089,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
 {
         ENTER_("%s", path);
 
-        printd(3, "(%05d) %-8s%s [0x%llu][called from %05d]\n", getpid(),
+        printd(3, "(%05d) %-8s%s [0x%" PRIu64 "][called from %05d]\n", getpid(),
                         "OPEN", path, fi->fh, fuse_get_context()->pid);
         dir_elem_t *entry_p;
         char *root;
@@ -3234,7 +3236,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                                          */
                                                         op->volHdl[j].pos = VOL_REAL_SZ - 
                                                                         (j ? VOL_NEXT_SZ : VOL_FIRST_SZ);
-                                                        printd(3, "SEEK src_off = %llu\n", op->volHdl[j].pos);
+                                                        printd(3, "SEEK src_off = %" PRIu64 "\n", op->volHdl[j].pos);
                                                         fseeko(fp_, op->volHdl[j].pos, SEEK_SET);
                                                         RARNextVolumeName(tmp, !entry_p->vtype);
                                                         ++j;
@@ -3352,10 +3354,8 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                         } else {
                                 /* Was the file removed ? */
                                 if (OPT_SET(OPT_KEY_SAVE_EOF) && !entry_p->flags.save_eof) {
-                                        if (!entry_p->password_p) {
-                                                entry_p->flags.save_eof = 1;
-                                                entry_p->flags.avi_tested = 0;
-                                        }
+                                        entry_p->flags.save_eof = 1;
+                                        entry_p->flags.avi_tested = 0;
                                 }
                         }
                         op->mmap_addr = mmap_addr;
@@ -3511,6 +3511,10 @@ static int rar2_readlink(const char *path, char *buf, size_t buflen)
         ENTER_("%s", path);
 
         dir_elem_t *entry_p;
+
+        if (!buflen)
+                return -EINVAL;
+
         entry_p = path_lookup(path, NULL);
         if (entry_p && entry_p != LOCAL_FS_ENTRY) {
                 if (entry_p->link_target_p)
@@ -3521,12 +3525,12 @@ static int rar2_readlink(const char *path, char *buf, size_t buflen)
                 char *tmp;
                 ABS_ROOT(tmp, path);
                 buflen = readlink(tmp, buf, buflen - 1);
+                if ((ssize_t)buflen == -1) /* readlink(2) returns ssize_t */
+                        return -errno;
         }
-        if ((ssize_t)buflen >= 0) {
-                buf[buflen] = 0;
-                return 0;
-        }
-        return -errno;
+
+        buf[buflen] = 0;
+        return 0;
 }
 
 /*!
@@ -3664,7 +3668,6 @@ static int rar2_read(const char *path, char *buffer, size_t size, off_t offset,
 {
         int res;
         struct io_handle *io;
-
         assert(FH_ISSET(fi->fh) && "bad I/O handle");
 
         io = FH_TOIO(fi->fh);
@@ -3674,7 +3677,7 @@ static int rar2_read(const char *path, char *buffer, size_t size, off_t offset,
         int direct_io = fi->direct_io;
 #endif
 
-        ENTER_("%s   size=%zu, offset=%llu, fh=%llu", path, size, offset, fi->fh);
+        ENTER_("%s   size=%zu, offset=%" PRIu64 ", fh=%" PRIu64, path, size, offset, fi->fh);
 
         if (io->type == IO_TYPE_NRM) {
                 char *root;
@@ -4533,17 +4536,13 @@ static void print_help()
         printf("    --exclude=F1[;F2...]    exclude file filter\n");
         printf("    --seek-length=n\t    set number of volume files that are traversed in search for headers [0=All]\n");
         printf("    --flat-only\t\t    only expand first level of nested RAR archives\n");
+#ifndef USE_STATIC_IOB_
         printf("    --iob-size=n\t    I/O buffer size in 'power of 2' MiB (1,2,4,8, etc.) [4]\n");
         printf("    --hist-size=n\t    I/O buffer history size as a percentage (0-75) of total buffer size [50]\n");
+#endif
         printf("    --save-eof\t\t    force creation of .r2i files (end-of-file chunk)\n");
-#ifdef ENABLE_OBSOLETE_ARGS
-        printf("    --unrar-path=PATH\t    path to external unrar binary (overide libunrar)\n");
-        printf("    --no-password\t    disable password file support\n");
-#endif
         printf("    --no-lib-check\t    disable validation of library version(s)\n");
-#ifndef USE_STATIC_IOB_
         printf("    --no-expand-cbr\t    do not expand comic book RAR archives\n");
-#endif
 #if defined ( HAVE_SCHED_SETAFFINITY ) && defined ( HAVE_CPU_SET_T )
         printf("    --no-smp\t\t    disable SMP support (bind to CPU #0)\n");
 #endif
@@ -4569,10 +4568,6 @@ static struct option longopts[] = {
         {"fake-iso",    optional_argument, NULL, OPT_ADDR(OPT_KEY_FAKE_ISO)},
         {"exclude",     required_argument, NULL, OPT_ADDR(OPT_KEY_EXCLUDE)},
         {"seek-length", required_argument, NULL, OPT_ADDR(OPT_KEY_SEEK_LENGTH)},
-#ifdef ENABLE_OBSOLETE_ARGS
-        {"unrar-path",  required_argument, NULL, OPT_ADDR(OPT_KEY_UNRAR_PATH)},
-        {"no-password",       no_argument, NULL, OPT_ADDR(OPT_KEY_NO_PASSWD)},
-#endif
         /* 
          * --seek-depth=n is obsolete and replaced by --flat-only
          * Provided here only for backwards compatibility. 
