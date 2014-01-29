@@ -1,5 +1,14 @@
 rar2fs ChangeLog file.
 
+2014-01-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Released 1.19.2
+
+        * [rar2fs #22]
+
+          The fix for this issue (released in 1.19.1) did not
+          work properly for RAR5 archives.
+
 2014-01-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.19.1

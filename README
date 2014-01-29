@@ -12,7 +12,7 @@ Encrypted archives are supported but since rar2fs is completely
 non-interactive it requires the archive password to be stored on the local
 file system in a file in plaintext format. This of course is a major security
 limitation in itself. If you really need to use this feature, use it wisely.
-The author(s) of rar2fs can and will not be held responsible for encrypted
+The author(s) of rar2fs will not be held responsible for encrypted
 information being exposed due to this limitation. If security is really an
 issue some encryption on file system level should be considered instead.
 A FUSE based encryption file system, such as encfs, has proven to work very

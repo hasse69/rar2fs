@@ -113,14 +113,18 @@ HANDLE PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *r, FileHandle fh)
     Data->Cmd.UserData=r->UserData;
     ((FileExt*)&Data->Arc)->SetHandle(fh);
     ((FileExt*)&Data->Arc)->SkipHandle();
+#if RARVER_MAJOR > 4
     int64 SavePos = Data->Arc.Tell();   // IsArchive() might destroy file position!
+#endif
     if (!Data->Arc.IsArchive(false))
     {
       r->OpenResult=Data->Cmd.DllError!=0 ? Data->Cmd.DllError:ERAR_BAD_ARCHIVE;
       delete Data;
       return(NULL);
     }
-    Data->Arc.Seek(SavePos,SEEK_SET);  // Restore file position!
+#if RARVER_MAJOR > 4
+    Data->Arc.RawSeek(SavePos,SEEK_SET);  // Restore file position!
+#endif
 #if RARVER_MAJOR < 5
     r->Flags=Data->Arc.MainHead.Flags;
 
