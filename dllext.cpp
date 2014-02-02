@@ -271,6 +271,7 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
 #endif
 
       N->LinkTargetFlags = 0;
+#if RARVER_MAJOR < 5
       if (N->hdr.HostOS==HOST_UNIX && (N->hdr.FileAttr & 0xF000)==0xA000)
       {
         if (N->hdr.UnpVer < 50)
@@ -279,19 +280,25 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
           Arc.Read(N->LinkTarget,DataSize);
           N->LinkTarget[DataSize]=0;
         }
-#if RARVER_MAJOR > 4
-        else
-        {
-          // Sanity check only that 'RedirType' match 'FileAttr'
-          if (Arc.FileHead.RedirType == FSREDIR_UNIXSYMLINK)
-          {
-            wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
-            N->LinkTargetFlags |= LHD_UNICODE; // Make sure UNICODE is set
-          }
-        }
-#endif
       }
-
+#else
+      if (Arc.FileHead.RedirType != FSREDIR_NONE)
+      {
+        // Sanity check only that 'RedirType' match 'FileAttr'
+        if (Arc.FileHead.RedirType == FSREDIR_UNIXSYMLINK &&
+          (N->hdr.FileAttr & 0xF000)==0xA000)
+        {
+            wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
+            N->LinkTargetFlags |= LINK_T_UNICODE; // Make sure UNICODE is set
+        }
+        else if (Arc.FileHead.RedirType == FSREDIR_FILECOPY)
+        {
+            wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
+            N->LinkTargetFlags |= LINK_T_FILECOPY;
+        }
+      }
+#endif
+      
       if (FileDataEnd)
         *FileDataEnd = Arc.NextBlockPos;
 

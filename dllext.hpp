@@ -48,6 +48,9 @@
 #define FileHandle HANDLE;
 #endif
 
+#define  LINK_T_UNICODE     0x00000001U
+#define  LINK_T_FILECOPY    0x00000002U
+
 #ifndef __cplusplus
 /* These are defined here since headers.hpp can not be included from non C++ code */
 
@@ -127,25 +130,6 @@ typedef struct RARArchiveListEx RARArchiveListEx;
 
 #ifdef __cplusplus
 }
-#endif
-
-#if 0
-struct RARArchiveList
-{
-  char         FileName[260];
-  unsigned int Flags;
-  unsigned int PackSize;
-  unsigned int UnpSize;
-  unsigned int HostOS;
-  unsigned int FileCRC;
-  unsigned int FileTime;
-  unsigned int UnpVer;
-  unsigned int Method;
-  unsigned int FileAttr;
-  unsigned int HeadSize;
-  off_t        Offset;
-  RARArchiveList* next;
-};
 #endif
 
 struct RARArchiveListEx

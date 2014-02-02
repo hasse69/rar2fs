@@ -1025,7 +1025,6 @@ static int lread_rar(char *buf, size_t size, off_t offset,
         }
         if (!size)
                 goto out;
-
         /* Check for exception case */
         if (offset != op->pos) {
 check_idx:
@@ -1689,7 +1688,7 @@ static void set_rarstats(dir_elem_t *entry_p, RARArchiveListEx *alist_p,
                         mode = (mode & ~S_IFMT) | S_IFREG;
                 }
                 if (S_ISLNK(mode)) {
-                        if (alist_p->LinkTargetFlags & LHD_UNICODE) {
+                        if (alist_p->LinkTargetFlags & LINK_T_UNICODE) {
                                 char *tmp = malloc(sizeof(alist_p->LinkTarget));
                                 if (tmp) {
                                         size_t len = wide_to_char(tmp, 
@@ -1787,6 +1786,62 @@ static void set_rarstats(dir_elem_t *entry_p, RARArchiveListEx *alist_p,
                         if (*s == '\\') *s = '/'; \
         } while(0)
 #define CHRCMP(s, c) (!(s[0] == (c) && s[1] == '\0'))
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static dir_elem_t *lookup_filecopy(const char *path, RARArchiveListEx *next,
+                const char *rar_root, int display)
+
+{
+        dir_elem_t *e_p = NULL;
+        char *tmp = malloc(sizeof(next->LinkTarget));
+        if (tmp) {
+                if (wide_to_char(tmp, next->LinkTargetW,
+                                        sizeof(next->LinkTarget)) != (size_t)-1) {
+                        DOS_TO_UNIX_PATH(tmp);
+                        char *mp2;
+                        if (!display) {
+                                ABS_MP(mp2, (*rar_root ? rar_root : "/"), tmp);
+                        } else {
+                                char *rar_dir = strdup(tmp);
+                                ABS_MP(mp2, path, basename(tmp));
+                                free(rar_dir);
+                        }
+                        e_p = filecache_get(mp2);
+                }
+                free(tmp);
+        }
+        return e_p;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static void resolve_filecopy(RARArchiveListEx *next, RARArchiveListEx *root)
+
+{
+        char *tmp = malloc(sizeof(next->LinkTarget));
+        if (tmp) {
+                if (wide_to_char(tmp, next->LinkTargetW,
+                                        sizeof(next->LinkTarget)) != (size_t)-1) {
+                        DOS_TO_UNIX_PATH(tmp);
+                        RARArchiveListEx *next2 = root;
+                        while (next2) {
+                                if (!strcmp(next2->hdr.FileName, tmp)) {
+                                        memcpy(&next->hdr, &next2->hdr, sizeof(struct RARHeaderDataEx));
+                                        next->HeadSize = next2->HeadSize;
+                                        next->Offset = next2->Offset;
+                                        break;
+                                }
+                                next2 = next2->next;
+                        }
+                }
+                free(tmp);
+        }
+}
 
 /*!
  *****************************************************************************
@@ -1944,8 +1999,18 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
                 printd(3, "Adding %s to cache\n", rar_file);
                 entry2_p = filecache_alloc(rar_file);
                 entry2_p->name_p = strdup(rar_file);
+
+                if (next2->LinkTargetFlags & LINK_T_FILECOPY) {
+                        dir_elem_t *e_p;
+                        e_p = lookup_filecopy(path, next2, rar_root, 0);
+                        if (e_p) {
+                                filecache_copy(e_p, entry2_p);
+                                /* We are done here! */
+                                goto cache_hit;
+                        }
+                }
                 entry2_p->rar_p = strdup(arch);
-                entry2_p->file_p = strdup(next->hdr.FileName);
+                entry2_p->file_p = strdup(next->hdr.FileName); 
                 entry2_p->file2_p = strdup(next2->hdr.FileName);
                 entry2_p->offset = (next->Offset + next->HeadSize);
                 entry2_p->flags.mmap = mflags;
@@ -1954,7 +2019,6 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
                 entry2_p->flags.multipart = 0;
                 entry2_p->flags.raw = 0;        /* no raw support yet */
                 entry2_p->flags.save_eof = 0;
-                entry2_p->flags.direct_io = 1;
                 set_rarstats(entry2_p, next2, 0);
 
 cache_hit:
@@ -2157,6 +2221,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 /* Allocate a cache entry for this file */
                 printd(3, "Adding %s to cache\n", mp);
                 entry_p = filecache_alloc(mp);
+
                 entry_p->name_p = strdup(mp);
                 entry_p->rar_p = strdup(arch);
                 entry_p->file_p = strdup(next->hdr.FileName);
@@ -2167,11 +2232,22 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         /* Only process files split across multiple volumes once */
                         int inval = (d.Flags & MHD_VOLUME) && 
                                         (next->hdr.Flags & LHD_SPLIT_BEFORE);
+                        if (!inval && next->LinkTargetFlags & LINK_T_FILECOPY)
+                                resolve_filecopy(next, &L);
                         if (inval || !listrar_rar(path, buffer, arch, hdl, next, entry_p, d.Flags)) {
                                 /* We are done with this rar file (.rar will never display!) */
                                 filecache_invalidate(mp);
                                 next = next->next;
                                 continue;
+                        }
+                }
+
+                if (next->LinkTargetFlags & LINK_T_FILECOPY) {
+                        dir_elem_t *e_p; 
+                        e_p = lookup_filecopy(path, next, rar_root, display);
+                        if (e_p) {
+                                filecache_copy(e_p, entry_p);
+                                goto cache_hit;
                         }
                 }
 
@@ -2514,7 +2590,7 @@ static void syncrar(const char *path)
         struct dir_entry_list *arch_next = arch_list_root.next;
         while (arch_next) {
                 (void)listrar(path, NULL, arch_next->entry.name);
-                if (c == c_end)
+                if (c_end && ++c == c_end)
                         break;
                 arch_next = arch_next->next;
         }
@@ -2763,7 +2839,7 @@ static int rar2_readdir2(const char *path, void *buffer,
         struct dir_entry_list *arch_next = arch_list_root.next;
         while (arch_next) {
                 (void)listrar(path, &next, arch_next->entry.name);
-                if (c == c_end)
+                if (c_end && ++c == c_end)
                         break;
                 arch_next = arch_next->next;
         }
@@ -3614,7 +3690,6 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
 #ifdef DEBUG_READ
                                 fclose(op->dbg_fp);
 #endif
-
                                 if (op->entry_p->flags.mmap) {
                                         fclose(op->mmap_fp);
                                         if (op->mmap_addr != MAP_FAILED) {

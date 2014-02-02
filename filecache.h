@@ -128,6 +128,9 @@ dir_elem_t *
 filecache_clone(const dir_elem_t *src);
 
 void
+filecache_copy(const dir_elem_t *src, dir_elem_t *dest);
+
+void
 filecache_freeclone(dir_elem_t *dest);
 
 void

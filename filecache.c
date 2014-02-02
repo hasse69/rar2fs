@@ -204,6 +204,55 @@ dir_elem_t *filecache_clone(const dir_elem_t *src)
  *****************************************************************************
  *
  ****************************************************************************/
+#define CP_ENTRY_F(f) dest->f = src->f
+void filecache_copy(const dir_elem_t *src, dir_elem_t *dest)
+{
+        if (dest != NULL && src != NULL) {
+                if (dest->rar_p) 
+                        free(dest->rar_p); 
+                if (src->rar_p)
+                        dest->rar_p = strdup(src->rar_p);
+                else
+                        dest->rar_p = NULL;
+                if (dest->file_p)
+                        free(dest->file_p); 
+                if (src->file_p)
+                        dest->file_p = strdup(src->file_p);
+                else
+                        dest->file_p = NULL;
+                if (dest->file2_p)
+                        free(dest->file2_p); 
+                if (src->file2_p)
+                        dest->file2_p = strdup(src->file2_p);
+                else
+                        dest->file2_p = NULL;
+                if (dest->link_target_p)
+                        free(dest->link_target_p); 
+                if (src->link_target_p)
+                        dest->link_target_p = strdup(src->link_target_p);
+                else
+                        dest->link_target_p = NULL;
+
+                CP_ENTRY_F(stat);
+                CP_ENTRY_F(offset);
+                CP_ENTRY_F(msize);
+                CP_ENTRY_F(vsize_real);
+                CP_ENTRY_F(vsize_next);
+                CP_ENTRY_F(vno_base);
+                CP_ENTRY_F(vno_max);
+                CP_ENTRY_F(vlen);
+                CP_ENTRY_F(vpos);
+                CP_ENTRY_F(vtype);
+                CP_ENTRY_F(method);
+                CP_ENTRY_F(flags_uint32);
+        }
+}
+#undef CP_ENTRY_F
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 void filecache_freeclone(dir_elem_t *dest)
 {
         FREE_CACHE_MEM(dest);

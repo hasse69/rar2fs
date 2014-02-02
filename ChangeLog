@@ -1,5 +1,30 @@
 rar2fs ChangeLog file.
 
+2014-02-02  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Released 1.19.5
+
+2014-02-01  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #27]
+
+          Fixed a problem with seek length not being handled properly
+          when mounting a single archive split into volumes.
+
+2014-01-31  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #25]
+
+          Added some mutex locks to take care of the race conditions
+          that were discovered in the I/O buffer.
+
+2014-01-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #24]
+
+          Added support for the 'Save identical file as references'
+          feature in RAR5 archives.
+
 2014-01-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.19.2

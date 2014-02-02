@@ -28,12 +28,15 @@
 
 #include <platform.h>
 #include <memory.h>
+#include <pthread.h>
 #include "debug.h"
 #include "iobuffer.h"
 #include "optdb.h"
 
 size_t iob_hist_sz = 0;
 size_t iob_sz = 0;
+
+static pthread_mutex_t io_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #define SPACE_LEFT(ri, wi) (IOB_SZ - SPACE_USED((ri), (wi)))
 #define SPACE_USED(ri, wi) (((wi) - (ri)) & (IOB_SZ-1))
@@ -45,13 +48,16 @@ size_t iob_sz = 0;
 size_t readTo(struct io_buf *dest, FILE *fp, int hist)
 {
         unsigned tot = 0;
+        pthread_mutex_lock(&io_mutex);
         unsigned int lri = dest->ri;  /* read once */
         unsigned int lwi = dest->wi;  /* read once */
         size_t left = SPACE_LEFT(lri, lwi) - 1;   /* -1 to avoid wi = ri */
         if (IOB_HIST_SZ && hist == IOB_SAVE_HIST) {
                 left = left > IOB_HIST_SZ ? left - IOB_HIST_SZ : 0;
-                if (!left)
+                if (!left) {
+                        pthread_mutex_unlock(&io_mutex);
                         return 0; /* quick exit */
+                }
         }
         unsigned int chunk = IOB_SZ - lwi;   /* assume one large chunk */
         chunk = chunk < left ? chunk : left; /* reconsider assumption */
@@ -73,8 +79,8 @@ size_t readTo(struct io_buf *dest, FILE *fp, int hist)
         }
         dest->offset += tot;
         dest->wi = lwi;
-        MB();
         dest->used = SPACE_USED(lri, lwi);
+        pthread_mutex_unlock(&io_mutex);
 
         return tot;
 }
@@ -86,8 +92,10 @@ size_t readTo(struct io_buf *dest, FILE *fp, int hist)
 size_t readFrom(char *dest, struct io_buf *src, size_t size, size_t off)
 {
         size_t tot = 0;
+        pthread_mutex_lock(&io_mutex);
         unsigned int lri = src->ri; /* read once */
         size_t used = src->used;
+        pthread_mutex_unlock(&io_mutex);
         if (off) {
                 /* consume offset */
                 off = off < used ? off : used;
@@ -106,9 +114,10 @@ size_t readFrom(char *dest, struct io_buf *src, size_t size, size_t off)
                 dest += chunk;
                 chunk = size;
         }
+        pthread_mutex_lock(&io_mutex);
         src->ri = lri;
-        MB();
         src->used = used;
+        pthread_mutex_unlock(&io_mutex);
 
         return tot;
 }
@@ -122,6 +131,7 @@ size_t copyFrom(char *dest, struct io_buf *src, size_t size, size_t pos)
         size_t tot = 0;
         unsigned int chunk = IOB_SZ - pos;   /* assume one large chunk */
         chunk = chunk < size ? chunk : size; /* reconsider assumption */
+        pthread_mutex_lock(&io_mutex);
         while (size) {
                 memcpy(dest, src->data_p + pos, chunk);
                 pos = (pos + chunk) & (IOB_SZ - 1);
@@ -130,6 +140,7 @@ size_t copyFrom(char *dest, struct io_buf *src, size_t size, size_t pos)
                 dest += chunk;
                 chunk = size;
         }
+        pthread_mutex_unlock(&io_mutex);
         return tot;
 }
 
