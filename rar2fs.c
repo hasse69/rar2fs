@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2013 Hans Beckerus (hans.beckerus#AT#gmail.com)
+    Copyright (C) 2009-2014 Hans Beckerus (hans.beckerus#AT#gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -112,27 +112,34 @@ struct io_handle {
 #define IO_TYPE_RAW 2
 #define IO_TYPE_ISO 3
 #define IO_TYPE_INFO 4
+#define IO_TYPE_DIR 5
         union {
                 struct io_context *context;     /* type = IO_TYPE_RAR/IO_TYPE_RAW */
                 int fd;                         /* type = IO_TYPE_NRM/IO_TYPE_ISO */
+                DIR *dp;                        /* type = IO_TYPE_DIR */
                 void *buf_p;                    /* type = IO_TYPE_INFO */
                 uintptr_t bits;
         } u;
         dir_elem_t *entry_p;                    /* type = IO_TYPE_ISO */
+        char *path;                             /* type = IO_TYPE_DIR */
 };
 
 #define FH_ZERO(fh)            ((fh) = 0)
 #define FH_ISSET(fh)           (fh)
 #define FH_SETCONTEXT(fh, v)   (FH_TOIO(fh)->u.context = (v))
 #define FH_SETFD(fh, v)        (FH_TOIO(fh)->u.fd = (v))
+#define FH_SETDP(fh, v)        (FH_TOIO(fh)->u.dp = (v))
 #define FH_SETBUF(fh, v)       (FH_TOIO(fh)->u.buf_p = (v))
 #define FH_SETIO(fh, v)        ((fh) = (uintptr_t)(v))
 #define FH_SETENTRY(fh, v)     (FH_TOIO(fh)->entry_p = (v))
+#define FH_SETPATH(fh, v)      (FH_TOIO(fh)->path = (v))
 #define FH_SETTYPE(fh, v)      (FH_TOIO(fh)->type = (v))
 #define FH_TOCONTEXT(fh)       (FH_TOIO(fh)->u.context)
 #define FH_TOFD(fh)            (FH_TOIO(fh)->u.fd)
+#define FH_TODP(fh)            (FH_TOIO(fh)->u.dp)
 #define FH_TOBUF(fh)           (FH_TOIO(fh)->u.buf_p)
 #define FH_TOENTRY(fh)         (FH_TOIO(fh)->entry_p)
+#define FH_TOPATH(fh)          (FH_TOIO(fh)->path)
 #define FH_TOIO(fh)            ((struct io_handle*)(uintptr_t)(fh))
 
 #define WAIT_THREAD(pfd) \
@@ -882,7 +889,7 @@ static int lread_info(char *buf, size_t size, off_t offset,
             if (c > 0)
                     return c;
         }
-        /* Nothing to output */
+        /* Nothing to output (EOF) */
         return 0;
 }
 
@@ -1094,7 +1101,6 @@ check_idx:
                                         }
                                 }
                         }
-                        fi->direct_io = 1;
                         pthread_mutex_lock(&file_access_mutex);
                         e_p = filecache_get(op->entry_p->name_p);
                         if (e_p)
@@ -1134,7 +1140,7 @@ check_idx:
                          * fake data to propagate in sub-sequent reads.
                          * This case is very likely for multi-part AVI 2.0.
                          */
-                        if (op->seq < 15 && ((offset + size) - op->buf->offset)
+                        if (op->seq < 25 && ((offset + size) - op->buf->offset)
                                         > (IOB_SZ - IOB_HIST_SZ)) {
                                 dir_elem_t *e_p; /* "real" cache entry */ 
                                 printd(3, "seq=%d    long jump hack2    offset=%" PRIu64 ","
@@ -1142,7 +1148,6 @@ check_idx:
                                                 op->seq, offset, size,
                                                 op->buf->offset);
                                 op->seq--;      /* pretend it never happened */
-                                fi->direct_io = 1;
                                 pthread_mutex_lock(&file_access_mutex);
                                 e_p = filecache_get(op->entry_p->name_p);
                                 if (e_p)
@@ -1209,11 +1214,12 @@ out:
  *****************************************************************************
  *
  ****************************************************************************/
-static int lflush(const char *path, struct fuse_file_info *fi)
+static int lflush(struct fuse_file_info *fi)
 {
-        ENTER_("%s", path);
-        (void)path;             /* touch */
+        ENTER_();
+
         (void)fi;               /* touch */
+
         return 0;
 }
 
@@ -1221,11 +1227,10 @@ static int lflush(const char *path, struct fuse_file_info *fi)
  *****************************************************************************
  *
  ****************************************************************************/
-static int lrelease(const char *path, struct fuse_file_info *fi)
+static int lrelease(struct fuse_file_info *fi)
 {
-        ENTER_("%s", path);
+        ENTER_();
 
-        (void)path;             /* touch */
         if (FH_TOIO(fi->fh)->type == IO_TYPE_INFO) {
                 if (FH_TOBUF(fi->fh))
                         free(FH_TOBUF(fi->fh));
@@ -1236,6 +1241,7 @@ static int lrelease(const char *path, struct fuse_file_info *fi)
                 if (FH_TOENTRY(fi->fh))
                         filecache_freeclone(FH_TOENTRY(fi->fh));
         }
+        printd(3, "(%05d) %s [%-16p]\n", getpid(), "FREE", fi->fh);
         free(FH_TOIO(fi->fh));
         FH_ZERO(fi->fh);
         return 0;
@@ -1245,14 +1251,13 @@ static int lrelease(const char *path, struct fuse_file_info *fi)
  *****************************************************************************
  *
  ****************************************************************************/
-static int lread(const char *path, char *buffer, size_t size, off_t offset,
+static int lread(char *buffer, size_t size, off_t offset,
                 struct fuse_file_info *fi)
 {
         int res;
 
-        ENTER_("%s   size = %zu, offset = %" PRIu64, path, size, offset);
-
-        (void)path;             /* touch */
+        ENTER_("%d   size = %zu, offset = %" PRIu64, FH_TOFD(fi->fh), 
+                                        size, offset);
 
         res = pread(FH_TOFD(fi->fh), buffer, size, offset);
         if (res == -1)
@@ -2703,7 +2708,7 @@ static int rar2_getattr2(const char *path, struct stat *stbuf)
 static void dump_dir_list(const char *path, void *buffer, fuse_fill_dir_t filler,
                 struct dir_entry_list *next)
 {
-        ENTER_();
+        ENTER_("%s", path);
 
         int do_inval_cache = 1;
 
@@ -2737,33 +2742,72 @@ static void dump_dir_list(const char *path, void *buffer, fuse_fill_dir_t filler
  *****************************************************************************
  *
  ****************************************************************************/
-static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
-                off_t offset, struct fuse_file_info *fi)
+static int rar2_opendir(const char *path, struct fuse_file_info *fi)
 {
         ENTER_("%s", path);
 
+        DIR *dp = NULL;
+        char *root;
+        ABS_ROOT(root, path);
+
+        dp = opendir(root);
+        if (dp == NULL && errno == ENOENT) {
+                if (filecache_get(path))
+                        goto opendir_ok;
+                return -ENOENT;
+        }
+        if (dp == NULL)
+                return -errno;
+        
+opendir_ok:
+
+        FH_SETIO(fi->fh, malloc(sizeof(struct io_handle)));
+        if (!FH_ISSET(fi->fh)) {
+                closedir(dp);
+                return -ENOMEM;
+        }
+        FH_SETTYPE(fi->fh, IO_TYPE_DIR);
+        FH_SETENTRY(fi->fh, NULL);
+        FH_SETDP(fi->fh, dp);
+        FH_SETPATH(fi->fh, strdup(path));
+
+        return 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
+                off_t offset, struct fuse_file_info *fi)
+{
+        ENTER_("%s", (path ? path : ""));
+
+        (void)path;             /* touch */
         (void)offset;           /* touch */
-        (void)fi;               /* touch */
+
+        assert(FH_ISSET(fi->fh) && "bad I/O handle");
+
+        struct io_handle *io = FH_TOIO(fi->fh);
+        if (io == NULL)
+                return -EIO;
 
         struct dir_entry_list dir_list;      /* internal list root */
         struct dir_entry_list *next = &dir_list;
         dir_list_open(next);
 
-        DIR *dp;
-        char *root;
-        ABS_ROOT(root, path);
-
-        dp = opendir(root);
+        DIR *dp = FH_TODP(fi->fh);
         if (dp != NULL) {
-                readdir_scan(path, root, &next);
-                (void)closedir(dp);
+                char *root;
+                ABS_ROOT(root, FH_TOPATH(fi->fh));
+                readdir_scan(FH_TOPATH(fi->fh), root, &next);
                 goto dump_buff;
         }
 
         int vol = 1;
 
         pthread_mutex_lock(&file_access_mutex);
-        dir_elem_t *entry_p = filecache_get(path);
+        dir_elem_t *entry_p = filecache_get(FH_TOPATH(fi->fh));
         if (entry_p) {
                 char *tmp = strdup(entry_p->rar_p);
                 int multipart = entry_p->flags.multipart;
@@ -2772,7 +2816,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 if (multipart) {
                         int vol_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
                         printd(3, "Search for local directory in %s\n", tmp);
-                        while (!listrar(path, &next, tmp)) {
+                        while (!listrar(entry_p->name_p, &next, tmp)) {
                                 ++vol;
                                 if (vol_end && vol_end < vol)
                                         goto fill_buff;
@@ -2782,7 +2826,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 } else { 
                         if (tmp) {
                                 printd(3, "Search for local directory in %s\n", tmp);
-                                if (!listrar(path, &next, tmp)) {
+                                if (!listrar(entry_p->name_p, &next, tmp)) {
                                         free(tmp);
                                         goto fill_buff;
                                 }
@@ -2795,12 +2839,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
 
         if (vol == 1) {
                 dir_list_free(&dir_list);
-                /*
-                 * Fuse bug!? Returning -ENOENT here seems to be
-                 * silently ignored. Typically errno is here set to
-                 * ESPIPE (aka "Illegal seek").
-                 */
-                return -errno;
+                return -ENOENT;
         }
 
 fill_buff:
@@ -2811,7 +2850,7 @@ fill_buff:
 dump_buff:
 
         dir_list_close(&dir_list);
-        dump_dir_list(path, buffer, filler, &dir_list);
+        dump_dir_list(FH_TOPATH(fi->fh), buffer, filler, &dir_list);
         dir_list_free(&dir_list);
 
         return 0;
@@ -2825,10 +2864,10 @@ static int rar2_readdir2(const char *path, void *buffer,
                 fuse_fill_dir_t filler, off_t offset,
                 struct fuse_file_info *fi)
 {
-        ENTER_("%s", path);
+        ENTER_("%s", (path ? path : ""));
 
+        (void)path;             /* touch */
         (void)offset;           /* touch */
-        (void)fi;               /* touch */
 
         struct dir_entry_list dir_list;      /* internal list root */
         struct dir_entry_list *next = &dir_list;
@@ -2838,7 +2877,7 @@ static int rar2_readdir2(const char *path, void *buffer,
         int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
         struct dir_entry_list *arch_next = arch_list_root.next;
         while (arch_next) {
-                (void)listrar(path, &next, arch_next->entry.name);
+                (void)listrar(FH_TOPATH(fi->fh), &next, arch_next->entry.name);
                 if (c_end && ++c == c_end)
                         break;
                 arch_next = arch_next->next;
@@ -2848,9 +2887,29 @@ static int rar2_readdir2(const char *path, void *buffer,
         filler(buffer, "..", NULL, 0);
 
         dir_list_close(&dir_list);
-        dump_dir_list(path, buffer, filler, &dir_list);
+        dump_dir_list(FH_TOPATH(fi->fh), buffer, filler, &dir_list);
         dir_list_free(&dir_list);
 
+        return 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int rar2_releasedir(const char *path, struct fuse_file_info *fi)
+{
+        ENTER_("%s", (path ? path : ""));
+
+        (void)path;
+        struct io_handle *io = FH_TOIO(fi->fh);
+        if (io == NULL)
+                return -EIO;
+
+        closedir(FH_TODP(fi->fh));
+        free(FH_TOPATH(fi->fh)); 
+        free(FH_TOIO(fi->fh));
+        FH_ZERO(fi->fh);
         return 0;
 }
 
@@ -3210,7 +3269,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                 FH_SETIO(fi->fh, io);
                 FH_SETTYPE(fi->fh, IO_TYPE_INFO);
                 FH_SETBUF(fi->fh, wcb);
-                fi->direct_io = 1;
+                fi->direct_io = 1;   /* skip cache */
                 extract_rar_file_info(e_p, wcb);
                 filecache_freeclone(e_p);
                 return 0;
@@ -3325,6 +3384,16 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                         op->volHdl = NULL;
                                 }
 
+                                /* 
+                                 * Disable flushing the kernel cache of the file contents on 
+                                 * every open(). This should only be enabled on files, where 
+                                 * the file data is never changed externally (not through the
+                                 * mounted FUSE filesystem).
+                                 * Since the file contents will never change this should save 
+                                 * us from some user space calls!
+                                 */
+                                fi->keep_cache = 1;
+
                                 /*
                                  * Make sure cache entry is filled in completely
                                  * before cloning it
@@ -3392,17 +3461,6 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                         pthread_mutex_init(&op->mutex, NULL);
 
                         /*
-                         * Disable flushing the cache of the file contents on every open().
-                         * This is important to make sure FUSE does not force read from an
-                         * old offset. That could break the logic for compressed/encrypted
-                         * archives since the I/O context will become out-of-sync.
-                         * This should only be enabled on files, where the file data is never
-                         * changed externally (not through the mounted FUSE filesystem).
-                         * But first see 'direct_io' below.
-                         */
-                        fi->keep_cache = 1;
-
-                        /*
                          * The below will take precedence over keep_cache.
                          * This flag will allow the filesystem to bypass the page cache using
                          * the "direct_io" flag.  This is not the same as O_DIRECT, it's
@@ -3412,8 +3470,10 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                          * information to be propagated to sub-sequent reads. Setting this
                          * flag will force _all_ reads to enter the filesystem.
                          */
+#if 0 /* disable for now */
                         if (entry_p->flags.direct_io)
                                 fi->direct_io = 1;
+#endif
 
                         /* Create reader thread */
                         op->terminate = 1;
@@ -3571,11 +3631,14 @@ static void rar2_destroy(void *data)
  *
  ****************************************************************************/
 static int rar2_flush(const char *path, struct fuse_file_info *fi)
-{
-        ENTER_("%s", path);
-        printd(3, "(%05d) %-8s%s [%-16p][called from %05d]\n", getpid(),
-               "FLUSH", path, FH_TOCONTEXT(fi->fh), fuse_get_context()->pid);
-        return lflush(path, fi);
+{ 
+        ENTER_("%s", (path ? path : ""));
+
+        (void)path;             /* touch */
+     
+        printd(3, "(%05d) %s [%-16p][called from %05d]\n", getpid(),
+               "FLUSH", FH_TOCONTEXT(fi->fh), fuse_get_context()->pid);
+        return lflush(fi);
 }
 
 /*!
@@ -3645,15 +3708,14 @@ static int rar2_statfs(const char *path, struct statvfs *vfs)
  ****************************************************************************/
 static int rar2_release(const char *path, struct fuse_file_info *fi)
 {
-        ENTER_("%s", path);
-        printd(3, "(%05d) %-8s%s [%-16p]\n", getpid(), "RELEASE", path,
-               FH_TOCONTEXT(fi->fh));
-        if (!FH_ISSET(fi->fh)) {
-                pthread_mutex_lock(&file_access_mutex);
-                filecache_invalidate(path);
-                pthread_mutex_unlock(&file_access_mutex);
+        ENTER_("%s", (path ? path : ""));
+
+        (void)path;             /* touch */
+
+        if (!FH_ISSET(fi->fh))
                 return 0;
-        }
+
+        printd(3, "(%05d) %s [%-16p]\n", getpid(), "RELEASE", fi->fh);
 
         if (FH_TOIO(fi->fh)->type == IO_TYPE_RAR ||
                         FH_TOIO(fi->fh)->type == IO_TYPE_RAW) {
@@ -3705,7 +3767,7 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                                 pthread_mutex_destroy(&op->mutex);
                         }
                 }
-                printd(3, "(%05d) %-8s%s [%-16p]\n", getpid(), "FREE", path, op);
+                printd(3, "(%05d) %s [%-16p]\n", getpid(), "FREE", fi->fh);
                 if (op->buf) {
                         /* XXX clean up */
 #ifdef HAVE_MMAP
@@ -3726,9 +3788,7 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                 free(FH_TOIO(fi->fh));
                 FH_ZERO(fi->fh);
         } else {
-                char *root;
-                ABS_ROOT(root, path);
-                return lrelease(root, fi);
+                return lrelease(fi);
         }
 
         return 0;
@@ -3745,37 +3805,26 @@ static int rar2_read(const char *path, char *buffer, size_t size, off_t offset,
         struct io_handle *io;
         assert(FH_ISSET(fi->fh) && "bad I/O handle");
 
+        (void)path;             /* touch */
+
         io = FH_TOIO(fi->fh);
         if (!io)
                return -EIO;
-#if 0
-        int direct_io = fi->direct_io;
-#endif
 
-        ENTER_("%s   size=%zu, offset=%" PRIu64 ", fh=%" PRIu64, path, size, offset, fi->fh);
+        ENTER_("size=%zu, offset=%" PRIu64 ", fh=%" PRIu64, size, offset, fi->fh);
 
         if (io->type == IO_TYPE_NRM) {
-                char *root;
-                ABS_ROOT(root, path);
-                res = lread(root, buffer, size, offset, fi);
+                res = lread(buffer, size, offset, fi);
         } else if (io->type == IO_TYPE_ISO) {
-                char *root;
-                ABS_ROOT(root, io->entry_p->file_p);
-                res = lread(root, buffer, size, offset, fi);
+                res = lread(buffer, size, offset, fi);
         } else if (io->type == IO_TYPE_RAW) {
                 res = lread_raw(buffer, size, offset, fi);
         } else if (io->type == IO_TYPE_INFO) {
                 res = lread_info(buffer, size, offset, fi);
-        } else {
+        } else if (io->type == IO_TYPE_RAR) {
                 res = lread_rar(buffer, size, offset, fi);
-        }
-
-#if 0
-        if (res < 0 && direct_io) {
-                errno = -res;   /* convert to proper errno? */
-                return -1;
-        }
-#endif
+        } else
+                return -EIO;
         return res;
 }
 
@@ -3803,12 +3852,12 @@ static int rar2_truncate(const char *path, off_t offset)
 static int rar2_write(const char *path, const char *buffer, size_t size,
                 off_t offset, struct fuse_file_info *fi)
 {
-        char *root;
         ssize_t n;
 
-        ENTER_("%s", path);
+        ENTER_("%s", (path ? path : ""));
 
-        ABS_ROOT(root, path);
+        (void)path;             /* touch */
+
         n = pwrite(FH_TOFD(fi->fh), buffer, size, offset);
         return n >= 0 ? n : -errno;
 }
@@ -4333,6 +4382,8 @@ static struct fuse_operations rar2_operations = {
         .destroy = rar2_destroy,
         .open = rar2_open,
         .release = rar2_release,
+        .opendir = rar2_opendir,
+        .releasedir = rar2_releasedir,
         .read = rar2_read,
         .flush = rar2_flush,
         .readlink = rar2_readlink,
@@ -4341,6 +4392,12 @@ static struct fuse_operations rar2_operations = {
         .setxattr = rar2_setxattr,
         .listxattr = rar2_listxattr,
         .removexattr = rar2_removexattr,
+#endif
+#if FUSE_MAJOR_VERSION == 2 && FUSE_MINOR_VERSION > 7
+        .flag_nullpath_ok = 1,
+#endif
+#if FUSE_MAJOR_VERSION > 2 || (FUSE_MAJOR_VERSION == 2 && FUSE_MINOR_VERSION == 9)
+        .flag_nopath = 1,
 #endif
 };
 
@@ -4587,7 +4644,7 @@ static void print_version()
         src_rev[0] = '\0';
 #endif
 #endif
-        printf("rar2fs v%u.%u.%u%s (DLL version %d)    Copyright (C) 2009-2013 Hans Beckerus\n",
+        printf("rar2fs v%u.%u.%u%s (DLL version %d)    Copyright (C) 2009-2014 Hans Beckerus\n",
                RAR2FS_MAJOR_VER,
                RAR2FS_MINOR_VER, RAR2FS_PATCH_LVL,
                src_rev,

@@ -1,5 +1,36 @@
 rar2fs ChangeLog file.
 
+2014-02-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Released 1.19.8
+
+2014-02-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Disabled automatic switch to direct I/O mode.
+
+        * Tweaked some of the more fine grained "hacks" to improve
+          support for compressed archives.
+
+        * Now supports 'flag_nullpath_ok' and 'flag_nopath'
+          (FUSE >= 2.9) in fuse ops.
+
+2014-02-04  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * The race condition in the I/O buffer has been identified and
+          the lock utilization has been redesigned accordingly to
+          minimize lock contention.
+
+        * Added check for __sync_synchronize()
+
+2014-02-03  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Changed use of the FUSE 'keep_cache' flag
+
+        * Removed the attempt to optimize the lock contention level
+          in the I/O buffer. Seems to have opened up for additional 
+          race conditions. When CPU is really needed lock contention
+          should be close to none anyway.
+
 2014-02-02  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.19.5

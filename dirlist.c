@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2013 Hans Beckerus (hans.beckerus#AT#gmail.com)
+    Copyright (C) 2009-2014 Hans Beckerus (hans.beckerus#AT#gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -36,14 +36,14 @@
  *****************************************************************************
  *
  ****************************************************************************/
-static inline int swap(struct dir_entry_list *A, struct dir_entry_list *B) {
+static inline int swap(struct dir_entry_list *A, struct dir_entry_list *B)
+{
         int swap = strcmp(A->entry.name, B->entry.name);
         swap = !swap ? A->entry.type > B->entry.type : swap;
         if (swap > 0) {
                 const struct dir_entry TMP = B->entry;
                 B->entry = A->entry;
                 A->entry = TMP;
-
                 return 1;
         }
         return 0;
@@ -162,6 +162,4 @@ struct dir_entry_list *dir_entry_add(struct dir_entry_list *l, const char *key,
         }
         return l;
 }
-
-
 

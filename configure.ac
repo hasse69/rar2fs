@@ -591,6 +591,24 @@ AC_TRY_LINK([],[return 0;],
 ac_c_werror_flag=
 AC_LANG_POP
 
+AC_LANG_PUSH(C)
+ac_c_werror_flag=yes
+AC_MSG_CHECKING([for __sync_synchronize])
+AC_TRY_COMPILE([],[int main (int argc, char** argv) {__sync_synchronize();}],
+    [AC_MSG_RESULT([yes])
+         has_synchronize=yes
+    ],
+    [AC_MSG_RESULT([no])
+         has_synchronize=no
+    ]
+)
+ac_c_werror_flag=
+AC_LANG_POP
+
+if test x"$has_synchronize" = x"yes"; then
+    AC_DEFINE(HAVE_SYNC_SYNCHRONIZE, 1, [Define if __sync_synchronize() is available])
+fi
+
 AC_PROG_LN_S
 AC_PROG_MKDIR_P
 

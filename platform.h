@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2013 Hans Beckerus (hans.beckerus#AT#gmail.com)
+    Copyright (C) 2009-2014 Hans Beckerus (hans.beckerus#AT#gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -95,7 +95,11 @@
 #endif
 
 #ifdef __GNUC__
+#ifdef HAVE_SYNC_SYNCHRONIZE
+#define MB() __sync_synchronize()
+#else 
 #define MB() do{ __asm__ __volatile__ ("" ::: "memory"); } while(0)
+#endif
 #else
 #warning Check code for MB() on current platform
 #define MB()
