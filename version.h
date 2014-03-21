@@ -30,7 +30,7 @@
 #define VERSION_H_
 
 #define RAR2FS_MAJOR_VER   1
-#define RAR2FS_MINOR_VER   19
-#define RAR2FS_PATCH_LVL   8
+#define RAR2FS_MINOR_VER   20
+#define RAR2FS_PATCH_LVL   0
 
 #endif

@@ -1,5 +1,103 @@
 rar2fs ChangeLog file.
 
+2014-03-19  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Released 1.20.0
+
+        * Turned off support for block special device mounts other
+          than for Linux platforms. It does not make much sense trying  
+          to support it any where else due to possible read alignment
+          restrictions.
+
+2014-03-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Built and tested against UnRAR source 5.10 beta 1 (5.1.1)
+
+2014-03-17  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #34]
+
+        Fixed a problem with old style archives split into more
+        than 101 files.
+
+2014-03-16  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Now returning "No such file or directory" instead of
+          "Input/output error" when trying to read information
+          for a file outside an archive or which does not exist
+          at all (libunrar5 only).
+
+        * Fixed an issue when retrieving file information (#info)
+          that could have resulted in an infinite loop.
+
+        * Fixed an issue with resolving symbolic links for
+          legacy archives in combination with libunrar5.
+
+2014-03-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Corrected some issues that caused compilation failures
+          for UnRAR source 4.1.x.
+
+2014-03-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Corrected a problem seen on e.g. FreeBSD for which closedir()
+          was called with a NULL pointer resulting in a crash.
+
+2014-03-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #31]
+
+        Corrected some compilation errors on FreeBSD (and also other
+        platforms that sets HAVE_SETXATTR).
+
+2014-03-02  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Mounting block special files on Linux can now benefit from
+          fmemopen() when supported.
+
+2014-02-25  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Enabled syslog support
+
+2014-02-24  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #22]
+           
+          Now may fall back to the old workaround from 1.19.2 that 
+          should be working also for (some!?) uClibc versions of 
+          fmemopen().
+
+2014-02-23  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Corrected some additional problems with the solution
+          for issue #22.
+
+        * Added support for presenting high-resolution time stamp in 
+          RAR5 archives (thanks to jyhpsycho for the initial patch).
+          Legacy archives still require a new version of UnRAR source 
+          before it can be enabled.
+
+2014-02-23  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #28]
+
+          Fixed problem with mounting a block special file that 
+          resulted in a crash due to incorrect use of mmap() and
+          fmemopen().
+
+2014-02-21  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Added a missing check for errors from fmemopen() 
+
+2014-02-21  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #29]
+
+          Fixed a minor calculation error in the file time stamp
+          'seconds' part as provided by libunrar (MS-DOS time format).
+
+        * Removed 'INSTALL' from SVN trunk
+
 2014-02-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.19.8

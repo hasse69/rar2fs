@@ -63,8 +63,8 @@ static void stack_trace(int sig, siginfo_t *info, void *secret)
 
         /* Do something useful with siginfo_t */
         char buf[256];
-        snprintf(buf, sizeof(buf), "Got signal %d, faulty address is 0x%p, "
-                        "from 0x%p", sig, info->si_addr,
+        snprintf(buf, sizeof(buf), "Got signal %d, faulty address is %p, "
+                        "from %p", sig, info->si_addr,
 #ifdef REG_PC
         (void*)uc->uc_mcontext.gregs[REG_PC]);
 #else

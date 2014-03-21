@@ -182,18 +182,36 @@ struct io_handle {
 #define IS_CBR(s) (!OPT_SET(OPT_KEY_NO_EXPAND_CBR) && \
                         !strcasecmp((s)+(strlen(s)-4), ".cbr"))
 
+/*
+ * This is to the handle the workaround for the destroyed file pointer
+ * position in some early libunrar5 versions when calling RARInitArchiveEx().
+ */
+#ifdef HAVE_FMEMOPEN
+#define INIT_FP_ARG_(fp) (fp),0
+#else
+#define INIT_FP_ARG_(fp) (fp),1
+#endif
+
 #ifdef HAVE_ICONV
 static iconv_t icd;
 #endif
-long page_size = 0;
+long page_size_ = 0;
 static int mount_type;
-struct dir_entry_list arch_list_root;        /* internal list root */
-struct dir_entry_list *arch_list = &arch_list_root;
-pthread_attr_t thread_attr;
-unsigned int rar2_ticks;
-int fs_terminated = 0;
-int fs_loop = 0;
-mode_t umask_ = 0022;
+static struct dir_entry_list arch_list_root;        /* internal list root */
+static struct dir_entry_list *arch_list = &arch_list_root;
+static pthread_attr_t thread_attr;
+static unsigned int rar2_ticks;
+static int fs_terminated = 0;
+static int fs_loop = 0;
+static int64_t blkdev_size = -1;
+static mode_t umask_ = 0022;
+
+#ifdef __linux
+#define IS_BLKDEV() (blkdev_size >= 0)
+#else
+#define IS_BLKDEV() (0)
+#endif
+#define BLKDEV_SIZE() (blkdev_size > 0 ? blkdev_size : 0)
 
 static int extract_rar(char *arch, const char *file, FILE *fp, void *arg);
 
@@ -225,7 +243,11 @@ static const char *file_cmd[] = {
  *****************************************************************************
  *
  ****************************************************************************/
+#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
 static wchar_t *get_password(const char *file, wchar_t *buf, size_t len)
+#else
+static char *get_password(const char *file, char *buf, size_t len)
+#endif
 {
         if (file) {
                 size_t l = strlen(file);
@@ -245,12 +267,16 @@ static wchar_t *get_password(const char *file, wchar_t *buf, size_t len)
                         fp = fopen(F, "r");
                 }
                 if (fp) {
+#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
                         buf = fgetws(buf, len, fp);
                         if (buf) {
                                 wchar_t *eol = wcspbrk(buf, L"\r\n");
                                 if (eol != NULL)
-                                        *eol=0;
+                                        *eol = 0;
                         }
+#else
+                        buf = fgets(buf, len, fp);
+#endif
                         fclose(fp);
                         return buf;
                 }
@@ -284,7 +310,7 @@ size_t wide_to_utf8(const wchar_t *src, char *dst, size_t dst_size)
                         c = ((c - 0xd800) << 10) + (*src - 0xdc00) + 0x10000;
                         src++;
                 }
-                if (c<0x10000 && (out_size -= 2) >= 0) {
+                if (c < 0x10000 && (out_size -= 2) >= 0) {
                         *(dst++) = (0xe0 | (c >> 12));
                         *(dst++) = (0x80 | ((c >> 6) & 0x3f));
                         *(dst++) = (0x80 | (c & 0x3f));
@@ -366,7 +392,7 @@ static dir_elem_t *path_lookup_miss(const char *path, struct stat *stbuf)
         ABS_ROOT(root, path);
 
         /* Check if the missing file can be found on the local fs */
-        if(!lstat(root, stbuf ? stbuf : &st)) {
+        if (!lstat(root, stbuf ? stbuf : &st)) {
                 printd(3, "STAT retrieved for %s\n", root);
                 return LOCAL_FS_ENTRY;
         }
@@ -395,18 +421,18 @@ static dir_elem_t *path_lookup_miss(const char *path, struct stat *stbuf)
                         e_p->name_p = strdup(path);
                         e_p->file_p = strdup(path);
                         e_p->flags.fake_iso = 1;
-                        if (l > 4)
+                        if (l > 4) {
                                 e_p->file_p = realloc(
                                         e_p->file_p,
                                         strlen(path) + 1 + (l - 4));
+                        }
                         /* back-patch *real* file name */
                         strncpy(e_p->file_p + (strlen(e_p->file_p) - 4),
                                         tmp ? tmp : "", l);
                         *(e_p->file_p+(strlen(path)-4+l)) = 0;
                         memcpy(&e_p->stat, &st, sizeof(struct stat));
-                        if (stbuf) {
+                        if (stbuf)
                                 memcpy(stbuf, &st, sizeof(struct stat));
-                        }
                         free(root1);
                         return e_p;
                 }
@@ -514,8 +540,9 @@ static void *extract_to(const char *file, off_t sz, const dir_elem_t *entry_p,
                 if (!fwrite(buffer, sz, 1, tmp)) {
                         fclose(tmp);
                         tmp = MAP_FAILED;
-                } else
+                } else {
                         fseeko(tmp, 0, SEEK_SET);
+                }
                 free(buffer);
                 return tmp;
         }
@@ -569,6 +596,10 @@ static FILE *popen_(const dir_elem_t *entry_p, pid_t *cpid, void **mmap_addr,
                                 fp = fmemopen(maddr + entry_p->offset,
                                                         entry_p->msize -
                                                         entry_p->offset, "r");
+                                if (fp == NULL) {
+                                        perror("fmemopen");
+                                        goto error;
+                                }
                         } else {
                                 perror("mmap");
                                 goto error;
@@ -720,12 +751,9 @@ static char *get_vname(int t, const char *str, int vol, int len, int pos)
                         sprintf(f, "%s", (lower ? "ar" : "AR"));
                 } else if (vol <= 101) {
                         sprintf(f, "%02d", (vol - 2));
-                }
-                /* Possible, but unlikely */
-                else {
-                        sprintf(f, "%c%02d", lower ? 'r' : 'R' + (vol - 2) / 100,
+                } else { /* Possible, but unlikely */
+                        sprintf(f, "%c%02d", (lower ? 'r' : 'R') + (vol - 2) / 100,
                                                 (vol - 2) % 100);
-
                         --pos;
                         ++len;
                 }
@@ -860,9 +888,8 @@ seek_check:
                 n = fread(buf, 1, chunk, fp);
                 printd(3, "Read %zu bytes from vol=%d, base=%d\n", n, op->vno,
                        op->entry_p->vno_base);
-                if (n != chunk) {
+                if (n != chunk)
                         size = n;
-                }
 
                 size -= n;
                 offset += n;
@@ -1012,7 +1039,6 @@ static int lread_rar(char *buf, size_t size, off_t offset,
 {
         int n = 0;
         struct io_context* op = FH_TOCONTEXT(fi->fh);
-
 #ifdef DEBUG_READ
         char *buf_saved = buf;
         off_t offset_saved = offset;
@@ -1241,7 +1267,7 @@ static int lrelease(struct fuse_file_info *fi)
                 if (FH_TOENTRY(fi->fh))
                         filecache_freeclone(FH_TOENTRY(fi->fh));
         }
-        printd(3, "(%05d) %s [%-16p]\n", getpid(), "FREE", fi->fh);
+        printd(3, "(%05d) %s [0x%-16" PRIx64 "]\n", getpid(), "FREE", fi->fh);
         free(FH_TOIO(fi->fh));
         FH_ZERO(fi->fh);
         return 0;
@@ -1517,9 +1543,17 @@ static int CALLBACK index_callback(UINT msg, LPARAM UserData,
         }
         if (msg == UCM_CHANGEVOLUME)
                 return access((char *)P1, F_OK);
-        if (msg == UCM_NEEDPASSWORDW)
+#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
+        if (msg == UCM_NEEDPASSWORDW) {
                 if (!get_password(eofd->arch, (wchar_t *)P1, P2))
                         return -1;
+        }
+#else
+        if (msg == UCM_NEEDPASSWORD) {
+                if (!get_password(eofd->arch, (char *)P1, P2))
+                        return -1;
+        }
+#endif
                
         return 1;
 }
@@ -1621,10 +1655,17 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
         }
         if (msg == UCM_CHANGEVOLUME)
                 return access((char *)P1, F_OK);
+#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
         if (msg == UCM_NEEDPASSWORDW) {
                 if (!get_password(cb_arg->arch, (wchar_t *)P1, P2))
                         return -1;
         }
+#else
+        if (msg == UCM_NEEDPASSWORD) {
+                if (!get_password(cb_arg->arch, (char *)P1, P2))
+                        return -1;
+        }
+#endif
 
         return 1;
 }
@@ -1648,7 +1689,9 @@ static int extract_rar(char *arch, const char *file, FILE *fp, void *arg)
         d.Callback = extract_callback;
         d.UserData = (LPARAM)&cb_arg;
         struct RARHeaderData header;
-        HANDLE hdl = fp ? RARInitArchiveEx(&d, fp) : RAROpenArchiveEx(&d);
+        HANDLE hdl = fp 
+                ? RARInitArchiveEx(&d, INIT_FP_ARG_(fp))
+                : RAROpenArchiveEx(&d);
         if (d.OpenResult)
                 goto extract_error;
 
@@ -1713,7 +1756,7 @@ static void set_rarstats(dir_elem_t *entry_p, RARArchiveListEx *alist_p,
                 entry_p->stat.st_mode = mode;
 #ifndef HAVE_SETXATTR
                 entry_p->stat.st_nlink =
-                        S_ISDIR(mode) ? 2 : alist_p->Method - (FHD_STORING - 1);
+                        S_ISDIR(mode) ? 2 : alist_p->hdr.Method - (FHD_STORING - 1);
 #else
                 entry_p->stat.st_nlink =
                         S_ISDIR(mode) ? 2 : 1;
@@ -1732,7 +1775,7 @@ static void set_rarstats(dir_elem_t *entry_p, RARArchiveListEx *alist_p,
          * This is far from perfect but does the job pretty well!
          * If there is some obvious way to calculate the number of blocks
          * used by a file, please tell me! Most Linux systems seems to
-         * apply some sort of multiple of 8 blocks scheme?
+         * apply some sort of multiple of 8 blocks (4K bytes) scheme?
          */
         entry_p->stat.st_blocks =
             (((entry_p->stat.st_size + (8 * 512)) & ~((8 * 512) - 1)) / 512);
@@ -1766,9 +1809,10 @@ static void set_rarstats(dir_elem_t *entry_p, RARArchiveListEx *alist_p,
                 unsigned int as_uint_;
         };
 
+        /* Using DOS time format by default for backward compatibility. */
         union dos_time_t *dos_time = (union dos_time_t *)&alist_p->hdr.FileTime;
 
-        t.tm_sec = dos_time->second;
+        t.tm_sec = dos_time->second * 2;
         t.tm_min = dos_time->minute;
         t.tm_hour = dos_time->hour;
         t.tm_mday = dos_time->day;
@@ -1778,6 +1822,32 @@ static void set_rarstats(dir_elem_t *entry_p, RARArchiveListEx *alist_p,
         entry_p->stat.st_atime = mktime(&t);
         entry_p->stat.st_mtime = entry_p->stat.st_atime;
         entry_p->stat.st_ctime = entry_p->stat.st_atime;
+
+        /* Using internally stored 100 ns precision time when available. */
+#ifdef HAVE_STRUCT_STAT_ST_MTIM
+        if (alist_p->RawTime.mtime) {
+                entry_p->stat.st_mtim.tv_sec  = 
+                        (alist_p->RawTime.mtime / 10000000);
+                entry_p->stat.st_mtim.tv_nsec = 
+                        (alist_p->RawTime.mtime % 10000000) * 100;
+        }
+#endif
+#ifdef HAVE_STRUCT_STAT_ST_CTIM
+        if (alist_p->RawTime.ctime) {
+                entry_p->stat.st_ctim.tv_sec  = 
+                        (alist_p->RawTime.ctime / 10000000);
+                entry_p->stat.st_ctim.tv_nsec = 
+                        (alist_p->RawTime.ctime % 10000000) * 100;
+        }
+#endif
+#ifdef HAVE_STRUCT_STAT_ST_ATIM
+        if (alist_p->RawTime.atime) {
+                entry_p->stat.st_atim.tv_sec  = 
+                        (alist_p->RawTime.atime / 10000000);
+                entry_p->stat.st_atim.tv_nsec = 
+                        (alist_p->RawTime.atime % 10000000) * 100;
+        }
+#endif
 }
 
 /*!
@@ -1853,7 +1923,7 @@ static void resolve_filecopy(RARArchiveListEx *next, RARArchiveListEx *root)
  *
  ****************************************************************************/
 static int listrar_rar(const char *path, struct dir_entry_list **buffer,
-                const char *arch,  HANDLE hdl, const RARArchiveListEx *next,
+                const char *arch, HANDLE hdl, const RARArchiveListEx *next,
                 const dir_elem_t *entry_p, unsigned int mh_flags)
 {
         printd(3, "%llu byte RAR file %s found in archive %s\n",
@@ -1879,23 +1949,33 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
                         goto file_error;
                 (void)fstat(fd, &st);
 #if defined ( HAVE_FMEMOPEN ) && defined ( HAVE_MMAP )
-                maddr = mmap(0, P_ALIGN_(st.st_size), PROT_READ, MAP_SHARED, fd, 0);
-                if (maddr != MAP_FAILED)
-                        fp = fmemopen(maddr + (next->Offset + next->HeadSize), GET_RAR_PACK_SZ(&next->hdr), "r");
-#else
-                fp = fopen(entry_p->rar_p, "r");
-                if (fp)
-                        fseeko(fp, next->Offset + next->HeadSize, SEEK_SET);
+                if (!IS_BLKDEV() || BLKDEV_SIZE()) {
+                        msize = IS_BLKDEV() ? BLKDEV_SIZE() : st.st_size; 
+                        maddr = mmap(0, P_ALIGN_(msize), PROT_READ,
+                                                MAP_SHARED, fd, 0);
+                        if (maddr != MAP_FAILED)
+                                fp = fmemopen(maddr + (next->Offset + next->HeadSize),
+                                                GET_RAR_PACK_SZ(&next->hdr), "r");
+                } else {
 #endif
-                msize = st.st_size;
+                        msize = st.st_size; 
+                        fp = fopen(entry_p->rar_p, "r");
+                        if (fp)
+                                fseeko(fp, next->Offset + next->HeadSize,
+                                                        SEEK_SET);
+#if defined ( HAVE_FMEMOPEN ) && defined ( HAVE_MMAP )
+                }
+#endif
                 mflags = 1;
         } else {
 #ifdef HAVE_FMEMOPEN
-                maddr = extract_to(next->hdr.FileName, GET_RAR_SZ(&next->hdr), entry_p, E_TO_MEM);
+                maddr = extract_to(next->hdr.FileName, GET_RAR_SZ(&next->hdr),
+                                                        entry_p, E_TO_MEM);
                 if (maddr != MAP_FAILED)
                         fp = fmemopen(maddr, GET_RAR_SZ(&next->hdr), "r");
 #else
-                fp = extract_to(next->hdr.FileName, GET_RAR_SZ(&next->hdr), entry_p, E_TO_TMP);
+                fp = extract_to(next->hdr.FileName, GET_RAR_SZ(&next->hdr),
+                                                        entry_p, E_TO_TMP);
                 if (fp == MAP_FAILED) {
                         fp = NULL;
                         printd(1, "Extract to tmpfile failed\n");
@@ -1905,8 +1985,15 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
                 mflags = 2;
         }
 
-        if (fp)
-                hdl2 = RARInitArchiveEx(&d2, fp);
+        if (fp) {
+#ifndef HAVE_MMAP
+                hdl2 = RARInitArchiveEx(&d2, fp, 1);
+#else
+                hdl2 = IS_BLKDEV() && !BLKDEV_SIZE() 
+                        ? RARInitArchiveEx(&d2, fp, 1)
+                        : RARInitArchiveEx(&d2, INIT_FP_ARG_(fp));
+#endif
+        }
         if (!fp || d2.OpenResult || (d2.Flags & MHD_VOLUME))
                 goto file_error;
 
@@ -2063,15 +2150,46 @@ file_error:
  *****************************************************************************
  *
  ****************************************************************************/
-static int CALLBACK list_callback(UINT msg,LPARAM UserData,LPARAM P1,LPARAM P2)
+static int CALLBACK list_callback_noswitch(UINT msg,LPARAM UserData,LPARAM P1,LPARAM P2)
 {
+#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
         if (msg == UCM_CHANGEVOLUME || msg == UCM_CHANGEVOLUMEW)
                 return -1; /* Do not allow volume switching */
         if (msg == UCM_NEEDPASSWORDW) {
                 if (!get_password((char *)UserData, (wchar_t *)P1, P2))
                         return -1;
         }
+#else
+        if (msg == UCM_CHANGEVOLUME)
+                return -1; /* Do not allow volume switching */
+        if (msg == UCM_NEEDPASSWORD) {
+                if (!get_password((char *)UserData, (char *)P1, P2))
+                        return -1;
+        }
+#endif
+
         return 1; 
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int CALLBACK list_callback(UINT msg,LPARAM UserData,LPARAM P1,LPARAM P2)
+{
+#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
+        if (msg == UCM_NEEDPASSWORDW) {
+                if (!get_password((char *)UserData, (wchar_t *)P1, P2))
+                        return -1;
+        }
+#else
+        if (msg == UCM_NEEDPASSWORD) {
+                if (!get_password((char *)UserData, (char *)P1, P2))
+                        return -1;
+        }
+#endif
+
+        return 1;
 }
 
 /*!
@@ -2088,7 +2206,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.ArcName = (char *)arch;       /* Horrible cast! But hey... it is the API! */
         d.OpenMode = RAR_OM_LIST;
-        d.Callback = list_callback;
+        d.Callback = list_callback_noswitch;
         d.UserData = (LPARAM)arch;
         HANDLE hdl = RAROpenArchiveEx(&d);
 
@@ -2640,10 +2758,25 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
 #if RARVER_MAJOR > 4
         int cmd = 0;
         while (file_cmd[cmd]) {
-                if (!strcmp(&path[strlen(path) - 5], file_cmd[cmd])) {
-                        memset(stbuf, 0, sizeof(struct stat));
-                        stbuf->st_mode = S_IFREG | 0644;
-                        return 0;
+                size_t len_path = strlen(path);
+                size_t len_cmd = strlen(file_cmd[cmd]);
+                if (len_path > len_cmd &&
+                                !strcmp(&path[len_path - len_cmd], file_cmd[cmd])) {
+                        char *root;
+                        char *real = (char *)path;
+                        /* Frome here on the real path is not needed anymore
+                         * and adding it to the cache is simply overkil, thus
+                         * it is safe to modify it! */
+                        real[len_path - len_cmd] = 0;
+                        ABS_ROOT(root, real);
+                        if (access(root, F_OK)) {
+                                if (filecache_get(real)) {
+                                        memset(stbuf, 0, sizeof(struct stat));
+                                        stbuf->st_mode = S_IFREG | 0644;
+                                        return 0;
+                                }
+                        }
+                        break;
                 }
                 ++cmd;
         }
@@ -2689,10 +2822,23 @@ static int rar2_getattr2(const char *path, struct stat *stbuf)
 #if RARVER_MAJOR > 4
         int cmd = 0;
         while (file_cmd[cmd]) {
-                if (!strcmp(&path[strlen(path) - 5], file_cmd[cmd])) {
-                        memset(stbuf, 0, sizeof(struct stat));
-                        stbuf->st_mode = S_IFREG | 0644;
-                        return 0;
+                size_t len_path = strlen(path);
+                size_t len_cmd = strlen(file_cmd[cmd]);
+                if (len_path > len_cmd &&
+                                !strcmp(&path[len_path - len_cmd], file_cmd[cmd])) {
+                        char *root;
+                        char *real = (char *)path;
+                        /* Frome here on the real path is not needed anymore
+                         * and adding it to the cache is simply overkil, thus
+                         * it is safe to modify it! */
+                        real[len_path - len_cmd] = 0;
+                        ABS_ROOT(root, real);
+                        if (filecache_get(real)) {
+                                memset(stbuf, 0, sizeof(struct stat));
+                                stbuf->st_mode = S_IFREG | 0644;
+                                return 0;
+                        }
+                        break;
                 }
                 ++cmd;
         }
@@ -2763,7 +2909,8 @@ opendir_ok:
 
         FH_SETIO(fi->fh, malloc(sizeof(struct io_handle)));
         if (!FH_ISSET(fi->fh)) {
-                closedir(dp);
+                if (dp)
+                        closedir(dp);
                 return -ENOMEM;
         }
         FH_SETTYPE(fi->fh, IO_TYPE_DIR);
@@ -2906,7 +3053,8 @@ static int rar2_releasedir(const char *path, struct fuse_file_info *fi)
         if (io == NULL)
                 return -EIO;
 
-        closedir(FH_TODP(fi->fh));
+        if (FH_TODP(fi->fh))
+                closedir(FH_TODP(fi->fh));
         free(FH_TOPATH(fi->fh)); 
         free(FH_TOIO(fi->fh));
         FH_ZERO(fi->fh);
@@ -3189,7 +3337,7 @@ static int extract_rar_file_info(dir_elem_t *entry_p, struct RARWcb *wcb)
                         d2.Callback = list_callback;
                         d2.UserData = (LPARAM)entry_p->rar_p;
 
-                        hdl2 = RARInitArchiveEx(&d2, fp);
+                        hdl2 = RARInitArchiveEx(&d2, INIT_FP_ARG_(fp));
                         if (d2.OpenResult || (d2.Flags & MHD_VOLUME))
                                 goto file_error;
                         RARGetFileInfo(hdl2, entry_p->file2_p, wcb);
@@ -3239,7 +3387,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                 while (file_cmd[cmd]) {
                         if (!strcmp(&path[strlen(path) - 5], "#info")) {
                                 char *tmp = strdup(path);
-                                tmp[strlen(path)-5] = 0;
+                                tmp[strlen(path) - 5] = 0;
                                 entry_p = path_lookup(tmp, NULL);
                                 free(tmp);
                                 if (entry_p == NULL || 
@@ -3715,7 +3863,7 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
         if (!FH_ISSET(fi->fh))
                 return 0;
 
-        printd(3, "(%05d) %s [%-16p]\n", getpid(), "RELEASE", fi->fh);
+        printd(3, "(%05d) %s [0x%-16" PRIx64 "]\n", getpid(), "RELEASE", fi->fh);
 
         if (FH_TOIO(fi->fh)->type == IO_TYPE_RAR ||
                         FH_TOIO(fi->fh)->type == IO_TYPE_RAW) {
@@ -3767,7 +3915,7 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                                 pthread_mutex_destroy(&op->mutex);
                         }
                 }
-                printd(3, "(%05d) %s [%-16p]\n", getpid(), "FREE", fi->fh);
+                printd(3, "(%05d) %s [0x%-16" PRIx64 "]\n", getpid(), "FREE", fi->fh);
                 if (op->buf) {
                         /* XXX clean up */
 #ifdef HAVE_MMAP
@@ -4269,6 +4417,39 @@ static void usage(char *prog)
  *****************************************************************************
  *
  ****************************************************************************/
+static int64_t get_blkdev_size(struct stat *st)
+{
+#ifdef __linux
+        struct stat st2;
+        char buf[PATH_MAX];
+	size_t len;
+	int fd;
+
+	snprintf(buf, sizeof(buf), "/sys/dev/block/%d:%d/loop/backing_file",
+		 major(st->st_rdev), minor(st->st_rdev));
+
+	fd = open(buf, O_RDONLY);
+	if (fd < 0)
+		return 0;
+
+	len = read(fd, buf, PATH_MAX);
+	close(fd);
+	if (len < 2)
+		return 0;
+
+	buf[len - 1] = '\0';
+        (void)stat(buf, &st2);  
+        return st2.st_size;   
+#else
+        (void)st;  /* touch */
+        return 0;
+#endif
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
                 char **src_path_out, char **dst_path_out, int verbose)
 {
@@ -4286,6 +4467,11 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
         struct stat st;
         (void)stat(a1, &st);
         mount_type = S_ISDIR(st.st_mode) ? MOUNT_FOLDER : MOUNT_ARCHIVE;
+
+        /* Check for block special file */
+        if (mount_type == MOUNT_ARCHIVE && S_ISBLK(st.st_mode))
+                blkdev_size = get_blkdev_size(&st);
+    
         /* Check path type(s), destination path *must* be a folder */
         (void)stat(a2, &st);
         if (!S_ISDIR(st.st_mode) ||
@@ -4559,7 +4745,6 @@ static int work(struct fuse_args *args)
 
         /* This is doing more or less the same as fuse_setup(). */
         if (!fuse_parse_cmdline(args, &mp, &mt, &fg)) {
-              printd(1, "mounting file system on %s\n", mp);
               ch = fuse_mount(mp, args);
               if (ch) {
                       /* Avoid any output from the initial attempt */
@@ -4577,11 +4762,12 @@ static int work(struct fuse_args *args)
                       }
                       if (f == NULL) {
                               fuse_unmount(mp, ch);
-                     } else {
+                      } else {
+                              syslog(LOG_DEBUG, "mounted %s\n", mp);
                               se = fuse_get_session(f);
                               fuse_set_signal_handlers(se);
                               fuse_daemonize(fg);
-                     }
+                      }
               }
         }
 
@@ -4613,6 +4799,7 @@ static int work(struct fuse_args *args)
         /* This is doing more or less the same as fuse_teardown(). */
         fuse_remove_signal_handlers(se);
         fuse_unmount(mp, ch);
+        syslog(LOG_DEBUG, "unmounted %s\n", mp);
         fuse_destroy(f);
         free(mp);
 
@@ -4818,7 +5005,6 @@ int main(int argc, char *argv[])
 #endif
 #endif
 
-        /*openlog("rarfs2", LOG_NOWAIT|LOG_PID, 0);*/
         optdb_init();
 
         long ps = -1;
@@ -4830,9 +5016,9 @@ int main(int argc, char *argv[])
 #endif
 #endif
         if (ps != -1)
-                page_size = ps;
+                page_size_ = ps;
         else
-                page_size = 4096;
+                page_size_ = 4096;
 
         struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
         if (fuse_opt_parse(&args, NULL, rar2fs_opts, rar2fs_opt_proc))
@@ -4872,8 +5058,19 @@ int main(int argc, char *argv[])
         if (OPT_SET(OPT_KEY_DST))
                 fuse_opt_add_arg(&args, OPT_STR(OPT_KEY_DST, 0));
 
-        /*
-         * All static setup is ready, the rest is taken from the configuration.
+        /* 
+         * Initialize logging.
+         * LOG_PERROR is not in POSIX.1-2001 and if it is not defined make 
+         * sure we set it to something that will not result in a compilation
+         * error.
+         */
+#ifndef LOG_PERROR
+#define LOG_PERROR 0
+#endif
+        openlog("rar2fs", LOG_CONS | LOG_PERROR | LOG_PID, LOG_USER);
+
+	/*
+	 * All static setup is ready, the rest is taken from the configuration.
          * Continue in work() function which will not return until the process
          * is about to terminate.
          */
@@ -4889,5 +5086,8 @@ int main(int argc, char *argv[])
         if (icd != (iconv_t)-1 && iconv_close(icd) != 0)
                 perror("iconv_close");
 #endif
+
+        closelog();
+
         return res;
 }

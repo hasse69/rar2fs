@@ -56,6 +56,9 @@ AC_TYPE_SIZE_T
 AC_TYPE_SSIZE_T
 AC_CHECK_MEMBERS([struct stat.st_blksize])
 AC_CHECK_MEMBERS([struct stat.st_gen])
+AC_CHECK_MEMBERS([struct stat.st_atim])
+AC_CHECK_MEMBERS([struct stat.st_ctim])
+AC_CHECK_MEMBERS([struct stat.st_mtim])
 AC_STRUCT_ST_BLOCKS
 AC_CHECK_MEMBERS([struct stat.st_rdev])
 AC_TYPE_UINT64_T

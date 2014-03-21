@@ -72,8 +72,8 @@ struct DataSet
 #endif
 };
 
-
-HANDLE PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *r, FileHandle fh)
+HANDLE PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *r, FileHandle fh, 
+    const bool IsArchiveWorkaround)
 {
   DataSet *Data=NULL;
   try
@@ -123,7 +123,19 @@ HANDLE PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *r, FileHandle fh)
       return(NULL);
     }
 #if RARVER_MAJOR > 4
-    Data->Arc.RawSeek(SavePos,SEEK_SET);  // Restore file position!
+    // Restore file position!
+    if (IsArchiveWorkaround)
+    {
+      if (Data->Arc.Format >= RARFMT50)
+        Data->Arc.Seek(SavePos + Data->Arc.Tell() + 1, SEEK_SET); 
+      else
+        Data->Arc.Seek(SavePos + Data->Arc.Tell(), SEEK_SET);  
+      Data->Arc.RawSeek(Data->Arc.Tell(), SEEK_SET);  
+    }
+    else
+    {
+      Data->Arc.RawSeek(SavePos, SEEK_SET);  
+    }
 #endif
 #if RARVER_MAJOR < 5
     r->Flags=Data->Arc.MainHead.Flags;
@@ -181,7 +193,11 @@ HANDLE PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *r, FileHandle fh)
     else
       r->CmtState=r->CmtSize=0;
 #endif
+#if  RARVER_MAJOR > 5 || ( RARVER_MAJOR == 5 && RARVER_MINOR >= 10 )
+    Data->Extract.ExtractArchiveInit(Data->Arc);
+#else
     Data->Extract.ExtractArchiveInit(&Data->Cmd,Data->Arc);
+#endif
     return((HANDLE)Data);
   }
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
@@ -227,7 +243,9 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
   struct RARHeaderDataEx h;
   RARArchiveListEx* N_ = N;
 
+#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
   try
+#endif
   {
     *ResultCode = 0;
     uint FileCount = 0;
@@ -253,6 +271,21 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
       N->HeadSize = Arc.FileHead.HeadSize;
       N->Offset = Arc.CurBlockPos;
       N->hdr.Flags = Arc.FileHead.Flags;
+
+      /* For supporting high-precision timestamp.
+       * If not available, this value is set to 0 (1601/01/01 00:00:00.000000000).
+       * For reference, see http://support.microsoft.com/kb/167296/en
+       */
+      memset(&N->RawTime, 0, sizeof(struct RARArchiveListEx::RawTime_));
+#if RARVER_MAJOR > 4 
+      if (Arc.FileHead.mtime.IsSet())
+        N->RawTime.mtime = Arc.FileHead.mtime.GetRaw() - 116444736000000000ULL;
+      if (Arc.FileHead.ctime.IsSet())
+        N->RawTime.ctime = Arc.FileHead.ctime.GetRaw() - 116444736000000000ULL;
+      if (Arc.FileHead.atime.IsSet())
+        N->RawTime.atime = Arc.FileHead.atime.GetRaw() - 116444736000000000ULL;
+#endif
+
 #if RARVER_MAJOR > 4
       // Map some RAR5 properties to old-style flags if applicable
       if (Arc.Format >= RARFMT50)
@@ -288,8 +321,17 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
         if (Arc.FileHead.RedirType == FSREDIR_UNIXSYMLINK &&
           (N->hdr.FileAttr & 0xF000)==0xA000)
         {
+          if (N->hdr.UnpVer < 50)
+          {
+            int DataSize=Min(N->hdr.PackSize,sizeof(N->LinkTarget)-1);
+            Arc.Read(N->LinkTarget,DataSize);
+            N->LinkTarget[DataSize]=0;
+          } 
+          else
+          {
             wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
             N->LinkTargetFlags |= LINK_T_UNICODE; // Make sure UNICODE is set
+          }
         }
         else if (Arc.FileHead.RedirType == FSREDIR_FILECOPY)
         {
@@ -385,7 +427,11 @@ void PASCAL RARVolNameToFirstName(char* arch, bool oldstylevolume)
 #else
   wchar ArcName[NM];
   CharToWide(arch, ArcName, ASIZE(ArcName));
+#if  RARVER_MAJOR > 5 || ( RARVER_MAJOR == 5 && RARVER_MINOR >= 10 )
+  VolNameToFirstName(ArcName, ArcName, ASIZE(ArcName), !oldstylevolume);
+#else
   VolNameToFirstName(ArcName, ArcName, !oldstylevolume);
+#endif
   WideToChar(ArcName,arch,strlen(arch)+1);
 #endif
 }
@@ -403,19 +449,15 @@ void PASCAL RARGetFileInfo(HANDLE hArcData, const char *FileName, struct RARWcb 
 
   memset(&h, 0, sizeof(h));
   wcb->bytes = 0;
-  while (1) 
+  while (!RARReadHeaderEx(hArcData, &h))
   {
-    if (!RARReadHeaderEx(hArcData, &h))
+    WideToUtf(Arc.FileHead.FileName,FileNameUtf,ASIZE(FileNameUtf));
+    if (!strcmp(FileNameUtf, FileName))
     {
-      WideToUtf(Arc.FileHead.FileName,FileNameUtf,ASIZE(FileNameUtf));
-      if (!strcmp(FileNameUtf, FileName))
-      {
-        wcb->bytes = ListFileHeader(wcb->data, Arc);
-        return;
-      }
-      // Skip to next header
-      (void)RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
+      wcb->bytes = ListFileHeader(wcb->data, Arc);
+      return;
     }
+    (void)RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
   }
 #else
   (void)hArcData;

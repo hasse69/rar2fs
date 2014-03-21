@@ -142,6 +142,12 @@ struct RARArchiveListEx
     wchar_t    LinkTargetW[1024];
   };
   unsigned int LinkTargetFlags;
+  struct RawTime_
+  {
+    uint64_t atime;
+    uint64_t mtime;
+    uint64_t ctime;
+  } RawTime;
   unsigned int HeadSize;
   off_t        Offset;
   RARArchiveListEx* next;
@@ -149,15 +155,15 @@ struct RARArchiveListEx
 
 struct RARWcb
 {
-    unsigned int bytes;
-    wchar_t data[8192]; // 8k should be enough?
+  unsigned int bytes;
+  wchar_t data[8192]; // 8k should be enough?
 };
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-HANDLE       PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *ArchiveData, FileHandle);
+HANDLE       PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *ArchiveData, FileHandle, bool IsArchiveWorkaround);
 int          PASCAL RARFreeArchive(HANDLE hArcData);
 int          PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* fList, off_t* FileDataEnd, int *ResultCode);
 void         PASCAL RARFreeListEx(RARArchiveListEx* fList);

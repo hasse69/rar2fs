@@ -99,7 +99,7 @@ struct opt_entry *opt_entry_p  = &opt_entry_[0];
 int optdb_save(int opt, const char *s)
 {
         char *s1 = NULL;
-        char *endptr;
+        char *endptr = NULL;
 
         if (opt < 0 || opt > OPT_KEY_LAST)
                 return 1;
