@@ -1,5 +1,27 @@
 rar2fs ChangeLog file.
 
+2014-09-19  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #37]
+
+          Fixed a potential memory leak when compiling against 
+          libunrar versions prior to 4.2.0.
+
+        * Fixed a potential memory leak in the collect_files() 
+          function. This function is only used when mounting
+          single RAR archives which means it is rather harmless.
+
+        * Simplified code in function dir_entry_add_hash().
+
+2014-07-16  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Changed implementation of utimens
+
+        * [rar2fs #35]
+
+        Fixed a problem with RAR5 stats that were incorrectly
+        inherited for file reference links.
+
 2014-03-19  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.20.0

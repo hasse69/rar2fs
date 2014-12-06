@@ -221,6 +221,8 @@ HANDLE PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *r, FileHandle fh,
   catch (int ErrCode)
   {
     r->OpenResult=RarErrorToDll(ErrCode);
+    if (Data != NULL)
+      delete Data;
   }
 #endif
   return(NULL);

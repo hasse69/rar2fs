@@ -120,25 +120,14 @@ void dir_list_free(struct dir_entry_list *root)
 struct dir_entry_list *dir_entry_add_hash(struct dir_entry_list *l,
                 const char *key, struct stat *st, uint32_t hash, int type)
 {
-        int dir_entry_add_skip_ = 0;
-
         if (l->entry.head_flag != DIR_LIST_HEAD_) {
                 if (hash == l->entry.hash)
                         if (!strcmp(key, l->entry.name))
-                                dir_entry_add_skip_ = 1;
-        };
-        l->next = !dir_entry_add_skip_
-                ? malloc(sizeof(struct dir_entry_list))
-                : NULL;
-        if (l->next) {
-                l=l->next;
-                l->entry.head_flag = 0;
-                l->entry.name = strdup(key);
+                                return l;
+        }
+        if (dir_entry_add(l, key, st, type) != l) {
+                l = l->next;
                 l->entry.hash = hash;
-                l->entry.st = st;
-                l->entry.type = type;
-                l->entry.valid = 1; /* assume entry is valid */
-                l->next = NULL;
         }
         return l;
 }
@@ -152,7 +141,7 @@ struct dir_entry_list *dir_entry_add(struct dir_entry_list *l, const char *key,
 {
         l->next = malloc(sizeof(struct dir_entry_list));
         if (l->next) {
-                l=l->next;
+                l = l->next;
                 l->entry.name = strdup(key);
                 l->entry.hash = 0;
                 l->entry.st = st;

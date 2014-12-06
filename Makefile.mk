@@ -79,7 +79,7 @@ endif
 DEFINES+=-D_GNU_SOURCE
 CFLAGS+=-std=gnu99 -Wall
 
-C_COMPILE=$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(DEFINES) $(CONF) -DRARDLL -DFUSE_USE_VERSION=27 $(INCLUDES)
+C_COMPILE=$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(DEFINES) $(CONF) -DRARDLL -DFUSE_USE_VERSION=26 $(INCLUDES)
 CXX_COMPILE=$(CXX) $(CXXFLAGS) $(EXTRA_CXXFLAGS) $(DEFINES) -DRARDLL 
 LINK=$(CC)
 ifneq ("$(UNRAR_LIB)", "")
@@ -89,7 +89,7 @@ ifneq ("$(FUSE_LIB)", "")
 LIB_DIR+=-L$(FUSE_LIB)
 endif
 
-OBJECTS=dllext.o optdb.o filecache.o iobuffer.o sighandler.o dirlist.o utf8.o rar2fs.o
+OBJECTS=dllext.o optdb.o filecache.o iobuffer.o sighandler.o dirlist.o rar2fs.o
 DEPS=.deps
 
 all:	rar2fs mkr2i
