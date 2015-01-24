@@ -159,6 +159,7 @@ int optdb_save(int opt, const char *s)
                          * string. Avoid it."
                          */
                         char *s2 = s1;
+                        char *s_free = s1;   /* save pointer for free() */
                         if (strlen(s1)) {
                                 while ((s2 = strchr(s2, ';'))) {
                                         *s2++ = 0;
@@ -169,6 +170,7 @@ int optdb_save(int opt, const char *s)
                                 if (*s1)
                                         ADD_OPT_(opt, s1, OPT_STR_);
                         }
+                        s1 = s_free;         /* restore pointer */
                 }
                 break;
         }
