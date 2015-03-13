@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+    <meta charset='utf-8'>
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <meta name="description" content="rar2fs : FUSE file system for reading RAR archives">
+
+    <link rel="stylesheet" type="text/css" media="screen" href="stylesheets/stylesheet.css">
+
+    <title>rar2fs</title>
+  </head>
+
+  <body>
+
+    <!-- HEADER -->
+    <div id="header_wrap" class="outer">
+        <header class="inner">
+          <a id="forkme_banner" href="https://github.com/hasse69/rar2fs">View on GitHub</a>
+
+          <h1 id="project_title">rar2fs</h1>
+          <h2 id="project_tagline">FUSE file system for reading RAR archives</h2>
+
+            <section id="downloads">
+              <a class="zip_download_link" href="https://github.com/hasse69/rar2fs/zipball/master">Download this project as a .zip file</a>
+              <a class="tar_download_link" href="https://github.com/hasse69/rar2fs/tarball/master">Download this project as a tar.gz file</a>
+            </section>
+        </header>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div id="main_content_wrap" class="outer">
+      <section id="main_content" class="inner">
+        <p><em>rar2fs</em> is a FUSE based file system that can mount a source RAR archive/volume or a directory containing any number of RAR archives and read the contents as regular files on-the-fly. Non-archived files located in the source directory are handled transparently. Both compressed and non-compressed archives/volumes are supported but full media seek support (aka. indexing) is only available for non-compressed plaintext archives. In general support for compressed and/or encrypted archives is "best effort", highly depending on what type of information the archive contains and by what method it is accessed.</p>
+
+<p>Encrypted archives are supported but since <em>rar2fs</em> is completely non-interactive it requires the archive password to be stored on the local file system in a file in plaintext format. This of course is a major security limitation in itself. If you really need to use this feature, use it wisely. <em>The author(s) of rar2fs will not be held responsible for encrypted information being exposed due to this limitation</em>. If security is really an issue some encryption on file system level should be considered instead. A FUSE based encryption file system, such as <em><a href="http://en.wikipedia.org/wiki/EncFS">encfs</a></em>, has proven to work very well together with <em>rar2fs</em>.</p>
+
+<p><strong>Latest released version of rar2fs is 1.20.0 and can be downloaded <a href="https://docs.google.com/uc?export=download&amp;id=0B-2uEqYiZg3zR1F0b0tmRktiaXc">here</a>.</strong></p>
+
+<hr>
+
+<p>This program takes use of the free <em>"Portable UnRAR"</em> C++ library and some extensions to it. In order to build the API extensions the complete source tree of unrar is needed.</p>
+
+<p>The latest supported version of the unrar source tree (by <em>Alexander Roshal</em>) can be found here <a href="http://www.rarlab.com/rar/unrarsrc-5.2.3.tar.gz">http://www.rarlab.com/rar/unrarsrc-5.2.3.tar.gz</a>. Later versions, especially minor revision steps, should still be possible to use (should you discover a bug) depending on the level of backward source compatibility it offers. If a new source version breaks the build please report it through the <a href="http://code.google.com/p/rar2fs/issues/list">issue tracking</a> system or wait patiently for a new version of rar2fs to be released. New versions will be tested as soon as they are discovered. Also <strong>be aware</strong> that changing from one version of the source to another <strong>always</strong> will require that the current version of <em>libunrar.so</em> on the target system is replaced.</p>
+
+<hr>
+
+<p>To successfully build <em>rar2fs</em> a copy of the fuse development files must also exist on the host system (build server). Any more recent version of FUSE should be possible to use, but versions earlier than 2.6 has not been tested and most probably does <strong>not</strong> work. A recent version of FUSE development files can be downloaded here <a href="http://sourceforge.net/projects/fuse/files/fuse-2.X/">http://sourceforge.net/projects/fuse/files/fuse-2.X/</a>. For FreeBSD the FUSE ports <a href="http://www.freshports.org/sysutils/fusefs-kmod/">sysutils/fusefs-kmod</a> and <a href="http://www.freshports.org/sysutils/fusefs-libs/">sysutils/fusefs-libs</a> must be installed.</p>
+
+<p>Version 1.11.3 and later of <em>rar2fs</em> supports <em>MacFUSE</em>, the FUSE clone for Mac OS X. The latest installation package can be found on the <em><a href="http://code.google.com/p/macfuse/">MacFUSE</a></em> project site.</p>
+
+<p>The more recent versions of <em>rar2fs</em> also supports <em>Fuse4x</em>, the reference implementation of the Linux FUSE API for Mac OS X and successor to the non-proprietary version of <em>MacFUSE</em>. More information can be found on the <em><a href="http://fuse4x.org">Fuse4x</a></em> project site. The latest installation package of <em>Fuse4x</em> can be downloaded <em><a href="https://github.com/fuse4x/fuse4x/downloads">here</a></em>.</p>
+
+<p>Version 1.15.2 and later includes support for FUSE for OS X (or <em>OSXFUSE</em>). <em>OSXFUSE</em> is a successor to <em>MacFUSE</em> which is no longer being maintained. <em>OSXFUSE</em> has also been merged with <em>Fuse4x</em>. A recent installation of <em>OSXFUSE</em> can be found <em><a href="http://osxfuse.github.com/">here</a></em>.</p>
+
+<hr>
+
+<p>For further information about building and using <em>rar2fs</em> refer to the <a href="https://code.google.com/p/rar2fs/source/browse/trunk/README">README</a> file or the <a href="http://code.google.com/p/rar2fs/w/list">Wiki</a>. If you still have questions or maybe even have a suggestion for improvement etc. do not hesitate posting it to the <a href="http://groups.google.com/group/rar2fs">rar2fs</a> group.</p>
+
+<hr>
+
+<p><a href="https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&amp;hosted_button_id=FZ8VF22AMASZS"><img src="https://www.paypal.com/en_US/i/btn/btn_donateCC_LG.gif" alt=""></a>
+<a href="http://www.gnu.org/licenses/licenses.html"><img src="http://www.gnu.org/graphics/gplv3-127x51.png" alt=""></a></p>
+      </section>
+    </div>
+
+    <!-- FOOTER  -->
+    <div id="footer_wrap" class="outer">
+      <footer class="inner">
+        <p class="copyright">rar2fs maintained by <a href="https://github.com/hasse69">hasse69</a></p>
+        <p>Published with <a href="http://pages.github.com">GitHub Pages</a></p>
+      </footer>
+    </div>
+
+              <script type="text/javascript">
+            var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");
+            document.write(unescape("%3Cscript src='" + gaJsHost + "google-analytics.com/ga.js' type='text/javascript'%3E%3C/script%3E"));
+          </script>
+          <script type="text/javascript">
+            try {
+              var pageTracker = _gat._getTracker("UA-22828301-1");
+            pageTracker._trackPageview();
+            } catch(err) {}
+          </script>
+
+
+  </body>
+</html>
