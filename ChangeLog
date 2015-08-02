@@ -1,5 +1,10 @@
 rar2fs ChangeLog file.
 
+2015-08-02  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Built and tested against UnRAR source 5.30 beta 1 (5.3.1)
+          This should resolve issue [rar2fs #40]
+
 2015-01-15  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed a crash when using the --exclude option.
