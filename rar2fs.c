@@ -4609,7 +4609,7 @@ static void *work_task(void *data)
         struct work_task_data *wdt = (struct work_task_data *)data;
         wdt->status = wdt->mt ? fuse_loop_mt(wdt->fuse) : fuse_loop(wdt->fuse);
         wdt->work_task_exited = 1;
-        pthread_exit(NULL);
+        return NULL;
 }
 
 /*!
