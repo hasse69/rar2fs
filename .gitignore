@@ -1,0 +1,15 @@
+config.h*
+config.log
+config.status
+config
+configure
+*.o
+.deps
+INSTALL
+Makefile
+Makefile.in
+aclocal.m4
+autom4te.cache
+stamp-h1
+mkr2i
+rar2fs

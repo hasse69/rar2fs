@@ -1,5 +1,9 @@
 rar2fs ChangeLog file.
 
+2015-11-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Fix wrong path being used in utimens 
+
 2015-08-28  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.21.0

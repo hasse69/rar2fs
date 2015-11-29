@@ -4191,7 +4191,7 @@ static int rar2_rmdir(const char *path)
         return -EPERM;
 }
 
-#ifdef HAVE_UTIMENSAT
+#if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
 /*!
  *****************************************************************************
  *
@@ -4202,8 +4202,10 @@ static int rar2_utimens(const char *path, const struct timespec ts[2])
 
         if (!access_chk(path, 0)) {
                 int res;
+                char *root;
+                ABS_ROOT(root, path);
                 /* don't use utime/utimes since they follow symlinks */
-                res = utimensat(0, path, ts, AT_SYMLINK_NOFOLLOW);
+                res = utimensat(0, root, ts, AT_SYMLINK_NOFOLLOW);
                 if (res == -1)
                         return -errno;
                 return 0;
@@ -4568,7 +4570,7 @@ static int check_libfuse(int verbose)
 static struct fuse_operations rar2_operations = {
         .init = rar2_init,
         .statfs = rar2_statfs,
-#ifdef HAVE_UTIMENSAT
+#if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
         .utimens = rar2_utimens,
 #endif
         .destroy = rar2_destroy,
