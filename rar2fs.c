@@ -724,9 +724,9 @@ static int pclose_(FILE *fp, pid_t pid)
 #define VOL_REAL_SZ op->entry_p->vsize_real
 
 /* Calculate volume number base offset using input file offset */
-#define VOL_NO(off, d)\
-        (off < VOL_FIRST_SZ ? 0 : ((off - VOL_FIRST_SZ) /\
-                (VOL_NEXT_SZ - (d))) + 1)
+#define VOL_NO(e_p, off, d)\
+        (off < (e_p)->vsize_first ? 0 : ((off - (e_p)->vsize_first) /\
+                ((e_p)->vsize_next - (d))) + 1)
 
 /*!
  *****************************************************************************
@@ -800,15 +800,14 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                 if (op->entry_p->flags.multipart) {
                         /* 
                          * RAR5.x (and later?) have a 1 byte volume number in 
-                         * the Main Archive Header for volume 1-127 and 2 byte
+                         * the Main Archive Header for volume 1-127 and 2 bytes
                          * for the rest. Check if we need to compensate. 
                          */
-                        int vol = VOL_NO(offset, 0);
-                        if (op->entry_p->flags.vno_in_header && 
-                                        op->entry_p->vno_base < 128 &&
+                        int vol = VOL_NO(op->entry_p, offset, 0);
+                        if (op->entry_p->flags.vno_check_header_sz &&
                                         (vol + op->entry_p->vno_base) > 128) {
                                 int vol_contrib = 128 - op->entry_p->vno_base;
-                                vol = vol_contrib + VOL_NO(offset - (vol_contrib * VOL_NEXT_SZ), 1);
+                                vol = vol_contrib + VOL_NO(op->entry_p, offset - (vol_contrib * VOL_NEXT_SZ), 1);
                                 chunk = (VOL_NEXT_SZ - 1) -
                                           ((offset - (VOL_FIRST_SZ + (127 * VOL_NEXT_SZ))) %
                                           (VOL_NEXT_SZ - 1));
@@ -2381,6 +2380,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         }
                 }
 
+                int check_header = 0;
                 if (next->hdr.Method == FHD_STORING && 
                                 !(next->hdr.Flags & LHD_PASSWORD) &&
                                 !IS_RAR_DIR(&next->hdr)) {
@@ -2405,14 +2405,11 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                                                 RARGetMainHeaderSize(hdl) + next->HeadSize);
                                                 /* 
                                                  * Check if we might need to compensate for the 
-                                                 * 1-byte RAR5.x (and later?) volume number in 
-                                                 * next main archive header.
+                                                 * 1-byte/2-byte RAR5.x (and later?) volume number
+                                                 * in next main archive header.
                                                  */
-                                                if (next->hdr.UnpVer >= 50) {
-                                                        if (entry_p->vno_base == 1 || entry_p->vno_base == 128)
-                                                                entry_p->vsize_next -= 1;
-                                                        entry_p->flags.vno_in_header = 1;
-                                                }
+                                                if (next->hdr.UnpVer >= 50)
+                                                        check_header = 1;
                                         }
                                 } else {
                                         entry_p->flags.raw = 0;
@@ -2448,8 +2445,16 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 entry_p->method = next->hdr.Method;
                 set_rarstats(entry_p, next, 0);
 
-cache_hit:
+                if (check_header) {
+                        if (entry_p->vno_base <= 128) {
+                                if (entry_p->vno_base + VOL_NO(entry_p, entry_p->stat.st_size - 1, 0) > 128)
+                                       entry_p->flags.vno_check_header_sz = 1;
+                        } else {
+                                entry_p->vsize_next -= 1;
+                        }
+                }
 
+cache_hit:
                 if (display && buffer) {
                         char *safe_path = strdup(entry_p->name_p);
                         *buffer = dir_entry_add_hash(

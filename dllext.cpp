@@ -395,7 +395,7 @@ unsigned int PASCAL RARGetMarkHeaderSize(HANDLE hArcData)
 {
 #if RARVER_MAJOR > 4
   DataSet *Data=(DataSet*)hArcData;
-  return (Data->Arc.FileHead.UnpVer >= 50 ? SIZEOF_MARKHEAD5 : SIZEOF_MARKHEAD3);
+  return (Data->Arc.Format >= RARFMT50 ? SIZEOF_MARKHEAD5 : SIZEOF_MARKHEAD3);
 #else
   (void)hArcData;
   return SIZEOF_MARKHEAD;
@@ -622,7 +622,7 @@ static void ListFileAttr(uint A,HOST_SYSTEM_TYPE HostType,wchar *AttrStr,size_t 
 }
 
 // This is a variant of ListFileHeader() function in UnRAR source  
-// (somewhat simplfied) since that function is not available in 
+// (somewhat simplified) since that function is not available in 
 // SILENT/RARDLL mode.
 // This function outputs the header information in technical format
 // to a wcs buffer instead of a file pointer (stderr/stdout).

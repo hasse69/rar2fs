@@ -1,5 +1,12 @@
 rar2fs ChangeLog file.
 
+2015-12-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #42]
+
+          Fixed a header size calculation error for RAR5 volumes
+          when using libunrar v5.30 beta 5 (5.3.6) and later.
+
 2015-11-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fix wrong path being used in utimens 
