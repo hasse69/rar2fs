@@ -1571,7 +1571,7 @@ static int extract_index(const dir_elem_t *entry_p, off_t offset)
         d.ArcName = entry_p->rar_p;
         d.OpenMode = RAR_OM_EXTRACT;
 
-        struct RARHeaderData header;
+        struct RARHeaderDataEx header;
         HANDLE hdl = 0;
         struct idx_head head = {R2I_MAGIC, 0, 0, 0, 0};
         char *r2i;
@@ -1600,7 +1600,7 @@ static int extract_index(const dir_elem_t *entry_p, off_t offset)
 
         header.CmtBufSize = 0;
         while (1) {
-                if (RARReadHeader(hdl, &header))
+                if (RARReadHeaderEx(hdl, &header))
                         break;
                 /* We won't extract subdirs */
                 if (IS_RAR_DIR(&header) ||
@@ -1689,7 +1689,7 @@ static int extract_rar(char *arch, const char *file, FILE *fp, void *arg)
 
         d.Callback = extract_callback;
         d.UserData = (LPARAM)&cb_arg;
-        struct RARHeaderData header;
+        struct RARHeaderDataEx header;
         HANDLE hdl = fp 
                 ? RARInitArchiveEx(&d, INIT_FP_ARG_(fp))
                 : RAROpenArchiveEx(&d);
@@ -1698,7 +1698,7 @@ static int extract_rar(char *arch, const char *file, FILE *fp, void *arg)
 
         header.CmtBufSize = 0;
         while (1) {
-                if (RARReadHeader(hdl, &header))
+                if (RARReadHeaderEx(hdl, &header))
                         break;
                 /* We won't extract subdirs */
                 if (IS_RAR_DIR(&header) || strcmp(header.FileName, file)) {

@@ -1,5 +1,12 @@
 rar2fs ChangeLog file.
 
+2015-12-20  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #43]
+
+        Replaced use of RARHeaderData with RARHeaderDataEx to allow
+        for longer filenames than 260 characters.
+
 2015-12-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * [rar2fs #42]
