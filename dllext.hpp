@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2014 Hans Beckerus (hans.beckerus#AT#gmail.com)
+    Copyright (C) 2009 Hans Beckerus (hans.beckerus#AT#gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -150,6 +150,7 @@ struct RARArchiveListEx
   } RawTime;
   unsigned int HeadSize;
   off_t        Offset;
+  off_t        FileDataEnd;
   RARArchiveListEx* next;
 };
 
@@ -165,10 +166,8 @@ extern "C" {
 
 HANDLE       PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *ArchiveData, FileHandle, bool IsArchiveWorkaround);
 int          PASCAL RARFreeArchive(HANDLE hArcData);
-int          PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* fList, off_t* FileDataEnd, int *ResultCode);
+int          PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* fList, int *ResultCode);
 void         PASCAL RARFreeListEx(RARArchiveListEx* fList);
-unsigned int PASCAL RARGetMainHeaderSize(HANDLE hArcData);
-unsigned int PASCAL RARGetMarkHeaderSize(HANDLE hArcData);
 FileHandle   PASCAL RARGetFileHandle(HANDLE hArcData);
 void         PASCAL RARNextVolumeName(char*, bool);
 void         PASCAL RARVolNameToFirstName(char*, bool);

@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2014 Hans Beckerus (hans.beckerus#AT#gmail.com)
+    Copyright (C) 2009 Hans Beckerus (hans.beckerus#AT#gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -238,7 +238,7 @@ int PASCAL RARFreeArchive(HANDLE hArcData)
 }
 
 
-int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDataEnd, int *ResultCode)
+int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, int *ResultCode)
 {
   DataSet *Data = (DataSet *)hArcData;
   Archive& Arc = Data->Arc;
@@ -272,6 +272,7 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
       memcpy(&N->hdr, &h, sizeof(h));
       N->HeadSize = Arc.FileHead.HeadSize;
       N->Offset = Arc.CurBlockPos;
+      N->FileDataEnd = Arc.NextBlockPos;
       N->hdr.Flags = Arc.FileHead.Flags;
 
       /* For supporting high-precision timestamp.
@@ -343,9 +344,6 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, off_t* FileDat
       }
 #endif
       
-      if (FileDataEnd)
-        *FileDataEnd = Arc.NextBlockPos;
-
       // Skip to next header
       PFCode = RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
       if (PFCode)
@@ -381,25 +379,6 @@ void PASCAL RARFreeListEx(RARArchiveListEx* L)
     N = N->next;
     delete tmp;
   }
-}
-
-
-unsigned int PASCAL RARGetMainHeaderSize(HANDLE hArcData)
-{
-  DataSet *Data=(DataSet*)hArcData;
-  return Data->Arc.MainHead.HeadSize;
-}
- 
- 	
-unsigned int PASCAL RARGetMarkHeaderSize(HANDLE hArcData)
-{
-#if RARVER_MAJOR > 4
-  DataSet *Data=(DataSet*)hArcData;
-  return (Data->Arc.Format >= RARFMT50 ? SIZEOF_MARKHEAD5 : SIZEOF_MARKHEAD3);
-#else
-  (void)hArcData;
-  return SIZEOF_MARKHEAD;
-#endif
 }
 
 FileHandle PASCAL RARGetFileHandle(HANDLE hArcData)

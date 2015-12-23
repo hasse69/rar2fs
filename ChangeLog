@@ -1,5 +1,19 @@
 rar2fs ChangeLog file.
 
+2015-12-23  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #42]
+
+        Fixed additional issues with offset calculations for both
+        legacy and RAR5 volume archives in store mode.
+
+        * Removed the DLL extensions RARGetMainHeaderSize() and 
+          RARGetMarkHeaderSize() since they are no longer needed.
+
+        * Updated file cache structure. 
+
+        * Updated copyright headers.
+
 2015-12-20  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * [rar2fs #43]

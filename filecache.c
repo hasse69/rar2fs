@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2014 Hans Beckerus (hans.beckerus@gmail.com)
+    Copyright (C) 2009 Hans Beckerus (hans.beckerus@gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -236,10 +236,10 @@ void filecache_copy(const dir_elem_t *src, dir_elem_t *dest)
                 CP_ENTRY_F(stat);
                 CP_ENTRY_F(offset);
                 CP_ENTRY_F(msize);
-                CP_ENTRY_F(vsize_real);
+                CP_ENTRY_F(vsize_real_first);
+                CP_ENTRY_F(vsize_real_next);
                 CP_ENTRY_F(vsize_next);
                 CP_ENTRY_F(vno_base);
-                CP_ENTRY_F(vno_max);
                 CP_ENTRY_F(vlen);
                 CP_ENTRY_F(vpos);
                 CP_ENTRY_F(vtype);

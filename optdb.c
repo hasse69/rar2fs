@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2014 Hans Beckerus (hans.beckerus#AT#gmail.com)
+    Copyright (C) 2009 Hans Beckerus (hans.beckerus#AT#gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -75,6 +75,10 @@ struct opt_entry *opt_entry_p  = &opt_entry_[0];
                         OPT_(o)->m[OPT_(o)->n_elem++] = (t)strdup(s1); \
                 else \
                         OPT_(o)->m[OPT_(o)->n_elem++] = (t)strtoul(s1, NULL, 10); \
+                        if (o == OPT_KEY_SEEK_LENGTH) { \
+                                if (OPT_(o)->m[OPT_(o)->n_elem - 1]) \
+                                        OPT_(o)->m[OPT_(o)->n_elem - 1]++; \
+                        }\
         } while (0)
 
 #define CLR_OPT_(o) \

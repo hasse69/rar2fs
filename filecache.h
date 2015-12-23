@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2014 Hans Beckerus (hans.beckerus@gmail.com)
+    Copyright (C) 2009 Hans Beckerus (hans.beckerus@gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -42,6 +42,7 @@ struct dir_elem {
         char *file_p;
         char *file2_p;
         char *link_target_p;
+        short method;                /* for getxattr() */
         struct stat stat;
         uint32_t dir_hash;
         off_t offset;                /* >0: offset in rar file (raw read) */
@@ -49,14 +50,13 @@ struct dir_elem {
                 off_t vsize_first;   /* >0: volume file size (raw read) */
                 off_t msize;         /* >0: mmap size */
         };
-        off_t vsize_real;
+        off_t vsize_real_first;
+        off_t vsize_real_next;
         off_t vsize_next;
         short vno_base;
-        short vno_max;
         short vlen;
         short vpos;
         short vtype;
-        short method;                /* for getxattr() */
         union {
                 struct {
 #ifndef WORDS_BIGENDIAN
@@ -66,9 +66,10 @@ struct dir_elem {
                         unsigned int fake_iso:1;
                         unsigned int mmap:2;
                         unsigned int force_dir:1;
-                        unsigned int vno_check_header_sz:1;
+                        unsigned int vsize_fixup_needed:1;
                         unsigned int encrypted:1;
-                        unsigned int :20;
+                        unsigned int vsize_resolved:1;
+                        unsigned int :19;
                         unsigned int direct_io:1;
                         unsigned int avi_tested:1;
                         unsigned int save_eof:1;
@@ -76,9 +77,10 @@ struct dir_elem {
                         unsigned int save_eof:1;
                         unsigned int avi_tested:1;
                         unsigned int direct_io:1;
-                        unsigned int :20;
+                        unsigned int :19;
+                        unsigned int vsize_resolved:1;
                         unsigned int encrypted:1;
-                        unsigned int vno_chk_header_sz:1;
+                        unsigned int vsize_fixup_needed:1;
                         unsigned int force_dir:1;
                         unsigned int mmap:2;
                         unsigned int fake_iso:1;

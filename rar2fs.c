@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009-2014 Hans Beckerus (hans.beckerus#AT#gmail.com)
+    Copyright (C) 2009 Hans Beckerus (hans.beckerus#AT#gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -88,6 +88,7 @@ struct io_context {
         pid_t pid;
         unsigned int seq;
         short vno;
+        short vno_max;
         dir_elem_t *entry_p;
         struct vol_handle *volHdl;
         int pfd1[2];
@@ -720,13 +721,9 @@ static int pclose_(FILE *fp, pid_t pid)
  */
 #define VOL_NEXT_SZ op->entry_p->vsize_next
 
-/* Size of file data in first volume number */
-#define VOL_REAL_SZ op->entry_p->vsize_real
-
-/* Calculate volume number base offset using input file offset */
-#define VOL_NO(e_p, off, d)\
-        (off < (e_p)->vsize_first ? 0 : ((off - (e_p)->vsize_first) /\
-                ((e_p)->vsize_next - (d))) + 1)
+/* Size of file data (including headers) in first volume number */
+#define VOL_REAL_SZ(x) \
+        ((x)?op->entry_p->vsize_real_next:op->entry_p->vsize_real_first)
 
 /*!
  *****************************************************************************
@@ -798,26 +795,29 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                 off_t src_off = 0;
                 struct vol_handle *vol_p = NULL;
                 if (op->entry_p->flags.multipart) {
+                        int vol;
                         /* 
-                         * RAR5.x (and later?) have a 1 byte volume number in 
-                         * the Main Archive Header for volume 1-127 and 2 bytes
-                         * for the rest. Check if we need to compensate. 
+                         * RAR5 (and later?) have a one byte volume number in 
+                         * the Main Archive Header for volume 1-127 and two 
+                         * bytes for the rest. Check if we need to compensate. 
                          */
-                        int vol = VOL_NO(op->entry_p, offset, 0);
-                        if (op->entry_p->flags.vno_check_header_sz &&
-                                        (vol + op->entry_p->vno_base) > 128) {
+                        if (op->entry_p->flags.vsize_fixup_needed) {
                                 int vol_contrib = 128 - op->entry_p->vno_base;
-                                vol = vol_contrib + VOL_NO(op->entry_p, offset - (vol_contrib * VOL_NEXT_SZ), 1);
-                                chunk = (VOL_NEXT_SZ - 1) -
-                                          ((offset - (VOL_FIRST_SZ + (127 * VOL_NEXT_SZ))) %
-                                          (VOL_NEXT_SZ - 1));
-                        } else {
-                                chunk = offset < VOL_FIRST_SZ
-                                        ? VOL_FIRST_SZ - offset
-                                        : (VOL_NEXT_SZ) -
-                                          ((offset - VOL_FIRST_SZ) % (VOL_NEXT_SZ));
+                                if (offset >= (VOL_FIRST_SZ + (vol_contrib * VOL_NEXT_SZ))) {
+                                        off_t offset_left =
+                                                offset - (VOL_FIRST_SZ + (vol_contrib * VOL_NEXT_SZ));
+                                        vol = 1 + vol_contrib + (offset_left / (VOL_NEXT_SZ - 1));
+                                        chunk = (VOL_NEXT_SZ - 1) - (offset_left % (VOL_NEXT_SZ - 1));
+                                        goto vol_ready;
+                                }
                         }
 
+                        vol = offset < VOL_FIRST_SZ ? 0 :
+                                1 + ((offset - VOL_FIRST_SZ) / VOL_NEXT_SZ);
+                        chunk = offset < VOL_FIRST_SZ ? VOL_FIRST_SZ - offset :
+                                VOL_NEXT_SZ - ((offset - VOL_FIRST_SZ) % (VOL_NEXT_SZ));
+
+vol_ready:
                         /* keep current open file */
                         if (vol != op->vno) {
                                 /* close/open */
@@ -826,7 +826,7 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                                         vol_p = &op->volHdl[vol];
                                         if (vol_p->fp) {
                                                 fp = vol_p->fp;
-                                                src_off = VOL_REAL_SZ - chunk;
+                                                src_off = VOL_REAL_SZ(vol) - chunk;
                                                 if (src_off != vol_p->pos)
                                                         force_seek = 1;
                                                 goto seek_check;
@@ -866,10 +866,10 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                         }
 seek_check:
                         if (force_seek || offset != op->pos) {
-                                src_off = VOL_REAL_SZ - chunk;
+                                src_off = VOL_REAL_SZ(vol) - chunk;
                                 printd(3, "SEEK src_off = %" PRIu64 ", "
                                                 "VOL_REAL_SZ = %" PRIu64 "\n",
-                                                src_off, VOL_REAL_SZ);
+                                                src_off, VOL_REAL_SZ(vol));
                                 fseeko(fp, src_off, SEEK_SET);
                                 force_seek = 0;
                         }
@@ -1910,6 +1910,7 @@ static void resolve_filecopy(RARArchiveListEx *next, RARArchiveListEx *root)
                                         memcpy(&next->hdr, &next2->hdr, sizeof(struct RARHeaderDataEx));
                                         next->HeadSize = next2->HeadSize;
                                         next->Offset = next2->Offset;
+                                        next->FileDataEnd = next2->FileDataEnd;
                                         break;
                                 }
                                 next2 = next2->next;
@@ -2001,7 +2002,7 @@ static int listrar_rar(const char *path, struct dir_entry_list **buffer,
         int dll_result;
         RARArchiveListEx LL;
         RARArchiveListEx *next2 = &LL;
-        if (!RARListArchiveEx(hdl2, next2, NULL, &dll_result))
+        if (!RARListArchiveEx(hdl2, next2, &dll_result))
                 goto file_error;
 
         char *tmp1 = strdup(entry_p->name_p);
@@ -2206,8 +2207,8 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         pthread_mutex_lock(&file_access_mutex);
         RAROpenArchiveDataEx d;
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
-        d.ArcName = (char *)arch;       /* Horrible cast! But hey... it is the API! */
-        d.OpenMode = RAR_OM_LIST;
+        d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
+        d.OpenMode = RAR_OM_LIST_INCSPLIT;
         d.Callback = list_callback_noswitch;
         d.UserData = (LPARAM)arch;
         HANDLE hdl = RAROpenArchiveEx(&d);
@@ -2222,10 +2223,9 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
 
         int n_files;
         int dll_result;
-        off_t FileDataEnd;
         RARArchiveListEx L;
         RARArchiveListEx *next = &L;
-        if (!(n_files = RARListArchiveEx(hdl, next, &FileDataEnd, &dll_result))) {
+        if (!(n_files = RARListArchiveEx(hdl, next, &dll_result))) {
                 RARCloseArchive(hdl);
                 pthread_mutex_unlock(&file_access_mutex);
                 if (dll_result == ERAR_EOPEN || dll_result == ERAR_END_ARCHIVE)
@@ -2334,6 +2334,30 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 printd(3, "Looking up %s in cache\n", mp);
                 dir_elem_t *entry_p = filecache_get(mp);
                 if (entry_p)  {
+                        if (!entry_p->flags.vsize_resolved) {
+                              entry_p->vsize_real_next = next->FileDataEnd;
+                              entry_p->vsize_next = GET_RAR_PACK_SZ(&next->hdr);
+                              entry_p->flags.vsize_resolved = 1;
+                              /* 
+                               * Check if we might need to compensate for the
+                               * 1-byte/2-byte RAR5 (and later?) volume number
+                               * in next main archive header.
+                               */
+                              if (next->hdr.UnpVer >= 50) {
+                                      /* 
+                                       * If base is last or next to last volume
+                                       * with one extra byte in header this and
+                                       * next volume size have already been
+                                       * resolved.
+                                       */
+                                      if (entry_p->vno_base < 128) { 
+                                              if (entry_p->stat.st_size >
+                                                            (entry_p->vsize_first + 
+                                                            (entry_p->vsize_next * (128 - entry_p->vno_base))))
+                                                      entry_p->flags.vsize_fixup_needed = 1;
+                                      }
+                              }
+                        }
                         /* 
                          * Check if this was a forced/fake entry. In that
                          * case update it with proper stats.
@@ -2352,6 +2376,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 entry_p->name_p = strdup(mp);
                 entry_p->rar_p = strdup(arch);
                 entry_p->file_p = strdup(next->hdr.FileName);
+                entry_p->flags.vsize_resolved = 1; /* Assume sizes will be resolved */
 
                 /* Check for .rar file inside archive */
                 if (!OPT_SET(OPT_KEY_FLAT_ONLY) && IS_RAR(entry_p->name_p)
@@ -2380,7 +2405,6 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         }
                 }
 
-                int check_header = 0;
                 if (next->hdr.Method == FHD_STORING && 
                                 !(next->hdr.Flags & LHD_PASSWORD) &&
                                 !IS_RAR_DIR(&next->hdr)) {
@@ -2398,18 +2422,15 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                         entry_p->vlen = len;
                                         entry_p->vpos = pos;
                                         if (!IS_RAR_DIR(&next->hdr)) {
-                                                entry_p->vsize_real = FileDataEnd;
+                                                entry_p->vsize_real_first = next->FileDataEnd;
                                                 entry_p->vsize_first = GET_RAR_PACK_SZ(&next->hdr);
-                                                entry_p->vsize_next = FileDataEnd - (
-                                                                RARGetMarkHeaderSize(hdl) +
-                                                                RARGetMainHeaderSize(hdl) + next->HeadSize);
-                                                /* 
-                                                 * Check if we might need to compensate for the 
-                                                 * 1-byte/2-byte RAR5.x (and later?) volume number
-                                                 * in next main archive header.
+                                                /*
+                                                 * Assume next volume to hold same amount
+                                                 * of data as the first. It will be adjusted
+                                                 * later if needed.
                                                  */
-                                                if (next->hdr.UnpVer >= 50)
-                                                        check_header = 1;
+                                                entry_p->vsize_next = entry_p->vsize_first;
+                                                entry_p->flags.vsize_resolved = 0;
                                         }
                                 } else {
                                         entry_p->flags.raw = 0;
@@ -2444,15 +2465,6 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 }
                 entry_p->method = next->hdr.Method;
                 set_rarstats(entry_p, next, 0);
-
-                if (check_header) {
-                        if (entry_p->vno_base <= 128) {
-                                if (entry_p->vno_base + VOL_NO(entry_p, entry_p->stat.st_size - 1, 0) > 128)
-                                       entry_p->flags.vno_check_header_sz = 1;
-                        } else {
-                                entry_p->vsize_next -= 1;
-                        }
-                }
 
 cache_hit:
                 if (display && buffer) {
@@ -3504,7 +3516,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                                 OPT_SET(OPT_KEY_PREOPEN_IMG) &&
                                                 entry_p->flags.image) {
                                         if (entry_p->vtype == 1) {  /* New numbering */
-                                                entry_p->vno_max =
+                                                op->vno_max =
                                                     pow_(10, entry_p->vlen) - 1;
                                         } else {
                                                  /* 
@@ -3514,14 +3526,14 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                                   * Will probably hit the open file limit 
                                                   * anyway.
                                                   */
-                                                 entry_p->vno_max = 901;  /* .rar -> .z99 */
+                                                 op->vno_max = 901;  /* .rar -> .z99 */
                                         }
-                                        op->volHdl = malloc(entry_p->vno_max * sizeof(struct vol_handle));
+                                        op->volHdl = malloc(op->vno_max * sizeof(struct vol_handle));
                                         if (op->volHdl) {
-                                                memset(op->volHdl, 0, entry_p->vno_max * sizeof(struct vol_handle));
+                                                memset(op->volHdl, 0, op->vno_max * sizeof(struct vol_handle));
                                                 char *tmp = strdup(entry_p->rar_p);
                                                 int j = 0;
-                                                while (j < entry_p->vno_max) {
+                                                while (j < op->vno_max) {
                                                         FILE *fp_ = fopen(tmp, "r");
                                                         if (fp_ == NULL)
                                                                 break;
@@ -3532,7 +3544,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                                          * guess. If it is wrong it will be adjusted
                                                          * later.
                                                          */
-                                                        op->volHdl[j].pos = VOL_REAL_SZ - 
+                                                        op->volHdl[j].pos = VOL_REAL_SZ(j) - 
                                                                         (j ? VOL_NEXT_SZ : VOL_FIRST_SZ);
                                                         printd(3, "SEEK src_off = %" PRIu64 "\n", op->volHdl[j].pos);
                                                         fseeko(fp_, op->volHdl[j].pos, SEEK_SET);
@@ -3887,7 +3899,7 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                         if (op->entry_p->flags.raw) {
                                 if (op->volHdl) {
                                         int j;
-                                        for (j = 0; j < op->entry_p->vno_max; j++) {
+                                        for (j = 0; j < op->vno_max; j++) {
                                                 if (op->volHdl[j].fp)
                                                         fclose(op->volHdl[j].fp);
                                         }
@@ -4844,7 +4856,7 @@ static void print_version()
         src_rev[0] = '\0';
 #endif
 #endif
-        printf("rar2fs v%u.%u.%u%s (DLL version %d)    Copyright (C) 2009-2014 Hans Beckerus\n",
+        printf("rar2fs v%u.%u.%u%s (DLL version %d)    Copyright (C) 2009 Hans Beckerus\n",
                RAR2FS_MAJOR_VER,
                RAR2FS_MINOR_VER, RAR2FS_PATCH_LVL,
                src_rev,
