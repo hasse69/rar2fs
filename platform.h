@@ -105,9 +105,6 @@
 #define MB()
 #endif
 
-extern long page_size_;
-#define P_ALIGN_(a) (((a)+page_size_)&~(page_size_-1))
-
 #ifdef HAVE_STDBOOL_H
 # include <stdbool.h>
 #else

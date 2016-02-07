@@ -196,7 +196,7 @@ struct io_handle {
 #ifdef HAVE_ICONV
 static iconv_t icd;
 #endif
-long page_size_ = 0;
+static long page_size_ = 0;
 static int mount_type;
 static struct dir_entry_list arch_list_root;        /* internal list root */
 static struct dir_entry_list *arch_list = &arch_list_root;
@@ -206,6 +206,8 @@ static int fs_terminated = 0;
 static int fs_loop = 0;
 static int64_t blkdev_size = -1;
 static mode_t umask_ = 0022;
+
+#define P_ALIGN_(a) (((a)+page_size_)&~(page_size_-1))
 
 #ifdef __linux
 #define IS_BLKDEV() (blkdev_size >= 0)
