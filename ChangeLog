@@ -1,5 +1,11 @@
 rar2fs ChangeLog file.
 
+2016-02-10  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Added options --relatime and --relatime-rar.
+
+        * Removed page_size dependency.
+
 2016-01-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Released 1.22.0
