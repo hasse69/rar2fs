@@ -761,6 +761,107 @@ static char *get_vname(int t, const char *str, int vol, int len, int pos)
         return s;
 }
 
+#if _POSIX_TIMERS < 1
+#define CLOCK_REALTIME 0
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int clock_gettime(int clk_id, struct timespec *ts)
+{
+        struct timeval now;
+        (void)clk_id; /* not used */
+        int rv = gettimeofday(&now, NULL);
+        if (rv)
+                return rv;
+        ts->tv_sec  = now.tv_sec;
+        ts->tv_nsec = now.tv_usec * 1000;
+        return 0;
+}
+
+#endif
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static void update_atime(dir_elem_t *entry_p, struct timespec *tp_in)
+{
+        dir_elem_t *e_p;
+        struct timespec tp[2];
+        int dir_updated = 0;
+
+        tp[0].tv_sec = tp_in->tv_sec;
+        tp[0].tv_nsec = tp_in->tv_nsec;
+
+        entry_p->stat.st_atime = tp[0].tv_sec;
+#ifdef HAVE_STRUCT_STAT_ST_ATIM
+        entry_p->stat.st_atim.tv_sec = tp[0].tv_sec;
+        entry_p->stat.st_atim.tv_nsec = tp[0].tv_nsec;
+#endif
+        char* tmp1 = strdup(entry_p->name_p);
+        e_p = filecache_get(dirname(tmp1));
+        free(tmp1);
+        if (e_p && S_ISDIR(e_p->stat.st_mode)) {
+                dir_updated = 1;
+                e_p->stat.st_atime = tp[0].tv_sec;
+#ifdef HAVE_STRUCT_STAT_ST_ATIM
+                e_p->stat.st_atim.tv_sec = tp[0].tv_sec;
+                e_p->stat.st_atim.tv_nsec = tp[0].tv_nsec;
+#endif
+        }
+        if (!dir_updated || OPT_SET(OPT_KEY_ATIME_RAR)) {
+#if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
+                tp[1].tv_nsec = UTIME_OMIT;
+                tmp1 = strdup(entry_p->rar_p);
+                RARVolNameToFirstName(tmp1, !entry_p->vtype);
+                char *tmp2 = strdup(tmp1);
+                int res = utimensat(0, dirname(tmp2), tp, AT_SYMLINK_NOFOLLOW);
+                if (!res && OPT_SET(OPT_KEY_ATIME_RAR)) {
+                        for (;;) {
+                                res = utimensat(0, tmp1, tp, AT_SYMLINK_NOFOLLOW);
+                                if (res == -1 && errno == ENOENT)
+                                        break;
+                                RARNextVolumeName(tmp1, !entry_p->vtype);
+                        }
+                }     
+                free(tmp1);
+                free(tmp2);
+#endif
+        }
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static void check_atime(dir_elem_t *entry_p)
+{
+        dir_elem_t *e_p;
+        struct timespec tp;
+
+        if (!OPT_SET(OPT_KEY_ATIME) && !OPT_SET(OPT_KEY_ATIME_RAR))
+                goto no_check_atime;
+        if (clock_gettime(CLOCK_REALTIME, &tp))
+                goto no_check_atime;
+        pthread_mutex_lock(&file_access_mutex);
+        e_p = filecache_get(entry_p->name_p);
+        if (e_p) {
+                if (e_p->stat.st_atime <= e_p->stat.st_ctime &&
+                    e_p->stat.st_atime <= e_p->stat.st_mtime &&
+                    (tp.tv_sec - e_p->stat.st_atime) > 86400) { /* 24h */
+                        update_atime(e_p, &tp);
+                        entry_p->stat = e_p->stat;
+                }
+        }
+        pthread_mutex_unlock(&file_access_mutex);
+
+no_check_atime:
+        entry_p->flags.check_atime = 0;
+        return;
+}
+
 /*!
  ****************************************************************************
  *
@@ -791,6 +892,9 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                         return 0;       /* EOF */
                 size = op->entry_p->stat.st_size - offset;
         }
+    
+        if (op->entry_p->flags.check_atime)
+                check_atime(op->entry_p);
 
         while (size) {
                 FILE *fp;
@@ -1059,6 +1163,10 @@ static int lread_rar(char *buf, size_t size, off_t offset,
         }
         if (!size)
                 goto out;
+
+        if (op->entry_p->flags.check_atime)
+                check_atime(op->entry_p);
+
         /* Check for exception case */
         if (offset != op->pos) {
 check_idx:
@@ -3728,6 +3836,7 @@ open_error:
         return -EIO;
 
 open_end:
+        op->entry_p->flags.check_atime = 1;
         pthread_mutex_unlock(&file_access_mutex);
         return 0;
 }
@@ -4609,7 +4718,7 @@ static struct fuse_operations rar2_operations = {
 #if FUSE_MAJOR_VERSION == 2 && FUSE_MINOR_VERSION > 7
         .flag_nullpath_ok = 1,
 #endif
-#if FUSE_MAJOR_VERSION > 2 || (FUSE_MAJOR_VERSION == 2 && FUSE_MINOR_VERSION == 9)
+#if FUSE_MAJOR_VERSION > 2 || (FUSE_MAJOR_VERSION == 2 && FUSE_MINOR_VERSION >= 9)
         .flag_nopath = 1,
 #endif
 };
@@ -4892,6 +5001,10 @@ static void print_help()
 #if defined ( HAVE_SCHED_SETAFFINITY ) && defined ( HAVE_CPU_SET_T )
         printf("    --no-smp\t\t    disable SMP support (bind to CPU #0)\n");
 #endif
+        printf("    --relatime\t\t    update file access times relative to modify or change time\n");
+#if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
+        printf("    --relatime-rar\t    like --relatime but also update main archive file(s)\n");
+#endif
 }
 
 /* FUSE API specific keys continue where 'optdb' left off */
@@ -4931,6 +5044,10 @@ static struct option longopts[] = {
         {"save-eof",          no_argument, NULL, OPT_ADDR(OPT_KEY_SAVE_EOF)},
         {"no-expand-cbr",     no_argument, NULL, OPT_ADDR(OPT_KEY_NO_EXPAND_CBR)},
         {"flat-only",         no_argument, NULL, OPT_ADDR(OPT_KEY_FLAT_ONLY)},
+        {"relatime",          no_argument, NULL, OPT_ADDR(OPT_KEY_ATIME)},
+#if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
+        {"relatime-rar",      no_argument, NULL, OPT_ADDR(OPT_KEY_ATIME_RAR)},
+#endif
         {NULL,                          0, NULL, 0}
 };
 

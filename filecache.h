@@ -69,7 +69,8 @@ struct dir_elem {
                         unsigned int vsize_fixup_needed:1;
                         unsigned int encrypted:1;
                         unsigned int vsize_resolved:1;
-                        unsigned int :19;
+                        unsigned int :18;
+                        unsigned int check_atime:1;
                         unsigned int direct_io:1;
                         unsigned int avi_tested:1;
                         unsigned int save_eof:1;
@@ -77,7 +78,8 @@ struct dir_elem {
                         unsigned int save_eof:1;
                         unsigned int avi_tested:1;
                         unsigned int direct_io:1;
-                        unsigned int :19;
+                        unsigned int check_atime:1;
+                        unsigned int :18;
                         unsigned int vsize_resolved:1;
                         unsigned int encrypted:1;
                         unsigned int vsize_fixup_needed:1;

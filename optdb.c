@@ -53,6 +53,8 @@ static struct opt_entry opt_entry_[] = {
         {{NULL,}, 0, 0, 0, 0, 1},
         {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 0},
+        {{NULL,}, 0, 0, 0, 0, 0},
+        {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 0}
 };
 
