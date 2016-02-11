@@ -1,4 +1,4 @@
-.TH RAR2FS 1 "v\ " "Wed, Feb 10, 2016" "User Commands"
+.TH RAR2FS 1 "v\ " "Wed, Feb 11, 2016" "User Commands"
 .SH NAME
 .B rar2fs
 \- FUSE file system for reading RAR archives
@@ -206,10 +206,10 @@ adhere to whatever access time update scheme is dictated by the underlying host 
 option may be used.
 See
 .BR mount (8)
-for a description of 'relatime' and other mount options controlling time stamps.
+for a description of 'relatime' and other mount options related to timestamping.
 
-Another issue with strictly relying on the host file system for time stamping is the effect on RAR volumes. Since reading
-data from a RAR volume might not access all files, only parts of the volume will obtain an updated time stamp. Tools relying on access time to clean up and delete "old" data might get fooled deleting only a subset of the volume resulting in a corrupt archive. By using the
+Another issue with strictly relying on the host file system for timestamping is the effect on RAR volumes. Since reading
+data from a RAR volume might not access all files, only parts of the volume will obtain an updated timestamp. Tools relying on access time to clean up and delete "old" data might get fooled deleting only a subset of the volume resulting in a corrupt archive. By using the
 .I --relatime-rar
 option this problem is eliminated by making sure all files in a volume set is always updated on access. Note that the underlying host file system must be writable and user needs sufficient permissions for this option to have any effect. 
 
@@ -221,7 +221,7 @@ which effectively means that both these options does not need to be specified. U
 .I --relatime
 makes sense only if updates of the source RAR files are not wanted for some reason. There is a slight overhead inflicted by using
 .I --relatime-rar
-since in the case of large RAR volume archives a lot of files will need a new time stamp. The access time is updated only at first read access after a file was opened which means overhead should be almost negligible.
+since in the case of large RAR volume archives a lot of files will need a new timestamp. The access time is updated only at first read access after a file was opened which means overhead should be almost negligible.
 .br
 .SH "SEE ALSO"
 .br
