@@ -116,7 +116,6 @@ rar2fs:	$(UNRAR_SMPTEST) $(OBJECTS)
 else
 rar2fs:	$(UNRAR_SMPTEST) $(OBJECTS)
 endif
-	echo $(GITREV)
 	$(LINK) -o rar2fs $(LDFLAGS) $(OBJECTS) $(LIB_DIR) $(LIBS)	
 
 ifneq ("$(STRIP)", "")
