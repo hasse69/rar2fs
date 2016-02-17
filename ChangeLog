@@ -1,5 +1,12 @@
 rar2fs ChangeLog file.
 
+2016-02-17  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #45]
+
+        Fixed a problem with missing detection of RAR_SMP for
+        libunrar5 when not compiling using autotools.
+
 2016-02-10  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Added options --relatime and --relatime-rar.

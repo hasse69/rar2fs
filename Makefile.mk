@@ -91,22 +91,30 @@ endif
 
 OBJECTS=dllext.o optdb.o filecache.o iobuffer.o sighandler.o dirlist.o rar2fs.o
 DEPS=.deps
+UNRAR_SMPTEST=__unrar_smptest.cpp
+UNRAR_SMPDEFS=-DRAR_SMP
 
 all:	rar2fs mkr2i
+
+$(UNRAR_SMPTEST):
+	@echo "#define RAR_SMP" > $@
+	@echo "#include <rar.hpp>" >> $@
+	@echo "int main(){(void)GetNumberOfThreads();return 0;}" >> $@
 
 clean:
 	(cd stubs;$(MAKE) clean)
 	rm -rf *.o *~ $(DEPS)
+	@rm -rf $(UNRAR_SMPTEST)
 
 clobber:
 	(cd stubs;$(MAKE) clobber)
 	rm -rf *.o *.P *.d rar2fs mkr2i *~ $(DEPS)
 
 ifneq ("$(UCLIBC_STUBS)", "")
-rar2fs:	$(OBJECTS) 
+rar2fs:	$(UNRAR_SMPTEST) $(OBJECTS) 
 	(cd stubs;$(MAKE) CROSS=$(CROSS))
 else
-rar2fs:	$(OBJECTS) 
+rar2fs:	$(UNRAR_SMPTEST) $(OBJECTS)
 endif
 	$(LINK) -o rar2fs $(LDFLAGS) $(OBJECTS) $(LIB_DIR) $(LIBS)	
 
@@ -129,8 +137,8 @@ endif
 	mv $*.P $(DEPS); \
 	rm -f $*.d
 
-
 %.o : %.cpp
+	$(eval CXX_COMPILE += $(shell $(CXX) -I$(UNRAR_SRC) -L$(UNRAR_LIB) $(UNRAR_SMPTEST) $(LIBS) 2>/dev/null && echo $(UNRAR_SMPDEFS)))
 	@mkdir -p .deps
 	$(CXX_COMPILE) -MD -I. -I$(UNRAR_SRC) -c $<
 	@cp $*.d $*.P; \
