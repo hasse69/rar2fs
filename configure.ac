@@ -435,15 +435,6 @@ fi
 
 AM_ICONV
 
-AC_MSG_CHECKING(for source revision in SVN)
-SVNREV=$(svn info 2>/dev/null | $GREP Revision: | cut -d' ' -f2 2>/dev/null)
-if test x"$SVNREV" != x; then
-    AC_SUBST([CONFIG_STATUS_DEPENDENCIES], ['$(top_srcdir)/.svn/entries'])
-    CFLAGS="$CFLAGS -DSVNREV_=$SVNREV"
-    echo $SVNREV
-else
-    echo no
-fi
 AC_MSG_CHECKING(for commit hash in git repo)
 GITHEAD=.git/$(cat .git/HEAD 2>/dev/null | cut -d" " -f2)
 GITREV=$(cut -c1-7 $GITHEAD 2>/dev/null)

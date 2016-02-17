@@ -9,10 +9,10 @@ CFLAGS+=-O2
 CXXFLAGS+=-O2
 endif
 
-# This assumes svn version >= 1.4
-SVNREV = $(shell awk '{if(NR==4){print $0;exit}}' .svn/entries 2>/dev/null)
-ifneq ($(SVNREV),)
-CFLAGS+=-DSVNREV=$(SVNREV)
+GITHEAD=.git/$(shell cat .git/HEAD 2>/dev/null | cut -d" " -f2)
+GITREV=$(shell cut -c1-7 $(GITHEAD) 2>/dev/null)
+ifneq ($(GITREV),)
+CFLAGS+=-DGITREV_=0x$(GITREV)
 endif
 
 UNAME := $(shell uname)
@@ -116,6 +116,7 @@ rar2fs:	$(UNRAR_SMPTEST) $(OBJECTS)
 else
 rar2fs:	$(UNRAR_SMPTEST) $(OBJECTS)
 endif
+	echo $(GITREV)
 	$(LINK) -o rar2fs $(LDFLAGS) $(OBJECTS) $(LIB_DIR) $(LIBS)	
 
 ifneq ("$(STRIP)", "")

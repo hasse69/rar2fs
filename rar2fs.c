@@ -4958,14 +4958,10 @@ static int work(struct fuse_args *args)
 static void print_version()
 {
         char src_rev[16];
-#ifdef SVNREV_
-        snprintf(src_rev, 16, "-svnr%d", SVNREV_);
-#else
 #ifdef GITREV_
         snprintf(src_rev, 16, "-git%x", GITREV_);
 #else
         src_rev[0] = '\0';
-#endif
 #endif
         printf("rar2fs v%u.%u.%u%s (DLL version %d)    Copyright (C) 2009 Hans Beckerus\n",
                RAR2FS_MAJOR_VER,
