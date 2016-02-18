@@ -111,7 +111,6 @@ option which is no longer supported. The
 option is however still accepted as a dummy for backwards compatibility but provides no functionality. To acquire more levels of nesting stacking of
 .B rar2fs
 file systems is needed.
-
 .TP
 .B --exclude="<file>[;<file>;...]"
 .TP
@@ -160,7 +159,6 @@ tool directly. Start of playback will also be delayed since almost the entire ar
 
 This option is only supported for AVI 1.0 and multi-part OpenDML (AVI 2.0) files created by a properly configured muxer. Badly configured muxers will expose themselves by generating invalid frame counts. The latter is automatically detected by
 .BR rar2fs .
-
 .TP
 .B --no-lib-check
 disable dynamic library consistency check
@@ -180,7 +178,6 @@ tune the size of the I/O buffer
 The I/O buffer is used to prefetch data at extraction of compressed or encrypted archives to make sure streaming is possible without delay due to disk or network I/O. Depending on the current system resources and network latency this buffer might need to be adjusted. A small buffer takes less resources but increase the chance that
 .B rar2fs
 must wait for data to arrive during a read request. On the other hand, a large buffer will increase memory footprint which may not always be desired. Also keep in mind that every file being extracted requires its own buffer. So the total memory resources required are always the buffer size multiplied by the number of active extraction threads. Be careful when choosing buffer size. There is no cap on the size itself. The only requirement is that it is a 'power of 2' Megabytes, eg. 1,2,4,8, etc. The default size is 4MiB.
-
 .TP
 .B --hist-size=n
 tune the size of I/O buffer history
@@ -213,7 +210,7 @@ data from a RAR volume might not access all files, only parts of the volume will
 .I --relatime-rar
 option this problem is eliminated by making sure all files in a volume set is always updated on access. Note that the underlying host file system must be writable and user needs sufficient permissions for this option to have any effect. 
 
-The 
+Except from what is described above the 
 .I --relatime-rar
 option has the same effect as
 .I --relatime
