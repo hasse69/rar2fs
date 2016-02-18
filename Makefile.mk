@@ -92,6 +92,7 @@ endif
 OBJECTS=dllext.o optdb.o filecache.o iobuffer.o sighandler.o dirlist.o rar2fs.o
 DEPS=.deps
 UNRAR_SMPTEST=__unrar_smptest.cpp
+UNRAR_SMPLOG=__unrar_smptest.log
 UNRAR_SMPDEFS=-DRAR_SMP
 
 all:	rar2fs mkr2i
@@ -104,7 +105,7 @@ $(UNRAR_SMPTEST):
 clean:
 	(cd stubs;$(MAKE) clean)
 	rm -rf *.o *~ $(DEPS)
-	@rm -rf $(UNRAR_SMPTEST)
+	@rm -rf $(UNRAR_SMPTEST) $(UNRAR_SMPLOG)
 
 clobber:
 	(cd stubs;$(MAKE) clobber)
@@ -138,7 +139,7 @@ endif
 	rm -f $*.d
 
 %.o : %.cpp
-	$(eval CXX_COMPILE += $(shell $(CXX) -I$(UNRAR_SRC) -L$(UNRAR_LIB) $(UNRAR_SMPTEST) $(LIBS) 2>/dev/null && echo $(UNRAR_SMPDEFS)))
+	$(eval CXX_COMPILE += $(shell $(CXX) -I$(UNRAR_SRC) -L$(UNRAR_LIB) $(UNRAR_SMPTEST) $(LIBS) 2>$(UNRAR_SMPLOG) && echo $(UNRAR_SMPDEFS)))
 	@mkdir -p .deps
 	$(CXX_COMPILE) -MD -I. -I$(UNRAR_SRC) -c $<
 	@cp $*.d $*.P; \
