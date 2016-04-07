@@ -1435,7 +1435,7 @@ static int lopen(const char *path, struct fuse_file_info *fi)
 #define DUMP_STAT4_(m) \
         fprintf(stderr, "%10s = %u\n", #m , (unsigned int)stbuf->m)
 #define DUMP_STAT8_(m) \
-        fprintf(stderr, "%10s = %" PRIu64 "\n", #m , (unsigned long long)stbuf->m)
+        fprintf(stderr, "%10s = %" PRIu64 "\n", #m , (uint64_t)stbuf->m)
 
 static void dump_stat(struct stat *stbuf)
 {
@@ -2773,7 +2773,7 @@ static void readdir_scan(const char *dir, const char *root,
 #endif
                                         tmp2 = strdup(tmp);
                                         if (convert_fake_iso(tmp2))
-                                                *next = dir_entry_add(*next, tmp,
+                                                *next = dir_entry_add(*next, tmp2,
                                                                NULL, DIR_E_NRM);
                                 }
                                 *next = dir_entry_add(*next, tmp, NULL, DIR_E_NRM);
