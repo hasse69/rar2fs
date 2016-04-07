@@ -1,5 +1,11 @@
 rar2fs ChangeLog file.
 
+2016-04-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Fixed broken detection of ISO files.
+
+        * Fixed a PRIu64 format error in debug builds.
+
 2016-02-17  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * [rar2fs #45]
