@@ -1,5 +1,12 @@
 rar2fs ChangeLog file.
 
+2016-04-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #48]
+
+        Fixed a compilation issue with GCC6
+        (thanks to jyhpsycho for providing the patch).
+
 2016-04-07  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Fixed broken detection of ISO files.

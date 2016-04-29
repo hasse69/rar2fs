@@ -536,7 +536,7 @@ void PrintfPrepareFmt(const wchar *Org,wchar *Cvt,size_t MaxSize)
 
 
 #undef St
-#define St(StringId) L""StringId""
+#define St(StringId) L"" StringId ""
 
 static int msprintf(wchar *wcs, const wchar *fmt,...)
 {
