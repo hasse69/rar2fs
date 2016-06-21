@@ -56,6 +56,9 @@
 #ifdef HAVE_SYS_XATTR_H
 # include <sys/xattr.h>
 #endif
+#ifdef HAVE_SYS_SYSMACROS_H
+# include <sys/sysmacros.h>
+#endif
 #ifdef HAVE_ICONV
 #include <iconv.h>
 #endif
