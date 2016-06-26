@@ -1,5 +1,12 @@
 rar2fs ChangeLog file.
 
+2016-06-26  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #51]
+
+        Use sys/sysmacros.h for major/minor/makedev
+        (patch from vapier/master)
+
 2016-04-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * [rar2fs #48]
