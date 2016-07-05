@@ -1,5 +1,12 @@
 rar2fs ChangeLog file.
 
+2016-07-05  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #53]
+
+        Fixed a divison by zero problem when volume size becomes
+        wrong due to corrupt archives.
+
 2016-06-26  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * [rar2fs #51]

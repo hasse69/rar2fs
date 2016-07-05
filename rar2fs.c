@@ -2449,7 +2449,12 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 if (entry_p)  {
                         if (!entry_p->flags.vsize_resolved) {
                               entry_p->vsize_real_next = next->FileDataEnd;
-                              entry_p->vsize_next = GET_RAR_PACK_SZ(&next->hdr);
+                              /* If GET_RAR_PACK_SZ() returns 0 keep next size
+                               * as is. This will prevent a division by zero
+                               * problem later when file is accessed. */
+                              entry_p->vsize_next = GET_RAR_PACK_SZ(&next->hdr)
+                                      ? (off_t)GET_RAR_PACK_SZ(&next->hdr)
+                                      : entry_p->vsize_next;
                               entry_p->flags.vsize_resolved = 1;
                               /* 
                                * Check if we might need to compensate for the
