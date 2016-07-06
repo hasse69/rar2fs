@@ -33,6 +33,7 @@
 #include <libgen.h>
 #include <errno.h>
 #include <assert.h>
+#include <syslog.h>
 #include "debug.h"
 #include "filecache.h"
 #include "optdb.h"
@@ -169,6 +170,7 @@ void filecache_invalidate(const char *path)
                         FREE_CACHE_MEM(e_p);
                         memset(e_p, 0, sizeof(dir_elem_t));
                 }
+                syslog(LOG_DEBUG, "cache invalidated");
         }
 }
 

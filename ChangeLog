@@ -1,5 +1,11 @@
 rar2fs ChangeLog file.
 
+2016-07-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #47]
+
+        Fixed a few more corner cases hit in fs loops.
+
 2016-07-05  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * [rar2fs #53]

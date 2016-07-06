@@ -98,6 +98,7 @@ struct dir_elem {
 typedef struct dir_elem dir_elem_t;
 
 #define LOCAL_FS_ENTRY ((void*)-1)
+#define LOOP_FS_ENTRY ((void*)-2)
 
 #define ABS_ROOT(s, path) \
         do { \
