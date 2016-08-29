@@ -182,13 +182,6 @@ struct io_handle {
                         perror("write"); \
         } while (0)
 
-#define IS_ISO(s) (!strcasecmp((s)+(strlen(s)-4), ".iso"))
-#define IS_AVI(s) (!strcasecmp((s)+(strlen(s)-4), ".avi"))
-#define IS_MKV(s) (!strcasecmp((s)+(strlen(s)-4), ".mkv"))
-#define IS_RAR(s) (!strcasecmp((s)+(strlen(s)-4), ".rar"))
-#define IS_CBR(s) (!OPT_SET(OPT_KEY_NO_EXPAND_CBR) && \
-                        !strcasecmp((s)+(strlen(s)-4), ".cbr"))
-
 /*
  * This is to the handle the workaround for the destroyed file pointer
  * position in some early libunrar5 versions when calling RARInitArchiveEx().
@@ -251,6 +244,49 @@ static const char *file_cmd[] = {
 };
 #endif
 
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static inline int is_rxx_vol(const char *name)
+{
+        size_t len = strlen(name);
+        if (name[len - 4] == '.' &&
+                        (name[len - 3] >= 'r' || name[len - 3] >= 'R') &&
+                        isdigit(name[len - 2]) && isdigit(name[len - 1])) {
+                /* This seems to be a classic .rNN rar volume file.
+                 * Let the rar header be the final judge. */
+                return 1;
+        }
+        return 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static inline int is_nnn_vol(const char *name)
+{
+        size_t len = strlen(name);
+        if (name[len - 4] == '.' &&
+                        isdigit(name[len - 3]) && isdigit(name[len - 2]) &&
+                        isdigit(name[len - 1])) {
+                /* This seems to be a .NNN rar volume file.
+                 * Let the rar header be the final judge. */
+                return 1;
+        }
+        return 0;
+}
+
+
+#define IS_ISO(s) (!strcasecmp((s)+(strlen(s)-4), ".iso"))
+#define IS_AVI(s) (!strcasecmp((s)+(strlen(s)-4), ".avi"))
+#define IS_MKV(s) (!strcasecmp((s)+(strlen(s)-4), ".mkv"))
+#define IS_RAR(s) (!strcasecmp((s)+(strlen(s)-4), ".rar"))
+#define IS_CBR(s) (!OPT_SET(OPT_KEY_NO_EXPAND_CBR) && \
+                        !strcasecmp((s)+(strlen(s)-4), ".cbr"))
+#define IS_RXX(s) (is_rxx_vol(s))
+#define IS_NNN(s) (is_nnn_vol(s))
 
 /*!
  *****************************************************************************
@@ -1531,23 +1567,6 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
  *****************************************************************************
  *
  ****************************************************************************/
-static inline int is_rxx_vol(const char *name)
-{
-        size_t len = strlen(name);
-        if (name[len - 4] == '.' &&
-                        (name[len - 3] >= 'r' || name[len - 3] >= 'R') &&
-                        isdigit(name[len - 2]) && isdigit(name[len - 1])) {
-                /* This seems to be a classic .rNN rar volume file.
-                 * Let the rar header be the final judge. */
-                return 1;
-        }
-        return 0;
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
 static int get_vformat(const char *s, int t, int *l, int *p)
 {
         int len = 0;
@@ -1555,26 +1574,37 @@ static int get_vformat(const char *s, int t, int *l, int *p)
         int vol = 0;
         const size_t SLEN = strlen(s);
         if (t) {
-                int dot = 0;
-                len = SLEN - 1;
-                while (dot < 2 && len >= 0) {
-                        if (s[len--] == '.')
-                                ++dot;
+                const char *c = s + SLEN - 1;
+                while (!isdigit(*c) && c > s)
+                        c--;
+
+                const char *num = c;
+                while (isdigit(*num) && num > s)
+                        num--;
+
+                while (num > s && *num != '.') {
+                        if (isdigit(*num)) {
+                                char *dot = strchr(s, '.');
+                                if (dot != NULL && dot < num)
+                                        c = num;
+                                break;
+                        }
+                        num--;
                 }
-                if (len >= 0) {
-                        pos = len + 1;
-                        len = SLEN - pos;
-                        if (len >= 10) {
-                                if ((s[pos + 1] == 'p' || s[pos + 1] == 'P') &&
-                                    (s[pos + 2] == 'a' || s[pos + 2] == 'A') &&
-                                    (s[pos + 3] == 'r' || s[pos + 3] == 'R') &&
-                                    (s[pos + 4] == 't' || s[pos + 4] == 'T')) {
-                                        pos += 5;       /* - ".part" */
-                                        len -= 9;       /* - ".ext" */
-                                        vol = strtoul(&s[pos], NULL, 10);
-                                }
+
+                while (c != s) {
+                        if (isdigit(*c)) {
+                                --c;
+                                ++len;
+                        } else {
+                                break;
                         }
                 }
+                if (c != s)
+                        vol = strtoul(c + 1, NULL, 10);
+                else
+                        vol = 1;
+                pos =  c - s + 1;
         } else {
                 int dot = 0;
                 len = SLEN - 1;
@@ -1608,12 +1638,6 @@ static int get_vformat(const char *s, int t, int *l, int *p)
         return vol ? vol : 1;
 }
 
-#define IS_AVI(s) (!strcasecmp((s)+(strlen(s)-4), ".avi"))
-#define IS_MKV(s) (!strcasecmp((s)+(strlen(s)-4), ".mkv"))
-#define IS_RAR(s) (!strcasecmp((s)+(strlen(s)-4), ".rar"))
-#define IS_CBR(s) (!OPT_SET(OPT_KEY_NO_EXPAND_CBR) && \
-                        !strcasecmp((s)+(strlen(s)-4), ".cbr"))
-#define IS_RXX(s) (is_rxx_vol(s))
 #define IS_UNIX_MODE_(l) \
         ((l)->UnpVer >= 50 \
                 ? (l)->HostOS == HOST_UNIX \
@@ -2643,9 +2667,12 @@ static int f0(SCANDIR_ARG3 e)
         if (e->d_type != DT_UNKNOWN)
                 return (!(IS_RAR(e->d_name) && e->d_type == DT_REG) &&
                         !(IS_CBR(e->d_name) && e->d_type == DT_REG) &&
+                        !(IS_NNN(e->d_name) && e->d_type == DT_REG) &&
                         !(IS_RXX(e->d_name) && e->d_type == DT_REG));
 #endif
-        return !IS_RAR(e->d_name) && !IS_CBR(e->d_name) &&
+        return !IS_RAR(e->d_name) &&
+                        !IS_CBR(e->d_name) &&
+                        !IS_NNN(e->d_name) &&
                         !IS_RXX(e->d_name);
 }
 
@@ -2660,10 +2687,14 @@ static int f1(SCANDIR_ARG3 e)
          */
 #ifdef _DIRENT_HAVE_D_TYPE
         if (e->d_type != DT_UNKNOWN)
-                return (IS_RAR(e->d_name) || IS_CBR(e->d_name)) &&
+                return (IS_RAR(e->d_name) || 
+                                IS_CBR(e->d_name) ||
+                                IS_NNN(e->d_name)) &&
                                 e->d_type == DT_REG;
 #endif
-        return IS_RAR(e->d_name) || IS_CBR(e->d_name);
+        return IS_RAR(e->d_name) ||
+                        IS_NNN(e->d_name) ||
+                        IS_CBR(e->d_name);
 }
 
 static int f2(SCANDIR_ARG3 e)

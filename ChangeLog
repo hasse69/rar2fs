@@ -1,5 +1,11 @@
 rar2fs ChangeLog file.
 
+2016-08-31  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * [rar2fs #55]
+
+        Added support for .NNN file naming scheme.
+
 2016-07-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * [rar2fs #47]
