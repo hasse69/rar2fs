@@ -288,6 +288,9 @@ static inline int is_nnn_vol(const char *name)
 #define IS_RXX(s) (is_rxx_vol(s))
 #define IS_NNN(s) (is_nnn_vol(s))
 
+#define VTYPE(f, flags) \
+        (IS_RAR(f) || IS_RXX(f)) ? (flags & MHD_NEWNUMBERING) ? 1 : 0 : 1
+
 /*!
  *****************************************************************************
  *
@@ -791,8 +794,6 @@ static char *get_vname(int t, const char *str, int vol, int len, int pos)
 {
         ENTER_("%s   vol=%d, len=%d, pos=%d", str, vol, len, pos);
         char *s = strdup(str);
-        if (!vol)
-                return s;
         if (t) {
                 char f[16];
                 char f1[16];
@@ -802,13 +803,13 @@ static char *get_vname(int t, const char *str, int vol, int len, int pos)
         } else {
                 char f[16];
                 int lower = s[pos - 1] >= 'r';
-                if (vol == 1) {
+                if (vol == 0) {
                         sprintf(f, "%s", (lower ? "ar" : "AR"));
-                } else if (vol <= 101) {
-                        sprintf(f, "%02d", (vol - 2));
+                } else if (vol <= 100) {
+                        sprintf(f, "%02d", (vol - 1));
                 } else { /* Possible, but unlikely */
-                        sprintf(f, "%c%02d", (lower ? 'r' : 'R') + (vol - 2) / 100,
-                                                (vol - 2) % 100);
+                        sprintf(f, "%c%02d", (lower ? 'r' : 'R') + (vol - 1) / 100,
+                                                (vol - 1) % 100);
                         --pos;
                         ++len;
                 }
@@ -927,7 +928,6 @@ static int lread_raw(char *buf, size_t size, off_t offset,
 {
         size_t n = 0;
         struct io_context *op = FH_TOCONTEXT(fi->fh);
-
         op->seq++;
 
         printd(3, "PID %05d calling %s(), seq = %d, offset=%" PRIu64 "\n",
@@ -1535,6 +1535,7 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
         RAROpenArchiveDataEx d;
         HANDLE hdl = NULL;
         int files = 0;
+        int vtype = 0;
 
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.ArcName = strdup(arch);
@@ -1553,9 +1554,15 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
                         break;
 
                 ++files;
+                
+                /* Default to new/optional numbering unless extension is .rar
+                 * for which we should check header. */
+                if (files == 1 && IS_RAR(arch))
+                        vtype = !(d.Flags & MHD_NEWNUMBERING);
+
                 list = dir_entry_add(list, d.ArcName, NULL, DIR_E_NRM);
                 RARCloseArchive(hdl);
-                RARNextVolumeName(d.ArcName, !(d.Flags & MHD_NEWNUMBERING));
+                RARNextVolumeName(d.ArcName, vtype);
         }
         if (hdl)
                 RARCloseArchive(hdl);
@@ -1603,7 +1610,7 @@ static int get_vformat(const char *s, int t, int *l, int *p)
                 if (c != s)
                         vol = strtoul(c + 1, NULL, 10);
                 else
-                        vol = 1;
+                        vol = 0;
                 pos =  c - s + 1;
         } else {
                 int dot = 0;
@@ -1621,11 +1628,11 @@ static int get_vformat(const char *s, int t, int *l, int *p)
                                 if ((s[pos - 1] == 'r' || s[pos - 1] == 'R') &&
                                     (s[pos    ] == 'a' || s[pos    ] == 'A') &&
                                     (s[pos + 1] == 'r' || s[pos + 1] == 'R')) {
-                                        vol = 1;
+                                        vol = 0;
                                 } else {
                                         int lower = s[pos - 1] >= 'r';
                                         errno = 0;
-                                        vol = strtoul(&s[pos], NULL, 10) + 2 +
+                                        vol = strtoul(&s[pos], NULL, 10) + 1 +
                                                 /* Possible, but unlikely */
                                                 (100 * (s[pos - 1] - (lower ? 'r' : 'R')));
                                         vol = errno ? 0 : vol;
@@ -1633,9 +1640,11 @@ static int get_vformat(const char *s, int t, int *l, int *p)
                         }
                 }
         }
-        if (l) *l = vol ? len : 0;
-        if (p) *p = vol ? pos : 0;
-        return vol ? vol : 1;
+
+        if (l) *l = len;
+        if (p) *p = pos;
+
+        return vol;
 }
 
 #define IS_UNIX_MODE_(l) \
@@ -2440,7 +2449,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                                 /* Check if part of a volume */
                                                 if (d.Flags & MHD_VOLUME) {
                                                         entry_p->flags.multipart = 1;
-                                                        entry_p->vtype = (d.Flags & MHD_NEWNUMBERING) ? 1 : 0;
+                                                        entry_p->vtype = VTYPE(arch, d.Flags);
                                                         /*
                                                          * Make sure parent folders are always searched
                                                          * from the first volume file since sub-folders
@@ -2574,7 +2583,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
 
                                 entry_p->flags.multipart = 1;
                                 entry_p->flags.image = IS_IMG(next->hdr.FileName);
-                                entry_p->vtype = (d.Flags & MHD_NEWNUMBERING) ? 1 : 0;
+                                entry_p->vtype = VTYPE(arch, d.Flags);
                                 entry_p->vno_base = get_vformat(arch, entry_p->vtype, &len, &pos);
 
                                 if (len > 0) {
@@ -2611,7 +2620,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         /* Check if part of a volume */
                         if (d.Flags & MHD_VOLUME) {
                                 entry_p->flags.multipart = 1;
-                                entry_p->vtype = (d.Flags & MHD_NEWNUMBERING) ? 1 : 0;
+                                entry_p->vtype = VTYPE(arch, d.Flags);
                                 /*
                                  * Make sure parent folders are always searched
                                  * from the first volume file since sub-folders
@@ -3248,6 +3257,7 @@ static int rar2_releasedir(const char *path, struct fuse_file_info *fi)
         ENTER_("%s", (path ? path : ""));
 
         (void)path;
+
         struct io_handle *io = FH_TOIO(fi->fh);
         if (io == NULL)
                 return -EIO;
@@ -4054,7 +4064,9 @@ static int rar2_symlink(const char *from, const char *to)
 static int rar2_statfs(const char *path, struct statvfs *vfs)
 {
         ENTER_("%s", path);
+
         (void)path;             /* touch */
+
         if (!statvfs(OPT_STR2(OPT_KEY_SRC, 0), vfs))
                 return 0;
         return -errno;
