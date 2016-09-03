@@ -817,6 +817,103 @@ static char *get_vname(int t, const char *str, int vol, int len, int pos)
         }
         return s;
 }
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int get_vformat(const char *s, int t, int *l, int *p)
+{
+        int len = 0;
+        int pos = 0;
+        int vol = 0;
+        const size_t SLEN = strlen(s);
+        if (t) {
+                const char *c = s + SLEN - 1;
+                while (!isdigit(*c) && c > s)
+                        c--;
+
+                const char *num = c;
+                while (isdigit(*num) && num > s)
+                        num--;
+
+                while (num > s && *num != '.') {
+                        if (isdigit(*num)) {
+                                char *dot = strchr(s, '.');
+                                if (dot != NULL && dot < num)
+                                        c = num;
+                                break;
+                        }
+                        num--;
+                }
+
+                while (c != s) {
+                        if (isdigit(*c)) {
+                                --c;
+                                ++len;
+                        } else {
+                                break;
+                        }
+                }
+                if (c != s)
+                        vol = strtoul(c + 1, NULL, 10);
+                else
+                        vol = 0;
+                pos =  c - s + 1;
+        } else {
+                int dot = 0;
+                len = SLEN - 1;
+                while (dot < 1 && len >= 0) {
+                        if (s[len--] == '.')
+                                ++dot;
+                }
+                if (len >= 0) {
+                        pos = len + 1;
+                        len = SLEN - pos;
+                        if (len == 4) {
+                                pos += 2;
+                                len -= 2;
+                                if ((s[pos - 1] == 'r' || s[pos - 1] == 'R') &&
+                                    (s[pos    ] == 'a' || s[pos    ] == 'A') &&
+                                    (s[pos + 1] == 'r' || s[pos + 1] == 'R')) {
+                                        vol = 0;
+                                } else {
+                                        int lower = s[pos - 1] >= 'r';
+                                        errno = 0;
+                                        vol = strtoul(&s[pos], NULL, 10) + 1 +
+                                                /* Possible, but unlikely */
+                                                (100 * (s[pos - 1] - (lower ? 'r' : 'R')));
+                                        vol = errno ? 0 : vol;
+                                }
+                        }
+                }
+        }
+
+        if (l) *l = len;
+        if (p) *p = pos;
+
+        return vol;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static void RARVolNameToFirstName_BUGGED(char *s, int vtype)
+{
+        int len;
+        int pos;
+
+        RARVolNameToFirstName(s, vtype);
+        int n = get_vformat(s, !vtype, &len, &pos);
+        if (n == 1) {
+                char *s_copy = strdup(s);
+                while (--len >= 0)
+                        s_copy[pos+len] = '0';
+                if (!access(s_copy, F_OK))
+                        strcpy(s, s_copy);
+                free(s_copy);
+         }
+}
 
 #if _POSIX_TIMERS < 1
 #define CLOCK_REALTIME 0
@@ -872,7 +969,7 @@ static void update_atime(dir_elem_t *entry_p, struct timespec *tp_in)
 #if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
                 tp[1].tv_nsec = UTIME_OMIT;
                 tmp1 = strdup(entry_p->rar_p);
-                RARVolNameToFirstName(tmp1, !entry_p->vtype);
+                RARVolNameToFirstName_BUGGED(tmp1, !entry_p->vtype);
                 char *tmp2 = strdup(tmp1);
                 int res = utimensat(0, dirname(tmp2), tp, AT_SYMLINK_NOFOLLOW);
                 if (!res && OPT_SET(OPT_KEY_ATIME_RAR)) {
@@ -964,7 +1061,7 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                          * bytes for the rest. Check if we need to compensate.
                          */
                         if (op->entry_p->flags.vsize_fixup_needed) {
-                                int vol_contrib = 128 - op->entry_p->vno_base;
+                                int vol_contrib = 128 - op->entry_p->vno_base + op->entry_p->vno_first - 1;
                                 if (offset >= (VOL_FIRST_SZ + (vol_contrib * VOL_NEXT_SZ))) {
                                         off_t offset_left =
                                                 offset - (VOL_FIRST_SZ + (vol_contrib * VOL_NEXT_SZ));
@@ -1568,83 +1665,6 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
                 RARCloseArchive(hdl);
         free(d.ArcName);
         return files;
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-static int get_vformat(const char *s, int t, int *l, int *p)
-{
-        int len = 0;
-        int pos = 0;
-        int vol = 0;
-        const size_t SLEN = strlen(s);
-        if (t) {
-                const char *c = s + SLEN - 1;
-                while (!isdigit(*c) && c > s)
-                        c--;
-
-                const char *num = c;
-                while (isdigit(*num) && num > s)
-                        num--;
-
-                while (num > s && *num != '.') {
-                        if (isdigit(*num)) {
-                                char *dot = strchr(s, '.');
-                                if (dot != NULL && dot < num)
-                                        c = num;
-                                break;
-                        }
-                        num--;
-                }
-
-                while (c != s) {
-                        if (isdigit(*c)) {
-                                --c;
-                                ++len;
-                        } else {
-                                break;
-                        }
-                }
-                if (c != s)
-                        vol = strtoul(c + 1, NULL, 10);
-                else
-                        vol = 0;
-                pos =  c - s + 1;
-        } else {
-                int dot = 0;
-                len = SLEN - 1;
-                while (dot < 1 && len >= 0) {
-                        if (s[len--] == '.')
-                                ++dot;
-                }
-                if (len >= 0) {
-                        pos = len + 1;
-                        len = SLEN - pos;
-                        if (len == 4) {
-                                pos += 2;
-                                len -= 2;
-                                if ((s[pos - 1] == 'r' || s[pos - 1] == 'R') &&
-                                    (s[pos    ] == 'a' || s[pos    ] == 'A') &&
-                                    (s[pos + 1] == 'r' || s[pos + 1] == 'R')) {
-                                        vol = 0;
-                                } else {
-                                        int lower = s[pos - 1] >= 'r';
-                                        errno = 0;
-                                        vol = strtoul(&s[pos], NULL, 10) + 1 +
-                                                /* Possible, but unlikely */
-                                                (100 * (s[pos - 1] - (lower ? 'r' : 'R')));
-                                        vol = errno ? 0 : vol;
-                                }
-                        }
-                }
-        }
-
-        if (l) *l = len;
-        if (p) *p = pos;
-
-        return vol;
 }
 
 #define IS_UNIX_MODE_(l) \
@@ -2455,7 +2475,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                                          * from the first volume file since sub-folders
                                                          * might actually be placed elsewhere.
                                                          */
-                                                        RARVolNameToFirstName(entry_p->rar_p, !entry_p->vtype);
+                                                        RARVolNameToFirstName_BUGGED(entry_p->rar_p, !entry_p->vtype);
                                                 } else {
                                                         entry_p->flags.multipart = 0;
                                                 }
@@ -2518,10 +2538,11 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                        * next volume size have already been
                                        * resolved.
                                        */
-                                      if (entry_p->vno_base < 128) {
+                                      if ((entry_p->vno_base - entry_p->vno_first + 1) < 128) {
                                               if (entry_p->stat.st_size >
                                                             (entry_p->vsize_first +
-                                                            (entry_p->vsize_next * (128 - entry_p->vno_base))))
+                                                            (entry_p->vsize_next * 
+                                                                    (128 - (entry_p->vno_base - entry_p->vno_first + 1)))))
                                                       entry_p->flags.vsize_fixup_needed = 1;
                                       }
                               }
@@ -2585,6 +2606,10 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                 entry_p->flags.image = IS_IMG(next->hdr.FileName);
                                 entry_p->vtype = VTYPE(arch, d.Flags);
                                 entry_p->vno_base = get_vformat(arch, entry_p->vtype, &len, &pos);
+                                char *tmp = strdup(arch);
+                                RARVolNameToFirstName_BUGGED(tmp, !entry_p->vtype);
+                                entry_p->vno_first = get_vformat(tmp, entry_p->vtype, NULL, NULL);
+                                free(tmp);
 
                                 if (len > 0) {
                                         entry_p->vlen = len;
@@ -2626,7 +2651,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                  * from the first volume file since sub-folders
                                  * might actually be placed elsewhere.
                                  */
-                                RARVolNameToFirstName(entry_p->rar_p, !entry_p->vtype);
+                                RARVolNameToFirstName_BUGGED(entry_p->rar_p, !entry_p->vtype);
                         } else {
                                 entry_p->flags.multipart = 0;
                         }

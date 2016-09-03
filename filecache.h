@@ -54,6 +54,7 @@ struct dir_elem {
         off_t vsize_real_next;
         off_t vsize_next;
         short vno_base;
+        short vno_first;
         short vlen;
         short vpos;
         short vtype;
