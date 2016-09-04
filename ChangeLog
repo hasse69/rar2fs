@@ -1,5 +1,16 @@
 rar2fs ChangeLog file.
 
+2016-09-04  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.23.0
+
+        * Fix seek length issue
+
+        The fix for [rar2fs #55] introduced a new problem resulting
+        in too few volume files being searched.
+
+        * Add full support for volumes numbered from 0
+
 2016-08-31  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * [rar2fs #55]
