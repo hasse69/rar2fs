@@ -2760,7 +2760,7 @@ static void syncdir_scan(const char *dir, const char *root)
         ENTER_("%s", dir);
 
         for (f = 0; f < (sizeof(filter) / sizeof(filter[0])); f++) {
-                int vno = 0;
+                int vno = -1;
                 int i = 0;
                 int n = scandir(root, &namelist, filter[f], alphasort);
                 if (n < 0) {
@@ -2775,14 +2775,18 @@ static void syncdir_scan(const char *dir, const char *root)
                                 const size_t SLEN = strlen(namelist[i]->d_name);
                                 if (namelist[i]->d_name[SLEN - 1] == '0' &&
                                     namelist[i]->d_name[SLEN - 2] == '0') {
-                                        vno = 2;
+                                        vno = 1;
                                 } else {
                                         ++vno;
                                 }
                         } else {
-                                vno = get_vformat(namelist[i]->d_name, 1, /* new style */
-                                                        NULL, NULL);
+                                if (vno >= 0)
+                                        vno = get_vformat(namelist[i]->d_name, 1, /* new style */
+                                                          NULL, NULL);
+                                else
+                                        vno = 0;
                         }
+                        /* We always need to scan at least two volume files */
                         if (!OPT_INT(OPT_KEY_SEEK_LENGTH, 0) ||
                                         vno <= OPT_INT(OPT_KEY_SEEK_LENGTH, 0)) {
                                 char *arch;
@@ -2833,7 +2837,7 @@ static void readdir_scan(const char *dir, const char *root,
         ENTER_("%s", dir);
 
         for (f = 0; f < (sizeof(filter) / sizeof(filter[0])); f++) {
-                int vno = 0;
+                int vno = -1;
                 int i = 0;
                 int n = scandir(root, &namelist, filter[f], alphasort);
                 if (n < 0) {
@@ -2870,14 +2874,18 @@ static void readdir_scan(const char *dir, const char *root,
                                 const size_t SLEN = strlen(namelist[i]->d_name);
                                 if (namelist[i]->d_name[SLEN - 1] == '0' &&
                                     namelist[i]->d_name[SLEN - 2] == '0') {
-                                        vno = 2;
+                                        vno = 1;
                                 } else {
                                         ++vno;
                                 }
                         } else {
-                                vno = get_vformat(namelist[i]->d_name, 1, /* new style */
-                                                        NULL, NULL);
+                                if (vno >= 0)
+                                        vno = get_vformat(namelist[i]->d_name, 1, /* new style */
+                                                          NULL, NULL);
+                                else
+                                        vno = 0;
                         }
+                        /* We always need to scan at least two volume files */
                         if (!OPT_INT(OPT_KEY_SEEK_LENGTH, 0) ||
                                         vno <= OPT_INT(OPT_KEY_SEEK_LENGTH, 0)) {
                                 char *arch;
@@ -2925,7 +2933,8 @@ static void syncrar(const char *path)
         ENTER_("%s", path);
 
         int c = 0;
-        int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
+        /* We always need to scan at least two volume files */
+        int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0) + 1;
         struct dir_entry_list *arch_next = arch_list_root.next;
         while (arch_next) {
                 (void)listrar(path, NULL, arch_next->entry.name);
@@ -3184,7 +3193,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 goto dump_buff;
         }
 
-        int vol = 1;
+        int vol = 0;
 
         pthread_mutex_lock(&file_access_mutex);
         dir_elem_t *entry_p = filecache_get(FH_TOPATH(fi->fh));
@@ -3217,7 +3226,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 pthread_mutex_unlock(&file_access_mutex);
         }
 
-        if (vol == 1) {
+        if (vol == 0) {
                 dir_list_free(&dir_list);
                 return -ENOENT;
         }
@@ -3254,7 +3263,8 @@ static int rar2_readdir2(const char *path, void *buffer,
         dir_list_open(next);
 
         int c = 0;
-        int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
+        /* We always need to scan at least two volume files */
+        int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0) + 1;
         struct dir_entry_list *arch_next = arch_list_root.next;
         while (arch_next) {
                 (void)listrar(FH_TOPATH(fi->fh), &next, arch_next->entry.name);
