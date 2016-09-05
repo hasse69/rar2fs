@@ -2780,11 +2780,19 @@ static void syncdir_scan(const char *dir, const char *root)
                                         ++vno;
                                 }
                         } else {
-                                if (vno >= 0)
-                                        vno = get_vformat(namelist[i]->d_name, 1, /* new style */
-                                                          NULL, NULL);
-                                else
+                                int oldvno = vno;
+                                int pos;
+                                vno = get_vformat(namelist[i]->d_name, 1, /* new style */
+                                                  NULL, &pos);
+                                if (vno <= oldvno)
                                         vno = 0;
+                                else if (vno > oldvno + 1)
+                                        vno = oldvno + 1;
+                                else
+                                        if(i && strncmp(namelist[i]->d_name,
+                                                        namelist[i - 1]->d_name,
+                                                        pos))
+                                                vno = 0;
                         }
                         /* We always need to scan at least two volume files */
                         if (!OPT_INT(OPT_KEY_SEEK_LENGTH, 0) ||
@@ -2878,12 +2886,20 @@ static void readdir_scan(const char *dir, const char *root,
                                 } else {
                                         ++vno;
                                 }
-                        } else {
-                                if (vno >= 0)
-                                        vno = get_vformat(namelist[i]->d_name, 1, /* new style */
-                                                          NULL, NULL);
-                                else
+                        } else { 
+                                int oldvno = vno;
+                                int pos;
+                                vno = get_vformat(namelist[i]->d_name, 1, /* new style */
+                                                  NULL, &pos);
+                                if (vno <= oldvno) 
                                         vno = 0;
+                                else if (vno > oldvno + 1) 
+                                        vno = oldvno + 1;
+                                else 
+                                        if(i && strncmp(namelist[i]->d_name,
+                                                        namelist[i - 1]->d_name,
+                                                        pos))
+                                                vno = 0;
                         }
                         /* We always need to scan at least two volume files */
                         if (!OPT_INT(OPT_KEY_SEEK_LENGTH, 0) ||
