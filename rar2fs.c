@@ -2065,7 +2065,7 @@ static dir_elem_t *lookup_filecopy(const char *path, RARArchiveListEx *next,
                                 ABS_MP(mp2, (*rar_root ? rar_root : "/"), tmp);
                         } else {
                                 char *rar_dir = strdup(tmp);
-                                ABS_MP(mp2, path, basename(tmp));
+                                ABS_MP(mp2, path, basename(rar_dir));
                                 free(rar_dir);
                         }
                         e_p = filecache_get(mp2);
