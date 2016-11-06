@@ -1245,7 +1245,8 @@ static void dump_buf(int seq, FILE *fp, char *buf, off_t offset, size_t size)
         memset(out, 0, 128);
         size = size > 64 ? 64 : size;
         if (fp) {
-                fprintf(fp, "seq=%d offset: %" PRIu64 "   size: %zu   buf: %p", seq, offset, size, buf);
+                fprintf(fp, "seq=%d offset: %" PRIu64 "   size: %zu   buf: %p",
+                        seq, offset, size_saved, buf);
                 for (i = 0; i < size; i++) {
                         if (!i || !(i % 10)) {
                                 sprintf(tmp, "\n%016llx : ", offset + i);
