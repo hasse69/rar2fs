@@ -2951,11 +2951,12 @@ static void syncrar(const char *path)
 
         int c = 0;
         /* We always need to scan at least two volume files */
-        int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0) + 1;
+        int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
+        c_end = c_end ? c_end + 1 : c_end;
         struct dir_entry_list *arch_next = arch_list_root.next;
         while (arch_next) {
                 (void)listrar(path, NULL, arch_next->entry.name);
-                if (c_end && ++c == c_end)
+                if (++c == c_end)
                         break;
                 arch_next = arch_next->next;
         }
@@ -3281,11 +3282,12 @@ static int rar2_readdir2(const char *path, void *buffer,
 
         int c = 0;
         /* We always need to scan at least two volume files */
-        int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0) + 1;
+        int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
+        c_end = c_end ? c_end + 1 : c_end;
         struct dir_entry_list *arch_next = arch_list_root.next;
         while (arch_next) {
                 (void)listrar(FH_TOPATH(fi->fh), &next, arch_next->entry.name);
-                if (c_end && ++c == c_end)
+                if (++c == c_end)
                         break;
                 arch_next = arch_next->next;
         }
