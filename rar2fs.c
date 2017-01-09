@@ -220,6 +220,7 @@ static mode_t umask_ = 0022;
 #define BLKDEV_SIZE() (blkdev_size > 0 ? blkdev_size : 0)
 
 static int extract_rar(char *arch, const char *file, FILE *fp, void *arg);
+static int get_vformat(const char *s, int t, int *l, int *p);
 
 struct eof_cb_arg {
         off_t toff;
@@ -302,8 +303,22 @@ static char *get_password(const char *file, char *buf, size_t len)
 #endif
 {
         if (file) {
-                size_t l = strlen(file);
-                char *F = alloca(l + 2); /* might try . below */
+                int l;
+                /* Try new style first since old style will always hit. */
+                (void)get_vformat(file, 1, NULL, &l);
+                if (!l) {
+                        /* It is not new style so it must be old style but
+                         * check the result just to make sure. */
+                        (void)get_vformat(file, 0, NULL, &l);
+                        if (!l)
+                                return NULL;
+                        else
+                                l += 2;
+                } else {
+                        l -= 1;
+                }
+
+                char *F = alloca(l + 6); /* .pwd + might try . below */
                 strcpy(F, file);
                 strcpy(F + (l - 4), ".pwd");
                 FILE *fp = fopen(F, "r");
@@ -1630,41 +1645,27 @@ static void dump_stat(struct stat *stbuf)
  ****************************************************************************/
 static int collect_files(const char *arch, struct dir_entry_list *list)
 {
-        RAROpenArchiveDataEx d;
-        HANDLE hdl = NULL;
+        char *arch_ = strdup(arch);
+        int format = 0;
         int files = 0;
-        int vtype = 0;
 
-        memset(&d, 0, sizeof(RAROpenArchiveDataEx));
-        d.ArcName = strdup(arch);
-        d.OpenMode = RAR_OM_LIST;
-
-        while (1) {
-                HANDLE hdl = RAROpenArchiveEx(&d);
-                if (d.OpenResult)
-                        break;
-                if (!(d.Flags & MHD_VOLUME)) {
-                        files = 1;
-                        list = dir_entry_add(list, d.ArcName, NULL, DIR_E_NRM);
-                        break;
-                }
-                if (!files && !(d.Flags & MHD_FIRSTVOLUME))
-                        break;
-
-                ++files;
-                
-                /* Default to new/optional numbering unless extension is .rar
-                 * for which we should check header. */
-                if (files == 1 && IS_RAR(arch))
-                        vtype = !(d.Flags & MHD_NEWNUMBERING);
-
-                list = dir_entry_add(list, d.ArcName, NULL, DIR_E_NRM);
-                RARCloseArchive(hdl);
-                RARNextVolumeName(d.ArcName, vtype);
+        RARVolNameToFirstName_BUGGED(arch_, format);
+        if (access(arch_, F_OK))  {
+                format = 1;
+                strcpy(arch_, arch);
+                RARVolNameToFirstName_BUGGED(arch_, format);
+                if (access(arch_, F_OK))
+                        goto out;
         }
-        if (hdl)
-                RARCloseArchive(hdl);
-        free(d.ArcName);
+        while (1) {
+                list = dir_entry_add(list, arch_, NULL, DIR_E_NRM);
+                ++files;
+                RARNextVolumeName(arch_, format);
+                if (access(arch_, F_OK))
+                       break;
+        }
+out:
+        free(arch_);
         return files;
 }
 
@@ -2384,7 +2385,7 @@ static int CALLBACK list_callback(UINT msg,LPARAM UserData,LPARAM P1,LPARAM P2)
  *
  ****************************************************************************/
 static int listrar(const char *path, struct dir_entry_list **buffer,
-                const char *arch)
+                const char *arch, int *final)
 {
         ENTER_("%s   arch=%s", path, arch);
 
@@ -2403,6 +2404,14 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 if (hdl)
                         RARCloseArchive(hdl);
                 return d.OpenResult;
+        }
+
+        if (d.Flags & MHD_PASSWORD) {
+                RARCloseArchive(hdl);
+                d.Callback = list_callback;
+                hdl = RAROpenArchiveEx(&d);
+                if (final)
+                        *final = 1;
         }
 
         int n_files;
@@ -2761,6 +2770,7 @@ static void syncdir_scan(const char *dir, const char *root)
         ENTER_("%s", dir);
 
         for (f = 0; f < (sizeof(filter) / sizeof(filter[0])); f++) {
+                int final = 0;
                 int vno = -1;
                 int i = 0;
                 int n = scandir(root, &namelist, filter[f], alphasort);
@@ -2795,12 +2805,16 @@ static void syncdir_scan(const char *dir, const char *root)
                                                         pos))
                                                 vno = 0;
                         }
+                        if (!vno)
+                                final = 0;
                         /* We always need to scan at least two volume files */
                         if (!OPT_INT(OPT_KEY_SEEK_LENGTH, 0) ||
                                         vno <= OPT_INT(OPT_KEY_SEEK_LENGTH, 0)) {
-                                char *arch;
-                                ABS_MP(arch, root, namelist[i]->d_name);
-                                (void)listrar(dir, NULL, arch);
+                                if (!final) {
+                                        char *arch;
+                                        ABS_MP(arch, root, namelist[i]->d_name);
+                                        (void)listrar(dir, NULL, arch, &final);
+                                }
                         }
                         free(namelist[i]);
                         ++i;
@@ -2846,6 +2860,7 @@ static void readdir_scan(const char *dir, const char *root,
         ENTER_("%s", dir);
 
         for (f = 0; f < (sizeof(filter) / sizeof(filter[0])); f++) {
+                int final = 0;
                 int vno = -1;
                 int i = 0;
                 int n = scandir(root, &namelist, filter[f], alphasort);
@@ -2902,15 +2917,19 @@ static void readdir_scan(const char *dir, const char *root,
                                                         pos))
                                                 vno = 0;
                         }
+                        if (!vno)
+                                final = 0;
                         /* We always need to scan at least two volume files */
                         if (!OPT_INT(OPT_KEY_SEEK_LENGTH, 0) ||
                                         vno <= OPT_INT(OPT_KEY_SEEK_LENGTH, 0)) {
-                                char *arch;
-                                ABS_MP(arch, root, namelist[i]->d_name);
-                                if (listrar(dir, next, arch))
-                                        *next = dir_entry_add(*next,
-                                                       namelist[i]->d_name,
-                                                       NULL, DIR_E_NRM);
+                                if (!final) {
+                                        char *arch;
+                                        ABS_MP(arch, root, namelist[i]->d_name);
+                                        if (listrar(dir, next, arch, &final))
+                                                *next = dir_entry_add(*next,
+                                                               namelist[i]->d_name,
+                                                               NULL, DIR_E_NRM);
+                                }
                         }
 
 next_entry:
@@ -2950,13 +2969,14 @@ static void syncrar(const char *path)
         ENTER_("%s", path);
 
         int c = 0;
+        int final = 0;
         /* We always need to scan at least two volume files */
         int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
         c_end = c_end ? c_end + 1 : c_end;
         struct dir_entry_list *arch_next = arch_list_root.next;
         while (arch_next) {
-                (void)listrar(path, NULL, arch_next->entry.name);
-                if (++c == c_end)
+                (void)listrar(path, NULL, arch_next->entry.name, &final);
+                if ((++c == c_end) || final)
                         break;
                 arch_next = arch_next->next;
         }
@@ -3221,11 +3241,12 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 short vtype = entry_p->vtype;
                 pthread_mutex_unlock(&file_access_mutex);
                 if (multipart) {
+                        int final = 0;
                         int vol_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
+                        vol_end = vol_end ? vol_end + 1 : vol_end;
                         printd(3, "Search for local directory in %s\n", tmp);
-                        while (!listrar(entry_p->name_p, &next, tmp)) {
-                                ++vol;
-                                if (vol_end && vol_end < vol) {
+                        while (!listrar(entry_p->name_p, &next, tmp, &final)) {
+                                if ((++vol == vol_end) || final) {
                                         free(tmp);
                                         goto fill_buff;
                                 }
@@ -3235,7 +3256,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 } else {
                         if (tmp) {
                                 printd(3, "Search for local directory in %s\n", tmp);
-                                if (!listrar(entry_p->name_p, &next, tmp)) {
+                                if (!listrar(entry_p->name_p, &next, tmp, NULL)) {
                                         free(tmp);
                                         goto fill_buff;
                                 }
@@ -3283,13 +3304,15 @@ static int rar2_readdir2(const char *path, void *buffer,
         dir_list_open(next);
 
         int c = 0;
+        int final = 0;
         /* We always need to scan at least two volume files */
         int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
         c_end = c_end ? c_end + 1 : c_end;
         struct dir_entry_list *arch_next = arch_list_root.next;
         while (arch_next) {
-                (void)listrar(FH_TOPATH(fi->fh), &next, arch_next->entry.name);
-                if (++c == c_end)
+                (void)listrar(FH_TOPATH(fi->fh), &next, arch_next->entry.name,
+                                                 &final);
+                if ((++c == c_end) || final)
                         break;
                 arch_next = arch_next->next;
         }
