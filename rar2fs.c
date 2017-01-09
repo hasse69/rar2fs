@@ -529,6 +529,8 @@ static dir_elem_t *path_lookup(const char *path, struct stat *stbuf)
                         memcpy(stbuf, &e_p->stat, sizeof(struct stat));
                 return e_p;
         }
+        if (!e_p && mount_type == MOUNT_ARCHIVE && strcmp(path, "/"))
+                return NULL;
         /* Do not remember fake .ISO entries between eg. getattr() calls */
         if (e_p && e_p->flags.fake_iso)
                 filecache_invalidate(path);
