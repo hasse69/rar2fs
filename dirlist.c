@@ -152,3 +152,29 @@ struct dir_entry_list *dir_entry_add(struct dir_entry_list *l, const char *key,
         return l;
 }
 
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+struct dir_entry_list *dir_list_dup(const struct dir_entry_list* src)
+{
+        dir_entry_list *root = malloc(sizeof(struct dir_entry_list));
+        dir_entry_list *l = root;
+        if (l) {
+                struct dir_entry_list *next = src->next;
+                dir_list_open(root);
+                while (next) {
+                        l->next = malloc(sizeof(struct dir_entry_list));
+                        l = l->next;
+                        l->entry.name = strdup(next->entry.name);
+                        l->entry.hash = next->entry.hash;
+                        l->entry.type = next->entry.type;
+                        l->entry.valid = next->entry.valid;
+                        l->entry.st = next->entry.st;
+                        next = next->next;
+                }
+                dir_list_close(root);
+        }
+        return root;
+}
+

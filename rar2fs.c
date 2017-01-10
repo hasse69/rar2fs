@@ -2960,7 +2960,7 @@ static void syncdir(const char *dir)
         }
 }
 
-/*!
+/*
  *****************************************************************************
  *
  ****************************************************************************/
@@ -3299,30 +3299,52 @@ static int rar2_readdir2(const char *path, void *buffer,
         (void)path;             /* touch */
         (void)offset;           /* touch */
 
-        struct dir_entry_list dir_list;      /* internal list root */
-        struct dir_entry_list *next = &dir_list;
-        dir_list_open(next);
+        struct dir_entry_list *dir_list; /* internal list root */
+        char *cloak;
 
-        int c = 0;
-        int final = 0;
-        /* We always need to scan at least two volume files */
-        int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
-        c_end = c_end ? c_end + 1 : c_end;
-        struct dir_entry_list *arch_next = arch_list_root.next;
-        while (arch_next) {
-                (void)listrar(FH_TOPATH(fi->fh), &next, arch_next->entry.name,
-                                                 &final);
-                if ((++c == c_end) || final)
-                        break;
-                arch_next = arch_next->next;
+        path = path ? path : FH_TOPATH(fi->fh);
+        CLOAK_PATH(cloak, path);
+        dir_elem_t *entry_p = filecache_get(cloak);
+        if (!entry_p) {
+                int c = 0;
+                int final = 0;
+                dir_list = malloc(sizeof(struct dir_entry_list)); 
+                struct dir_entry_list *next = dir_list;
+                if (!next)
+                        return -ENOMEM;
+
+                /* We always need to scan at least two volume files */
+                int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
+                c_end = c_end ? c_end + 1 : c_end;
+                struct dir_entry_list *arch_next = arch_list_root.next;
+
+                dir_list_open(next);
+                while (arch_next) {
+                        (void)listrar(FH_TOPATH(fi->fh), &next,
+                                                        arch_next->entry.name,
+                                                        &final);
+                        if ((++c == c_end) || final)
+                                break;
+                        arch_next = arch_next->next;
+                }
+                dir_list_close(dir_list);
+
+                entry_p = filecache_alloc(cloak);
+                if (entry_p) {
+                        entry_p->name_p = strdup(cloak);
+                        entry_p->dir_entry_list_p = dir_list;
+                        entry_p->flags.dir = 1;
+                }
+        } else {
+                dir_list = entry_p->dir_entry_list_p;
         }
 
         filler(buffer, ".", NULL, 0);
         filler(buffer, "..", NULL, 0);
 
-        dir_list_close(&dir_list);
-        dump_dir_list(FH_TOPATH(fi->fh), buffer, filler, &dir_list);
-        dir_list_free(&dir_list);
+        dump_dir_list(FH_TOPATH(fi->fh), buffer, filler, dir_list);
+        if (!entry_p)
+                dir_list_free(dir_list);
 
         return 0;
 }

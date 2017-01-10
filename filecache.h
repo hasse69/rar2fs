@@ -41,7 +41,10 @@ struct dir_elem {
         char *rar_p;
         char *file_p;
         char *file2_p;
-        char *link_target_p;
+        union {
+                char *link_target_p;
+                struct dir_entry_list *dir_entry_list_p;
+        };
         short method;                /* for getxattr() */
         struct stat stat;
         uint32_t dir_hash;
@@ -70,7 +73,8 @@ struct dir_elem {
                         unsigned int vsize_fixup_needed:1;
                         unsigned int encrypted:1;
                         unsigned int vsize_resolved:1;
-                        unsigned int :18;
+                        unsigned int :17;
+                        unsigned int dir;
                         unsigned int check_atime:1;
                         unsigned int direct_io:1;
                         unsigned int avi_tested:1;
@@ -80,7 +84,8 @@ struct dir_elem {
                         unsigned int avi_tested:1;
                         unsigned int direct_io:1;
                         unsigned int check_atime:1;
-                        unsigned int :18;
+                        unsigned int dir;
+                        unsigned int :17;
                         unsigned int vsize_resolved:1;
                         unsigned int encrypted:1;
                         unsigned int vsize_fixup_needed:1;
@@ -118,6 +123,13 @@ typedef struct dir_elem dir_elem_t;
                         strcat((s), "/"); \
                 strcat((s), file); \
         } while(0)
+
+#define CLOAK_PATH(s, path) \
+        do { \
+                (s) = alloca(strlen(path) + 3); \
+                strcpy((s), "%"); \
+                strcat((s), path); \
+        } while (0)
 
 extern pthread_mutex_t file_access_mutex;
 

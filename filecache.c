@@ -38,6 +38,7 @@
 #include "filecache.h"
 #include "optdb.h"
 #include "hash.h"
+#include "dirlist.h"
 
 extern char *src_path;
 pthread_mutex_t file_access_mutex;
@@ -48,15 +49,18 @@ static dir_elem_t path_cache[PATH_CACHE_SZ];
 #define FREE_CACHE_MEM(e)\
         do {\
                 if ((e)->name_p)\
-                        free ((e)->name_p);\
+                        free((e)->name_p);\
                 if ((e)->rar_p)\
-                        free ((e)->rar_p);\
+                        free((e)->rar_p);\
                 if ((e)->file_p)\
-                        free ((e)->file_p);\
+                        free((e)->file_p);\
                 if ((e)->file2_p)\
-                        free ((e)->file2_p);\
-                if ((e)->link_target_p)\
-                        free ((e)->link_target_p);\
+                        free((e)->file2_p);\
+                if ((e)->flags.dir) {\
+                        if ((e)->dir_entry_list_p)\
+                                dir_list_free((e)->dir_entry_list_p);\
+                } else if ((e)->link_target_p)\
+                        free((e)->link_target_p);\
                 (e)->name_p = NULL;\
                 (e)->rar_p = NULL;\
                 (e)->file_p = NULL;\
@@ -192,7 +196,11 @@ dir_elem_t *filecache_clone(const dir_elem_t *src)
                         dest->file_p = strdup(src->file_p);
                 if (src->file2_p)
                         dest->file2_p = strdup(src->file2_p);
-                if (src->link_target_p)
+                if (src->flags.dir) {
+                        if (src->dir_entry_list_p)
+                                dest->dir_entry_list_p =
+                                        dir_list_dup(src->dir_entry_list_p);
+                } else if (src->link_target_p)
                         dest->link_target_p = strdup(src->link_target_p);
                 if (errno != 0) {
                         filecache_freeclone(dest);
@@ -228,9 +236,16 @@ void filecache_copy(const dir_elem_t *src, dir_elem_t *dest)
                         dest->file2_p = strdup(src->file2_p);
                 else
                         dest->file2_p = NULL;
-                if (dest->link_target_p)
+                if (dest->flags.dir) {
+                        if (dest->dir_entry_list_p)
+                                dir_list_free(dest->dir_entry_list_p);
+                } else if (dest->link_target_p)
                         free(dest->link_target_p); 
-                if (src->link_target_p)
+                if (src->flags.dir) {
+                        if (src->dir_entry_list_p)
+                                dest->dir_entry_list_p =
+                                        dir_list_dup(src->dir_entry_list_p);
+                } else if (src->link_target_p)
                         dest->link_target_p = strdup(src->link_target_p);
                 else
                         dest->link_target_p = NULL;

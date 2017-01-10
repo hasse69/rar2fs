@@ -64,4 +64,6 @@ struct dir_entry_list *dir_entry_add_hash(struct dir_entry_list *l,
 struct dir_entry_list *dir_entry_add(struct dir_entry_list *l,
         const char *key, struct stat *st, int type);
 
+struct dir_entry_list *dir_list_dup(const struct dir_entry_list* src);
+
 #endif
