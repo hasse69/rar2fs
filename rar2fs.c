@@ -3225,8 +3225,10 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                         printd(3, "Search for local directory in %s\n", tmp);
                         while (!listrar(entry_p->name_p, &next, tmp)) {
                                 ++vol;
-                                if (vol_end && vol_end < vol)
+                                if (vol_end && vol_end < vol) {
+                                        free(tmp);
                                         goto fill_buff;
+                                }
                                 RARNextVolumeName(tmp, !vtype);
                                 printd(3, "Search for local directory in %s\n", tmp);
                         }
