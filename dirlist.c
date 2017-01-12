@@ -156,7 +156,7 @@ struct dir_entry_list *dir_entry_add(struct dir_entry_list *l, const char *key,
  *****************************************************************************
  *
  ****************************************************************************/
-struct dir_entry_list *dir_list_dup(const struct dir_entry_list* src)
+struct dir_entry_list *dir_list_dup(const struct dir_entry_list *src)
 {
         dir_entry_list *root = malloc(sizeof(struct dir_entry_list));
         dir_entry_list *l = root;
@@ -173,8 +173,35 @@ struct dir_entry_list *dir_list_dup(const struct dir_entry_list* src)
                         l->entry.st = next->entry.st;
                         next = next->next;
                 }
-                dir_list_close(root);
+                l->next = NULL;
         }
         return root;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+struct dir_entry_list *dir_list_append(struct dir_entry_list *list1,
+                const struct dir_entry_list *list2)
+{
+        /* TODO: Make sure list1/list2 are heads */
+        struct dir_entry_list *next1 = list1->next;
+        struct dir_entry_list *next2 = list2->next;
+        struct dir_entry_list *prev_next = list1;
+        while (next1) {
+                prev_next = next1;
+                next1 = next1->next;
+        }
+        next1 = prev_next;
+
+        while (next2) {
+                next1->next = malloc(sizeof(struct dir_entry_list));
+                memcpy(next1->next, next2, sizeof(struct dir_entry_list));
+                next1 = next1->next;
+                next1->entry.name = strdup(next2->entry.name);
+                next2 = next2->next;
+        }
+        return next1;
 }
 

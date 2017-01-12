@@ -66,4 +66,7 @@ struct dir_entry_list *dir_entry_add(struct dir_entry_list *l,
 
 struct dir_entry_list *dir_list_dup(const struct dir_entry_list* src);
 
+struct dir_entry_list *dir_list_append(struct dir_entry_list* list1,
+        const struct dir_entry_list* list2);
+
 #endif

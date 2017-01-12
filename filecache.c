@@ -57,8 +57,10 @@ static dir_elem_t path_cache[PATH_CACHE_SZ];
                 if ((e)->file2_p)\
                         free((e)->file2_p);\
                 if ((e)->flags.dir) {\
-                        if ((e)->dir_entry_list_p)\
+                        if ((e)->dir_entry_list_p) {\
                                 dir_list_free((e)->dir_entry_list_p);\
+                                free((e)->dir_entry_list_p);\
+                        }\
                 } else if ((e)->link_target_p)\
                         free((e)->link_target_p);\
                 (e)->name_p = NULL;\
@@ -237,8 +239,10 @@ void filecache_copy(const dir_elem_t *src, dir_elem_t *dest)
                 else
                         dest->file2_p = NULL;
                 if (dest->flags.dir) {
-                        if (dest->dir_entry_list_p)
+                        if (dest->dir_entry_list_p) {
                                 dir_list_free(dest->dir_entry_list_p);
+                                free(dest->dir_entry_list_p);
+                        }
                 } else if (dest->link_target_p)
                         free(dest->link_target_p); 
                 if (src->flags.dir) {
