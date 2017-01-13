@@ -2761,7 +2761,8 @@ static int f2(SCANDIR_ARG3 e)
  *****************************************************************************
  *
  ****************************************************************************/
-static void syncdir_scan(const char *dir, const char *root)
+static int syncdir_scan(const char *dir, const char *root,
+                struct dir_entry_list **next)
 {
         struct dirent **namelist;
         unsigned int f;
@@ -2776,7 +2777,7 @@ static void syncdir_scan(const char *dir, const char *root)
                 int n = scandir(root, &namelist, filter[f], alphasort);
                 if (n < 0) {
                         perror("scandir");
-                        return;
+                        return -errno;
                 }
                 while (i < n) {
                         if (f == 1) {
@@ -2813,7 +2814,7 @@ static void syncdir_scan(const char *dir, const char *root)
                                 if (!final) {
                                         char *arch;
                                         ABS_MP(arch, root, namelist[i]->d_name);
-                                        (void)listrar(dir, NULL, arch, &final);
+                                        (void)listrar(dir, next, arch, &final);
                                 }
                         }
                         free(namelist[i]);
@@ -2821,6 +2822,8 @@ static void syncdir_scan(const char *dir, const char *root)
                 }
                 free(namelist);
         }
+
+        return 0;
 }
 
 /*!
@@ -2959,28 +2962,88 @@ next_entry:
  *****************************************************************************
  *
  ****************************************************************************/
-static void syncdir(const char *dir)
+static int syncdir(const char *path)
 {
-        ENTER_("%s", dir);
+        ENTER_("%s", path);
 
         DIR *dp;
         char *root;
-        ABS_ROOT(root, dir);
+        dir_elem_t *entry_p;
+        struct dir_entry_list *dir_list; /* internal list root */
+        struct dir_entry_list *next;
+        char *cloak;
 
+        CLOAK_PATH(cloak, path);
+        entry_p = filecache_get(cloak);
+        if (entry_p)
+                return 0;
+        entry_p = filecache_get(path);
+        if (entry_p && entry_p->flags.dir)
+                return 0;
+
+        ABS_ROOT(root, path);
         dp = opendir(root);
         if (dp != NULL) {
-                syncdir_scan(dir, root);
+                int res;
+
+                dir_list = malloc(sizeof(struct dir_entry_list));
+                next = dir_list;
+                if (!next)
+                        return -ENOMEM;
+                dir_list_open(next);
+                res = syncdir_scan(path, root, &next);
                 (void)closedir(dp);
+                if (res) {
+                        dir_list_free(dir_list);
+                        free(dir_list);
+                        return res;
+                }
+
+                pthread_mutex_lock(&file_access_mutex);
+                entry_p = filecache_get(path);
+                if (entry_p && !entry_p->dir_entry_list_p) {
+                        entry_p->dir_entry_list_p = dir_list;
+                        entry_p->flags.dir = 1;
+                } else {
+                        entry_p = filecache_alloc(cloak);
+                        if (entry_p && !entry_p->dir_entry_list_p) {
+                                entry_p->name_p = strdup(cloak);
+                                entry_p->dir_entry_list_p = dir_list;
+                                entry_p->flags.dir = 1;
+                        }
+                }
+                pthread_mutex_unlock(&file_access_mutex);
         }
+
+        return 0;
 }
 
 /*
  *****************************************************************************
  *
  ****************************************************************************/
-static void syncrar(const char *path)
+static int syncrar(const char *path)
 {
         ENTER_("%s", path);
+
+        dir_elem_t *entry_p;
+        struct dir_entry_list *dir_list; /* internal list root */
+        struct dir_entry_list *next;
+        char *cloak;
+
+        CLOAK_PATH(cloak, path);
+        entry_p = filecache_get(cloak);
+        if (entry_p)
+                return 0;
+        entry_p = filecache_get(path);
+        if (entry_p && entry_p->flags.dir)
+                return 0;
+
+        dir_list = malloc(sizeof(struct dir_entry_list));
+        next = dir_list;
+        if (!next)
+                return -ENOMEM;
+        dir_list_open(next);
 
         int c = 0;
         int final = 0;
@@ -2988,12 +3051,31 @@ static void syncrar(const char *path)
         int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
         c_end = c_end ? c_end + 1 : c_end;
         struct dir_entry_list *arch_next = arch_list_root.next;
+
+        dir_list_open(dir_list);
         while (arch_next) {
-                (void)listrar(path, NULL, arch_next->entry.name, &final);
+                (void)listrar(path, &next, arch_next->entry.name, &final);
                 if ((++c == c_end) || final)
                         break;
                 arch_next = arch_next->next;
         }
+
+        pthread_mutex_lock(&file_access_mutex);
+        entry_p = filecache_get(path);
+        if (entry_p && !entry_p->dir_entry_list_p) {
+                entry_p->dir_entry_list_p = dir_list;
+                entry_p->flags.dir = 1;
+        } else {
+                entry_p = filecache_alloc(cloak);
+                if (entry_p && !entry_p->dir_entry_list_p) {
+                        entry_p->name_p = strdup(cloak);
+                        entry_p->dir_entry_list_p = dir_list;
+                        entry_p->flags.dir = 1;
+                }
+        }
+        pthread_mutex_unlock(&file_access_mutex);
+
+        return 0;
 }
 
 /*!
@@ -3005,6 +3087,7 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         ENTER_("%s", path);
 
         dir_elem_t *entry_p;
+        int res;
 
         pthread_mutex_lock(&file_access_mutex);
         entry_p = path_lookup(path, stbuf);
@@ -3025,15 +3108,11 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         if (OPT_FILTER(path))
                 return -ENOENT;
         char *safe_path = strdup(path);
-        char *dir = dirname(safe_path);
-        char *cloak;
-        CLOAK_PATH(cloak, dir);
-        if (filecache_get(cloak)) {
-                free(safe_path);
-                goto skip_scan;
-        }
-        syncdir(dir);
+        res = syncdir(dirname(safe_path));
         free(safe_path);
+        if (res)
+                return res;
+
         pthread_mutex_lock(&file_access_mutex);
         entry_p = filecache_get(path);
         if (entry_p) {
@@ -3044,10 +3123,7 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         }
         pthread_mutex_unlock(&file_access_mutex);
 
-skip_scan:
-
 #if RARVER_MAJOR > 4
-{ /* Avoid compiler error for label before non-statement */
         int cmd = 0;
         while (file_cmd[cmd]) {
                 size_t len_path = strlen(path);
@@ -3072,7 +3148,6 @@ skip_scan:
                 }
                 ++cmd;
         }
-}
 #endif
 
         return -ENOENT;
@@ -3085,6 +3160,8 @@ skip_scan:
 static int rar2_getattr2(const char *path, struct stat *stbuf)
 {
         ENTER_("%s", path);
+
+        int res;
 
         pthread_mutex_lock(&file_access_mutex);
         if (path_lookup(path, stbuf)) {
@@ -3100,11 +3177,9 @@ static int rar2_getattr2(const char *path, struct stat *stbuf)
          * This should not happen very frequently unless the contents of
          * the rar archive was actually changed after it was mounted.
          */
-        char *cloak;
-        CLOAK_PATH(cloak, "/");
-        if (filecache_get(cloak))
-                goto skip_scan;
-        syncrar("/");
+        res = syncrar("/");
+        if (res)
+                return res;
 
         pthread_mutex_lock(&file_access_mutex);
         dir_elem_t *entry_p = filecache_get(path);
@@ -3116,10 +3191,7 @@ static int rar2_getattr2(const char *path, struct stat *stbuf)
         }
         pthread_mutex_unlock(&file_access_mutex);
 
-skip_scan:
-
 #if RARVER_MAJOR > 4
-{ /* Avoid compiler error for label before non-statement */
         int cmd = 0;
         while (file_cmd[cmd]) {
                 size_t len_path = strlen(path);
@@ -3142,7 +3214,6 @@ skip_scan:
                 }
                 ++cmd;
         }
-}
 #endif
 
         return -ENOENT;
@@ -3259,6 +3330,11 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
         pthread_mutex_lock(&file_access_mutex);
         dir_elem_t *entry_p = filecache_get(cloak);
         if (!entry_p) {
+                entry_p = filecache_get(path);
+                if (entry_p && !entry_p->flags.dir)
+                        entry_p = NULL;
+        }
+        if (!entry_p) {
                 pthread_mutex_unlock(&file_access_mutex);
                 dir_list2 = malloc(sizeof(struct dir_entry_list));
                 if (!dir_list2)
@@ -3343,19 +3419,27 @@ dump_buff:
         dir_list_close(&dir_list);
         dump_dir_list(path, buffer, filler, &dir_list);
         dir_list_free(&dir_list);
+
         if (!entry_p) {
                 pthread_mutex_lock(&file_access_mutex);
-                entry_p = filecache_alloc(cloak);
-                if (entry_p) {
-                        entry_p->name_p = strdup(cloak);
+                entry_p = filecache_get(path);
+                if (entry_p && !entry_p->dir_entry_list_p) {
                         entry_p->dir_entry_list_p = dir_list2;
                         entry_p->flags.dir = 1;
+                } else {
+                        entry_p = filecache_alloc(cloak);
+                        if (entry_p && !entry_p->dir_entry_list_p) {
+                                entry_p->name_p = strdup(cloak);
+                                entry_p->dir_entry_list_p = dir_list2;
+                                entry_p->flags.dir = 1;
+                        }
                 }
                 pthread_mutex_unlock(&file_access_mutex);
         } else {
                 dir_list_free(dir_list2);
                 free(dir_list2);
         }
+
         return 0;
 }
 
@@ -3376,11 +3460,18 @@ static int rar2_readdir2(const char *path, void *buffer,
 
         path = path ? path : FH_TOPATH(fi->fh);
         CLOAK_PATH(cloak, path);
+        pthread_mutex_lock(&file_access_mutex);
         dir_elem_t *entry_p = filecache_get(cloak);
+        if (!entry_p) {
+                entry_p = filecache_get(path);
+                if (entry_p && !entry_p->flags.dir)
+                        entry_p = NULL;
+        }
         if (!entry_p) {
                 int c = 0;
                 int final = 0;
-                dir_list = malloc(sizeof(struct dir_entry_list)); 
+                pthread_mutex_unlock(&file_access_mutex);
+                dir_list = malloc(sizeof(struct dir_entry_list));
                 struct dir_entry_list *next = dir_list;
                 if (!next)
                         return -ENOMEM;
@@ -3399,24 +3490,35 @@ static int rar2_readdir2(const char *path, void *buffer,
                                 break;
                         arch_next = arch_next->next;
                 }
-                dir_list_close(dir_list);
-
-                entry_p = filecache_alloc(cloak);
-                if (entry_p) {
-                        entry_p->name_p = strdup(cloak);
-                        entry_p->dir_entry_list_p = dir_list;
-                        entry_p->flags.dir = 1;
-                }
         } else {
-                dir_list = entry_p->dir_entry_list_p;
+                dir_list = dir_list_dup(entry_p->dir_entry_list_p);
+                pthread_mutex_unlock(&file_access_mutex);
         }
 
         filler(buffer, ".", NULL, 0);
         filler(buffer, "..", NULL, 0);
 
         dump_dir_list(FH_TOPATH(fi->fh), buffer, filler, dir_list);
-        if (!entry_p)
+
+        if (!entry_p) {
+                pthread_mutex_lock(&file_access_mutex);
+                entry_p = filecache_get(path);
+                if (entry_p && !entry_p->dir_entry_list_p) {
+                        entry_p->dir_entry_list_p = dir_list;
+                        entry_p->flags.dir = 1;
+                } else {
+                        entry_p = filecache_alloc(cloak);
+                        if (entry_p && !entry_p->dir_entry_list_p) {
+                                entry_p->name_p = strdup(cloak);
+                                entry_p->dir_entry_list_p = dir_list;
+                                entry_p->flags.dir = 1;
+                        }
+                }
+                pthread_mutex_unlock(&file_access_mutex);
+        } else {
                 dir_list_free(dir_list);
+                free(dir_list);
+        }
 
         return 0;
 }

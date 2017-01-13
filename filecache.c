@@ -60,13 +60,17 @@ static dir_elem_t path_cache[PATH_CACHE_SZ];
                         if ((e)->dir_entry_list_p) {\
                                 dir_list_free((e)->dir_entry_list_p);\
                                 free((e)->dir_entry_list_p);\
+                                (e)->dir_entry_list_p = NULL;\
                         }\
-                } else if ((e)->link_target_p)\
+                } else if ((e)->link_target_p) {\
                         free((e)->link_target_p);\
+                        (e)->link_target_p = NULL;\
+                }\
                 (e)->name_p = NULL;\
                 (e)->rar_p = NULL;\
                 (e)->file_p = NULL;\
                 (e)->file2_p = NULL;\
+                (e)->dir_entry_list_p = NULL;\
         } while(0)
 
 /*!
