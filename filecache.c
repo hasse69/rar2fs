@@ -48,14 +48,10 @@ static dir_elem_t path_cache[PATH_CACHE_SZ];
 
 #define FREE_CACHE_MEM(e)\
         do {\
-                if ((e)->name_p)\
-                        free((e)->name_p);\
-                if ((e)->rar_p)\
-                        free((e)->rar_p);\
-                if ((e)->file_p)\
-                        free((e)->file_p);\
-                if ((e)->file2_p)\
-                        free((e)->file2_p);\
+                free((e)->name_p);\
+                free((e)->rar_p);\
+                free((e)->file_p);\
+                free((e)->file2_p);\
                 if ((e)->flags.dir) {\
                         if ((e)->dir_entry_list_p) {\
                                 dir_list_free((e)->dir_entry_list_p);\
@@ -224,20 +220,17 @@ dir_elem_t *filecache_clone(const dir_elem_t *src)
 void filecache_copy(const dir_elem_t *src, dir_elem_t *dest)
 {
         if (dest != NULL && src != NULL) {
-                if (dest->rar_p) 
-                        free(dest->rar_p); 
+                free(dest->rar_p);
                 if (src->rar_p)
                         dest->rar_p = strdup(src->rar_p);
                 else
                         dest->rar_p = NULL;
-                if (dest->file_p)
-                        free(dest->file_p); 
+                free(dest->file_p);
                 if (src->file_p)
                         dest->file_p = strdup(src->file_p);
                 else
                         dest->file_p = NULL;
-                if (dest->file2_p)
-                        free(dest->file2_p); 
+                free(dest->file2_p);
                 if (src->file2_p)
                         dest->file2_p = strdup(src->file2_p);
                 else
@@ -248,11 +241,13 @@ void filecache_copy(const dir_elem_t *src, dir_elem_t *dest)
                                 free(dest->dir_entry_list_p);
                         }
                 } else if (dest->link_target_p)
-                        free(dest->link_target_p); 
+                        free(dest->link_target_p);
                 if (src->flags.dir) {
                         if (src->dir_entry_list_p)
                                 dest->dir_entry_list_p =
                                         dir_list_dup(src->dir_entry_list_p);
+                        else
+                            dest->dir_entry_list_p = NULL;
                 } else if (src->link_target_p)
                         dest->link_target_p = strdup(src->link_target_p);
                 else

@@ -79,6 +79,9 @@
 #define MOUNT_FOLDER  0
 #define MOUNT_ARCHIVE 1
 
+#define SYNCDIR_NO_FORCE 0
+#define SYNCDIR_FORCE 1
+
 struct vol_handle {
         FILE *fp;
         off_t pos;
@@ -528,13 +531,52 @@ static dir_elem_t *path_lookup_miss(const char *path, struct stat *stbuf)
 }
 
 /*!
+*****************************************************************************
+*
+****************************************************************************/
+static inline void __invalidate_cloak(const char *path)
+{
+        char *cloak;
+        CLOAK_PATH(cloak, path);
+        filecache_invalidate(cloak);
+}
+
+/*!
+*****************************************************************************
+*
+****************************************************************************/
+static void __attribute__((unused)) __invalidate_cloak_for_file(const char *path)
+{
+        char *safe_path;
+        safe_path = strdup(path);
+        __invalidate_cloak(dirname(safe_path));
+        free(safe_path);
+}
+
+/*!
+*****************************************************************************
+*
+****************************************************************************/
+static void __invalidate_cloak_for_rar(const char *path)
+{
+        if (IS_RAR(path) || IS_CBR(path) || IS_NNN(path) ||
+            IS_RXX(path)) {
+                char *safe_path;
+                safe_path = strdup(path);
+                __invalidate_cloak(dirname(safe_path));
+                free(safe_path);
+            }
+}
+
+/*!
  *****************************************************************************
  *
  ****************************************************************************/
 static dir_elem_t *path_lookup(const char *path, struct stat *stbuf)
 {
         dir_elem_t *e_p = filecache_get(path);
-        if (e_p && !e_p->flags.fake_iso) {
+        dir_elem_t *e2_p = e_p;
+        if (e_p && !e_p->flags.fake_iso && !e_p->flags.unresolved) {
                 if (stbuf)
                         memcpy(stbuf, &e_p->stat, sizeof(struct stat));
                 return e_p;
@@ -544,7 +586,17 @@ static dir_elem_t *path_lookup(const char *path, struct stat *stbuf)
         /* Do not remember fake .ISO entries between eg. getattr() calls */
         if (e_p && e_p->flags.fake_iso)
                 filecache_invalidate(path);
-        return path_lookup_miss(path, stbuf);
+        e_p = path_lookup_miss(path, stbuf);
+        if (!e_p) {
+                if (e2_p && e2_p->flags.unresolved) {
+                        __invalidate_cloak(path);
+                        e2_p->flags.unresolved = 0;
+                        if (stbuf)
+                                memcpy(stbuf, &e2_p->stat, sizeof(struct stat));
+                        return e2_p;
+                }
+        }
+        return e_p;
 }
 
 /*!
@@ -1546,12 +1598,10 @@ static int lrelease(struct fuse_file_info *fi)
 {
         ENTER_();
 
-        if (FH_TOIO(fi->fh)->type == IO_TYPE_INFO) {
-                if (FH_TOBUF(fi->fh))
-                        free(FH_TOBUF(fi->fh));
-        } else if (FH_TOFD(fi->fh)) {
+        if (FH_TOIO(fi->fh)->type == IO_TYPE_INFO)
+                free(FH_TOBUF(fi->fh));
+        else if (FH_TOFD(fi->fh))
                 close(FH_TOFD(fi->fh));
-        }
         if (FH_TOIO(fi->fh)->type == IO_TYPE_ISO) {
                 if (FH_TOENTRY(fi->fh))
                         filecache_freeclone(FH_TOENTRY(fi->fh));
@@ -2501,6 +2551,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                                 entry_p->rar_p = strdup(arch);
                                                 entry_p->file_p = strdup(rar_name);
                                                 entry_p->flags.force_dir = 1;
+                                                entry_p->flags.unresolved = 1;
 
                                                 /* Check if part of a volume */
                                                 if (d.Flags & MHD_VOLUME) {
@@ -2597,11 +2648,11 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 /* Allocate a cache entry for this file */
                 printd(3, "Adding %s to cache\n", mp);
                 entry_p = filecache_alloc(mp);
-
                 entry_p->name_p = strdup(mp);
                 entry_p->rar_p = strdup(arch);
                 entry_p->file_p = strdup(next->hdr.FileName);
                 entry_p->flags.vsize_resolved = 1; /* Assume sizes will be resolved */
+                entry_p->flags.unresolved = 1;
 
                 /* Check for .rar file inside archive */
                 if (!OPT_SET(OPT_KEY_FLAT_ONLY) && IS_RAR(entry_p->name_p)
@@ -2840,7 +2891,10 @@ static int syncdir_scan(const char *dir, const char *root,
                                 if (!final) {
                                         char *arch;
                                         ABS_MP(arch, root, namelist[i]->d_name);
-                                        (void)listrar(dir, next, arch, &final);
+                                        if (listrar(dir, next, arch, &final))
+                                                *next = dir_entry_add(*next,
+                                                               namelist[i]->d_name,
+                                                               NULL, DIR_E_NRM);
                                 }
                         }
                         free(namelist[i]);
@@ -2915,9 +2969,7 @@ static void readdir_scan(const char *dir, const char *root,
                         if (f == 0) {
                                 char *tmp = namelist[i]->d_name;
                                 char *tmp2 = NULL;
-#ifdef _DIRENT_HAVE_D_TYPE
-                                if (namelist[i]->d_type == DT_REG) {
-#else
+#ifndef _DIRENT_HAVE_D_TYPE
                                 char *path;
                                 struct stat st;
                                 ABS_MP(path, root, tmp);
@@ -2928,10 +2980,11 @@ static void readdir_scan(const char *dir, const char *root,
                                         if (convert_fake_iso(tmp2))
                                                 *next = dir_entry_add(*next, tmp2,
                                                                NULL, DIR_E_NRM);
+#ifndef _DIRENT_HAVE_D_TYPE
                                 }
+#endif
                                 *next = dir_entry_add(*next, tmp, NULL, DIR_E_NRM);
-                                if (tmp2 != NULL)
-                                        free(tmp2);
+                                free(tmp2);
                                 goto next_entry;
                         }
                         if (f == 2) {
@@ -2988,7 +3041,7 @@ next_entry:
  *****************************************************************************
  *
  ****************************************************************************/
-static int syncdir(const char *path)
+static int syncdir(const char *path, int force_sync)
 {
         ENTER_("%s", path);
 
@@ -3000,12 +3053,13 @@ static int syncdir(const char *path)
         char *cloak;
 
         CLOAK_PATH(cloak, path);
-        entry_p = filecache_get(cloak);
-        if (entry_p)
-                return 0;
-        entry_p = filecache_get(path);
-        if (entry_p && entry_p->flags.dir)
-                return 0;
+        if (force_sync == SYNCDIR_NO_FORCE) {
+                entry_p = filecache_get(cloak);
+                if (entry_p)
+                        return 0;
+        } else {
+                entry_p = NULL;
+        }
 
         ABS_ROOT(root, path);
         dp = opendir(root);
@@ -3026,17 +3080,12 @@ static int syncdir(const char *path)
                 }
 
                 pthread_mutex_lock(&file_access_mutex);
-                entry_p = filecache_get(path);
+                entry_p = filecache_alloc(cloak);
                 if (entry_p && !entry_p->dir_entry_list_p) {
+                        free(entry_p->name_p);
+                        entry_p->name_p = strdup(cloak);
                         entry_p->dir_entry_list_p = dir_list;
                         entry_p->flags.dir = 1;
-                } else {
-                        entry_p = filecache_alloc(cloak);
-                        if (entry_p && !entry_p->dir_entry_list_p) {
-                                entry_p->name_p = strdup(cloak);
-                                entry_p->dir_entry_list_p = dir_list;
-                                entry_p->flags.dir = 1;
-                        }
                 }
                 pthread_mutex_unlock(&file_access_mutex);
         }
@@ -3094,6 +3143,7 @@ static int syncrar(const char *path)
         } else {
                 entry_p = filecache_alloc(cloak);
                 if (entry_p && !entry_p->dir_entry_list_p) {
+                        free(entry_p->name_p);
                         entry_p->name_p = strdup(cloak);
                         entry_p->dir_entry_list_p = dir_list;
                         entry_p->flags.dir = 1;
@@ -3134,7 +3184,7 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         if (OPT_FILTER(path))
                 return -ENOENT;
         char *safe_path = strdup(path);
-        res = syncdir(dirname(safe_path));
+        res = syncdir(dirname(safe_path), SYNCDIR_NO_FORCE);
         free(safe_path);
         if (res)
                 return res;
@@ -3254,7 +3304,12 @@ static void dump_dir_list(const char *path, void *buffer, fuse_fill_dir_t filler
 {
         ENTER_("%s", path);
 
+#if 0
+        dir_elem_t *entry_p;
         int do_inval_cache = 1;
+#else
+        (void)path;
+#endif
 
         next = next->next;
         while (next) {
@@ -3262,10 +3317,13 @@ static void dump_dir_list(const char *path, void *buffer, fuse_fill_dir_t filler
                  * Purge invalid entries from the cache, display the rest.
                  * Collisions are rare but might occur when a file inside
                  * a RAR archives share the same name with a file in the
-                 * back-end fs. The latter will prevail in all cases.
+                 * back-end fs. The latter will prevail in all cases unless
+                 * the directory cache is currently in effect.
                  */
                 if (next->entry.valid) {
                         filler(buffer, next->entry.name, next->entry.st, 0);
+/* TODO: If/when folder cache becomes optional this needs to be revisted */
+#if 0
                         if (next->entry.type == DIR_E_RAR)
                                 do_inval_cache = 0;
                         else
@@ -3277,6 +3335,7 @@ static void dump_dir_list(const char *path, void *buffer, fuse_fill_dir_t filler
                                 ABS_MP(tmp, path, next->entry.name);
                                 filecache_invalidate(tmp);
                         }
+#endif
                 }
                 next = next->next;
         }
@@ -3355,11 +3414,6 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
         CLOAK_PATH(cloak, path);
         pthread_mutex_lock(&file_access_mutex);
         dir_elem_t *entry_p = filecache_get(cloak);
-        if (!entry_p) {
-                entry_p = filecache_get(path);
-                if (entry_p && !entry_p->flags.dir)
-                        entry_p = NULL;
-        }
         if (!entry_p) {
                 pthread_mutex_unlock(&file_access_mutex);
                 dir_list2 = malloc(sizeof(struct dir_entry_list));
@@ -3443,28 +3497,24 @@ dump_buff:
 
         (void)dir_list_append(&dir_list, dir_list2);
         dir_list_close(&dir_list);
-        dump_dir_list(path, buffer, filler, &dir_list);
-        dir_list_free(&dir_list);
 
         if (!entry_p) {
                 pthread_mutex_lock(&file_access_mutex);
-                entry_p = filecache_get(path);
+                entry_p = filecache_alloc(cloak);
                 if (entry_p && !entry_p->dir_entry_list_p) {
+                        free(entry_p->name_p);
+                        entry_p->name_p = strdup(cloak);
                         entry_p->dir_entry_list_p = dir_list2;
                         entry_p->flags.dir = 1;
-                } else {
-                        entry_p = filecache_alloc(cloak);
-                        if (entry_p && !entry_p->dir_entry_list_p) {
-                                entry_p->name_p = strdup(cloak);
-                                entry_p->dir_entry_list_p = dir_list2;
-                                entry_p->flags.dir = 1;
-                        }
                 }
                 pthread_mutex_unlock(&file_access_mutex);
         } else {
                 dir_list_free(dir_list2);
                 free(dir_list2);
         }
+
+        dump_dir_list(path, buffer, filler, &dir_list);
+        dir_list_free(&dir_list);
 
         return 0;
 }
@@ -3535,6 +3585,7 @@ static int rar2_readdir2(const char *path, void *buffer,
                 } else {
                         entry_p = filecache_alloc(cloak);
                         if (entry_p && !entry_p->dir_entry_list_p) {
+                                free(entry_p->name_p);
                                 entry_p->name_p = strdup(cloak);
                                 entry_p->dir_entry_list_p = dir_list;
                                 entry_p->flags.dir = 1;
@@ -4224,7 +4275,7 @@ open_end:
  ****************************************************************************/
 static inline int access_chk(const char *path, int new_file)
 {
-        void *e;
+        dir_elem_t *e;
 
         if (fs_loop) {
                 if (!strncmp(path, fs_loop_mp_base, fs_loop_mp_base_len) ||
@@ -4236,21 +4287,25 @@ static inline int access_chk(const char *path, int new_file)
          * To return a more correct fault code if an attempt is
          * made to create/remove a file in a RAR folder, a cache lookup
          * will tell if operation should be permitted or not.
-         * Simply, if the file/folder is in the cache, forget it!
+         * Simply, if the file/folder is in the cache and cannot be
+         * found/accessed natively, forget it!
          *   This works fine in most cases but it does not work for some
          * specific programs like 'touch'. A 'touch' may result in a
          * getattr() callback even if -EPERM is returned by open() which
          * will eventually render a "No such file or directory" type of
          * error/message.
          */
+        char *real;
         if (new_file) {
                 char *p = strdup(path); /* In case p is destroyed by dirname() */
-                e = (void *)filecache_get(dirname(p));
+                e = filecache_get(dirname(p));
+                ABS_ROOT(real, p);
                 free(p);
         } else {
-                e = (void *)filecache_get(path);
+                e = filecache_get(path);
+                ABS_ROOT(real, path);
         }
-        return e ? 1 : 0;
+        return e && !e->flags.unresolved ? 1 : 0;
 }
 
 /*!
@@ -4601,6 +4656,7 @@ static int rar2_create(const char *path, mode_t mode, struct fuse_file_info *fi)
                                 FH_SETENTRY(fi->fh, NULL);
                                 FH_SETFD(fi->fh, fd);
                         }
+                        __invalidate_cloak_for_rar(path);
                         return 0;
                 }
         }
@@ -4629,8 +4685,10 @@ static int rar2_rename(const char *oldpath, const char *newpath)
                 char *newroot;
                 ABS_ROOT(oldroot, oldpath);
                 ABS_ROOT(newroot, newpath);
-                if (!rename(oldroot, newroot))
+                if (!rename(oldroot, newroot)) {
+                        __invalidate_cloak_for_rar(newpath);
                         return 0;
+                }
                 return -errno;
         }
         return -EPERM;
@@ -4663,8 +4721,10 @@ static int rar2_unlink(const char *path)
         if (!access_chk(path, 0)) {
                 char *root;
                 ABS_ROOT(root, path);
-                if (!unlink(root))
+                if (!unlink(root)) {
+                        __invalidate_cloak_for_rar(path);
                         return 0;
+                }
                 return -errno;
         }
         return -EPERM;

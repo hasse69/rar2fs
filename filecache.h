@@ -74,7 +74,8 @@ struct dir_elem {
                         unsigned int encrypted:1;
                         unsigned int vsize_resolved:1;
                         unsigned int :17;
-                        unsigned int dir;
+                        unsigned int unresolved:1;
+                        unsigned int dir:1;
                         unsigned int check_atime:1;
                         unsigned int direct_io:1;
                         unsigned int avi_tested:1;
@@ -84,7 +85,8 @@ struct dir_elem {
                         unsigned int avi_tested:1;
                         unsigned int direct_io:1;
                         unsigned int check_atime:1;
-                        unsigned int dir;
+                        unsigned int dir:1;
+                        unsigned int unresolved:1;
                         unsigned int :17;
                         unsigned int vsize_resolved:1;
                         unsigned int encrypted:1;
@@ -126,9 +128,10 @@ typedef struct dir_elem dir_elem_t;
 
 #define CLOAK_PATH(s, path) \
         do { \
-                (s) = alloca(strlen(path) + 3); \
+                const char *p = (path); \
+                (s) = alloca(strlen(p) + 3); \
                 strcpy((s), "%"); \
-                strcat((s), path); \
+                strcat((s), p); \
         } while (0)
 
 extern pthread_mutex_t file_access_mutex;
