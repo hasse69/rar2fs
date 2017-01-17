@@ -33,7 +33,7 @@ rar2fs_LDADD = $(PTHREAD_CFLAGS) $(LDFLAGS) $(UNRAR_LDFLAGS) $(FUSE_LDFLAGS) \
 		$(PTHREAD_LIBS) $(FUSE_LIBS) $(UNRAR_LIBS) $(LIBICONV) -lstdc++
 rar2fs_LINK = $(CC) -o $@
 mkr2i_SOURCES = mkr2i.c
-mkr2i_LDADD = $(LDFLAGS) $(UNRAR_LDFLAGS) $(FUSE_LDFLAGS)
+mkr2i_LDADD = $(LDFLAGS)
 mkr2i_LINK = $(CC) -o $@
 
 if LINUX
