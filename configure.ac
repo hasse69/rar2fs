@@ -200,6 +200,20 @@ if test x"$withval" != x; then
     fi
 fi
 
+static_unrar=fallback
+enableval=
+AC_ARG_ENABLE([static-unrar],
+   [AS_HELP_STRING([--enable-static-unrar],
+               [enable static linking of libunrar [default]])],
+   [], [])
+if test x"$enableval" != x"yes"; then
+    if test x"$enableval" = x"no"; then
+        static_unrar=no
+    fi;
+else
+    static_unrar=yes
+fi
+
 withval=
 AC_ARG_WITH([unrar],
    [AS_HELP_STRING([--with-unrar=PATH],
@@ -226,9 +240,12 @@ AC_ARG_WITH([unrar-lib],
 if test x"$withval" != x; then
     if test x"$withval" != x"no"; then
        if test x"$withval" != x"yes"; then
-           UNRAR_LDFLAGS="-L"$withval
-           export LD_LIBRARY_PATH="$LD_LIBRARY_PATH\:/"`cd $withval;pwd`
-           export DYLD_LIBRARY_PATH="$LD_LIBRARY_PATH\:/"`cd $withval;pwd`
+           if test x"$static_unrar" != x"yes"; then
+               UNRAR_LDFLAGS="-L"$withval
+               with_unrar_lib=$withval
+               export LD_LIBRARY_PATH="$LD_LIBRARY_PATH\:/"`cd $withval;pwd`
+               export DYLD_LIBRARY_PATH="$LD_LIBRARY_PATH\:/"`cd $withval;pwd`
+           fi
        fi
     fi
 fi
@@ -277,7 +294,7 @@ save_CPPFLAGS="$CPPFLAGS"
 CPPFLAGS="$CPPFLAGS $FUSE_CPPFLAGS"
 AC_CHECK_HEADER(fuse.h,,
     [AC_MSG_ERROR([
-        Can't find fuse.h - add alternative include search path using
+        Cannot find fuse.h - add alternative include search path using
         --with-fuse and rerun configure. ])])
 
 save_LDFLAGS="$LDFLAGS"
@@ -289,7 +306,7 @@ AC_CHECK_LIB(fuse4x,fuse_new, [FUSE_LIBS="-lfuse4x"],
         [ AC_CHECK_LIB(fuse,fuse_new, [FUSE_LIBS="-lfuse"],
             [ AC_CHECK_LIB(osxfuse,fuse_new, [FUSE_LIBS="-losxfuse"],
                 [AC_MSG_ERROR([
-                    Can't find fuse library - add alternative library search path using
+                    Cannot find fuse library - add alternative library search path using
                     --with-fuse-lib and rerun configure. ])
             ],)
         ],)
@@ -333,105 +350,132 @@ CPPFLAGS="$CPPFLAGS $UNRAR_CPPFLAGS"
 AC_LANG_PUSH([C++])
 AC_CHECK_HEADER([rar.hpp],,
      AC_MSG_ERROR([
-            Can't find unrar source - add alternative source search path using
-            --with-unrar and rerun configure. ])
+            Cannot find unrar source - add alternative source search path using
+            --with-unrar and rerun configure.])
 )
 AC_LANG_POP
 CPPFLAGS="$save_CPPFLAGS"
 
-save_LDFLAGS="$LDFLAGS"
-save_LIBS="$LIBS"
-save_CXXFLAGS="$CXXFLAGS"
-LDFLAGS="$LDFLAGS $UNRAR_LDFLAGS"
-LIBS="$PTHREAD_LIBS $LIBS"
-CXXFLAGS="$CXXFLAGS $PTHREAD_CFLAGS"
-AC_LANG_PUSH([C++])
-AC_CHECK_LIB(unrar, RARGetDllVersion, [UNRAR_LIBS="-lunrar"],
-     AC_MSG_ERROR([
-            Can't find unrar library - add alternative library search path using
-            --with-unrar-lib and rerun configure. ])
-)
-AC_LANG_POP
-LDFLAGS="$save_LDFLAGS"
-LIBS="$save_LIBS"
-CXXFLAGS="$save_CXXFLAGS"
-AC_SUBST(UNRAR_LIBS)
-
-########################################################
-# Check for matching unrar library- vs. source version
-save_CPPFLAGS="$CPPFLAGS"
-save_LDFLAGS="$LDFLAGS"
-save_LIBS="$LIBS"
-save_CXXFLAGS="$CXXFLAGS"
-LDFLAGS="$LDFLAGS $UNRAR_LDFLAGS"
-CPPFLAGS="$CPPFLAGS $UNRAR_CPPFLAGS"
-LIBS="$UNRAR_LIBS $PTHREAD_LIBS $LIBS"
-CXXFLAGS="$CXXFLAGS $PTHREAD_CFLAGS"
-AC_LANG_PUSH([C++])
-AC_MSG_CHECKING([for matching UnRAR library and source version])
-if test x"$cross_compiling" = x"no"; then
-    AC_RUN_IFELSE([
-        AC_LANG_PROGRAM([[
-             #define _UNIX
-             #include <dll.hpp>]],
-    [[
-        if (RARGetDllVersion() != RAR_DLL_VERSION)
-            return -1;
-    ]])],
-        [AC_MSG_RESULT([yes])],
-        [AC_MSG_RESULT([no])
-        AC_MSG_FAILURE([
-    The version of UnRAR source pointed to by --with-unrar=$with_unrar
-    and the current shared library picked up at run time are incompatible.
-    Make sure the shared library is properly installed on the system or add 
-    an alternative library search path using --with-unrar-lib and/or add
-    an alternative source search path using --with-unrar and rerun configure.])
-        ]
-    )
-else
-    AC_MSG_RESULT([skipped])
+AC_MSG_CHECKING([for static linking of UnRAR library])
+AC_MSG_RESULT([$static_unrar])
+if test x"$static_unrar" != x"no"; then
+    AC_CHECK_FILE($with_unrar/libunrar.a, [link_fallback=no], [link_fallback=test])
+    if test x"$link_fallback" = x"test"; then
+        if test x"$static_unrar" = x"fallback"; then
+            static_unrar=no
+            AC_MSG_WARN([Failed to locate static UnRAR library; falling back to dynamic linking])
+        else
+            AC_MSG_ERROR([]
+                   [Cannot find static unrar library - add alternative source search path using]
+                   [--with-unrar and/or make sure a library has been built (only supported from]
+                   [version 5.4.6 and later) in the source tree pointed to as $with_unrar and]
+                   [rerun configure.])
+        fi
+    fi
 fi
-AC_LANG_POP
-CPPFLAGS="$save_CPPFLAGS"
-LDFLAGS="$save_LDFLAGS"
-LIBS="$save_LIBS"
-CXXFLAGS="$save_CXXFLAGS"
-########################################################
 
-########################################################
-# Check if we need to set -DRAR_SMP
-if test x"$UNRAR_LIBS" != x; then
-    save_CPPFLAGS="$CPPFLAGS"
-    CPPFLAGS="$CPPFLAGS $UNRAR_CPPFLAGS"
-    save_LDFLAGS=$LDFLAGS
-    LDFLAGS="$LDFLAGS $UNRAR_LDFLAGS"
-    save_LIBS=$LIBS
-    LIBS="$UNRAR_LIBS $LIBS"
+if test x"$static_unrar" = x"no"; then
+    save_LDFLAGS="$LDFLAGS"
+    save_LIBS="$LIBS"
     save_CXXFLAGS="$CXXFLAGS"
+    LDFLAGS="$LDFLAGS $UNRAR_LDFLAGS"
+    LIBS="$PTHREAD_LIBS $LIBS"
     CXXFLAGS="$CXXFLAGS $PTHREAD_CFLAGS"
     AC_LANG_PUSH([C++])
-    AC_MSG_CHECKING([if unrar library needs -DRAR_SMP])
-    AC_LINK_IFELSE(
-        [AC_LANG_PROGRAM(
-            [
-                #define RAR_SMP
-                #include "rar.hpp"
-            ],
-            [
-                GetNumberOfThreads();
-            ])],
-        [AC_MSG_RESULT([yes])
-            UNRAR_CXXFLAGS="$UNRAR_CXXFLAGS -DRAR_SMP"
-        ],
-        [AC_MSG_RESULT([no])
-        ]
+    AC_CHECK_LIB(unrar, RARGetDllVersion, [UNRAR_LIBS="-lunrar"],
+         AC_MSG_ERROR([]
+                [Cannot find unrar library - add alternative library search path using]
+                [--with-unrar-lib and rerun configure. If the intention was to build]
+                [towards a static version of the library please make sure such has been]
+                [built (only supported from v5.4.6 and later) in the source tree pointed]
+                [to as $with_unrar.])
     )
+    AC_LANG_POP
+    LDFLAGS="$save_LDFLAGS"
+    LIBS="$save_LIBS"
+    CXXFLAGS="$save_CXXFLAGS"
+
+    ########################################################
+    # Check for matching unrar library- vs. source version
+    save_CPPFLAGS="$CPPFLAGS"
+    save_LDFLAGS="$LDFLAGS"
+    save_LIBS="$LIBS"
+    save_CXXFLAGS="$CXXFLAGS"
+    LDFLAGS="$LDFLAGS $UNRAR_LDFLAGS"
+    CPPFLAGS="$CPPFLAGS $UNRAR_CPPFLAGS"
+    LIBS="$UNRAR_LIBS $PTHREAD_LIBS $LIBS"
+    CXXFLAGS="$CXXFLAGS $PTHREAD_CFLAGS"
+    AC_LANG_PUSH([C++])
+    AC_MSG_CHECKING([for matching UnRAR library and source version])
+    if test x"$cross_compiling" = x"no"; then
+        AC_RUN_IFELSE([
+            AC_LANG_PROGRAM([[
+                 #define _UNIX
+                 #include <dll.hpp>]],
+        [[
+            if (RARGetDllVersion() != RAR_DLL_VERSION)
+                return -1;
+        ]])],
+            [AC_MSG_RESULT([yes])],
+            [AC_MSG_RESULT([no])
+            AC_MSG_FAILURE([
+        The version of UnRAR source pointed to by --with-unrar=$with_unrar
+        and the current shared library picked up at run time are incompatible.
+        Make sure the shared library is properly installed on the system or add 
+        an alternative library search path using --with-unrar-lib and/or add
+        an alternative source search path using --with-unrar and rerun configure.])
+            ]
+        )
+    else
+        AC_MSG_RESULT([skipped])
+    fi
     AC_LANG_POP
     CPPFLAGS="$save_CPPFLAGS"
     LDFLAGS="$save_LDFLAGS"
     LIBS="$save_LIBS"
     CXXFLAGS="$save_CXXFLAGS"
+    ########################################################
+
+    ########################################################
+    # Check if we need to set -DRAR_SMP
+    if test x"$UNRAR_LIBS" != x; then
+        save_CPPFLAGS="$CPPFLAGS"
+        CPPFLAGS="$CPPFLAGS $UNRAR_CPPFLAGS"
+        save_LDFLAGS=$LDFLAGS
+        LDFLAGS="$LDFLAGS $UNRAR_LDFLAGS"
+        save_LIBS=$LIBS
+        LIBS="$UNRAR_LIBS $LIBS"
+        save_CXXFLAGS="$CXXFLAGS"
+        CXXFLAGS="$CXXFLAGS $PTHREAD_CFLAGS"
+        AC_LANG_PUSH([C++])
+        AC_MSG_CHECKING([if unrar library needs -DRAR_SMP])
+        AC_LINK_IFELSE(
+            [AC_LANG_PROGRAM(
+                [
+                    #define RAR_SMP
+                    #include "rar.hpp"
+                ],
+                [
+                    GetNumberOfThreads();
+                ])],
+            [AC_MSG_RESULT([yes])
+                UNRAR_CXXFLAGS="$UNRAR_CXXFLAGS -DRAR_SMP"
+            ],
+            [AC_MSG_RESULT([no])
+            ]
+        )
+        AC_LANG_POP
+        CPPFLAGS="$save_CPPFLAGS"
+        LDFLAGS="$save_LDFLAGS"
+        LIBS="$save_LIBS"
+        CXXFLAGS="$save_CXXFLAGS"
+    fi
+else
+    UNRAR_LIBS="$with_unrar/libunrar.a"
+    UNRAR_CXXFLAGS="$UNRAR_CXXFLAGS -DRAR_SMP"
+    AC_DEFINE(HAVE_STATIC_UNRAR,1,[Define if UnRAR library is linked statically])
 fi
+AC_SUBST(UNRAR_LIBS)
 ########################################################
 
 AM_ICONV

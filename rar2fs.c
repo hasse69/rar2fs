@@ -5026,6 +5026,9 @@ static int check_iob(char *bname, int verbose)
  *****************************************************************************
  *
  ****************************************************************************/
+#ifdef HAVE_STATIC_UNRAR
+#define check_libunrar(x) 0
+#else
 static int check_libunrar(int verbose)
 {
         if (RARGetDllVersion() != RAR_DLL_VERSION) {
@@ -5042,6 +5045,7 @@ static int check_libunrar(int verbose)
         }
         return 0;
 }
+#endif
 
 /*!
  *****************************************************************************
