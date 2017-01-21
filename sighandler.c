@@ -71,7 +71,6 @@ static void stack_trace(int sig, siginfo_t *info, void *secret)
         /* TODO: need to handle compilers other than GCC */
         __builtin_return_address(0));
 #endif
-        printf("%s\n", buf);
         syslog(LOG_INFO, "%s", buf);
 
         void *trace[30];
@@ -90,10 +89,8 @@ static void stack_trace(int sig, siginfo_t *info, void *secret)
         messages = backtrace_symbols(trace, trace_size);
         if (messages) {
                 /* skip first stack frame (points here) */
-                for (i = 1; i < trace_size; ++i) {
-                        printf("%s\n", messages[i]);
+                for (i = 1; i < trace_size; ++i)
                         syslog(LOG_INFO, "%s", messages[i]);
-                }
                 free(messages);
         }
 }
