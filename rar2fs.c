@@ -221,6 +221,7 @@ static mode_t umask_ = 0022;
 
 static int extract_rar(char *arch, const char *file, FILE *fp, void *arg);
 static int get_vformat(const char *s, int t, int *l, int *p);
+static int CALLBACK list_callback_noswitch(UINT, LPARAM UserData, LPARAM, LPARAM);
 
 struct eof_cb_arg {
         off_t toff;
@@ -303,50 +304,59 @@ static char *get_password(const char *file, char *buf, size_t len)
 #endif
 {
         if (file) {
-                int l;
-                /* Try new style first since old style will always hit. */
-                (void)get_vformat(file, 1, NULL, &l);
-                if (!l) {
-                        /* It is not new style so it must be old style but
-                         * check the result just to make sure. */
-                        (void)get_vformat(file, 0, NULL, &l);
-                        if (!l)
-                                return NULL;
-                        else
-                                l += 2;
-                } else {
-                        l -= 1;
-                }
+                char *f[2] = {NULL, NULL};
+                int l[2] = {0, 0};
+                int i;
 
-                char *F = alloca(l + 6); /* .pwd + might try . below */
-                strcpy(F, file);
-                strcpy(F + (l - 4), ".pwd");
-                FILE *fp = fopen(F, "r");
-                if (!fp) {
-                        char *tmp1 = strdup(file);
-                        strcpy(F, dirname(tmp1));
-                        free(tmp1);
-                        strcat(F, "/.");
-                        tmp1 = strdup(file);
-                        strcat(F, basename(tmp1));
-                        free(tmp1);
-                        strcpy(F + (l - 3), ".pwd");
-                        fp = fopen(F, "r");
+                (void)get_vformat(file, 1, NULL, &l[0]);
+                if (l[0]) {
+                        while (file[l[0]] != '.') --l[0];
+                        f[0] = strdup(file);
                 }
-                if (fp) {
+                (void)get_vformat(file, 0, NULL, &l[1]);
+                if (l[1]) {
+                        l[1] -= 2;
+                        f[1] = strdup(file);
+                }
+                for (i = 0; i < 2; i++) {
+                        if (f[i]) {
+                                char *F = f[i];
+                                strcpy(F + l[i], ".pwd");
+                                FILE *fp = fopen(F, "r");
+                                if (!fp) {
+                                        char *tmp1 = strdup(F);
+                                        char *tmp2 = strdup(F);
+                                        char *tmp1_ = tmp1;
+                                        char *tmp2_ = tmp2;
+                                        tmp1 = dirname(tmp1);
+                                        tmp2 = basename(tmp2);
+                                        F = malloc(strlen(file) + 8);
+                                        sprintf(F, "%s%s%s", tmp1, "/.", tmp2);
+                                        free(tmp1_);
+                                        free(tmp2_);
+                                        fp = fopen(F, "r");
+                                        free(F);
+                                }
+                                if (fp) {
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
-                        buf = fgetws(buf, len, fp);
-                        if (buf) {
-                                wchar_t *eol = wcspbrk(buf, L"\r\n");
-                                if (eol != NULL)
-                                        *eol = 0;
-                        }
+                                        buf = fgetws(buf, len, fp);
+                                        if (buf) {
+                                                wchar_t *eol = wcspbrk(buf, L"\r\n");
+                                                if (eol != NULL)
+                                                        *eol = 0;
+                                        }
 #else
-                        buf = fgets(buf, len, fp);
+                                        buf = fgets(buf, len, fp);
 #endif
-                        fclose(fp);
-                        return buf;
+                                        fclose(fp);
+                                        free(f[0]);
+                                        free(f[1]);
+                                        return buf;
+                                }
+                        }
                 }
+                free(f[0]);
+                free(f[1]);
         }
         return NULL;
 }
@@ -907,7 +917,6 @@ static int get_vformat(const char *s, int t, int *l, int *p)
 
         if (l) *l = len;
         if (p) *p = pos;
-
         return vol;
 }
 
@@ -1647,27 +1656,42 @@ static void dump_stat(struct stat *stbuf)
  ****************************************************************************/
 static int collect_files(const char *arch, struct dir_entry_list *list)
 {
-        char *arch_ = strdup(arch);
-        int format = 0;
         int files = 0;
+        HANDLE h;
+        RAROpenArchiveDataEx d;
 
-        RARVolNameToFirstName_BUGGED(arch_, format);
-        if (access(arch_, F_OK))  {
-                format = 1;
-                strcpy(arch_, arch);
+        memset(&d, 0, sizeof(RAROpenArchiveDataEx));
+        d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
+        d.OpenMode = RAR_OM_LIST_INCSPLIT;
+        d.Callback = list_callback_noswitch;
+        d.UserData = (LPARAM)arch;
+        h = RAROpenArchiveEx(&d);
+
+        /* Check for fault */
+        if (d.OpenResult) {
+                if (h)
+                        RARCloseArchive(h);
+                goto out;
+        }
+
+        if (d.Flags & MHD_VOLUME) {
+                char *arch_ = strdup(arch);
+                int format = (d.Flags & MHD_NEWNUMBERING) ? 0 : 1;
                 RARVolNameToFirstName_BUGGED(arch_, format);
-                if (access(arch_, F_OK))
-                        goto out;
+                while (1) {
+                        if (access(arch_, F_OK))
+                               break;
+                        list = dir_entry_add(list, arch_, NULL, DIR_E_NRM);
+                        ++files;
+                        RARNextVolumeName(arch_, format);
+                }
+                free(arch_);
+        } else {
+                (void)dir_entry_add(list, arch, NULL, DIR_E_NRM);
+                files = 1;
         }
-        while (1) {
-                list = dir_entry_add(list, arch_, NULL, DIR_E_NRM);
-                ++files;
-                RARNextVolumeName(arch_, format);
-                if (access(arch_, F_OK))
-                       break;
-        }
+
 out:
-        free(arch_);
         return files;
 }
 
