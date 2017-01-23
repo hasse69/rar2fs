@@ -435,47 +435,47 @@ if test x"$static_unrar" = x"no"; then
     LIBS="$save_LIBS"
     CXXFLAGS="$save_CXXFLAGS"
     ########################################################
-
-    ########################################################
-    # Check if we need to set -DRAR_SMP
-    if test x"$UNRAR_LIBS" != x; then
-        save_CPPFLAGS="$CPPFLAGS"
-        CPPFLAGS="$CPPFLAGS $UNRAR_CPPFLAGS"
-        save_LDFLAGS=$LDFLAGS
-        LDFLAGS="$LDFLAGS $UNRAR_LDFLAGS"
-        save_LIBS=$LIBS
-        LIBS="$UNRAR_LIBS $LIBS"
-        save_CXXFLAGS="$CXXFLAGS"
-        CXXFLAGS="$CXXFLAGS $PTHREAD_CFLAGS"
-        AC_LANG_PUSH([C++])
-        AC_MSG_CHECKING([if unrar library needs -DRAR_SMP])
-        AC_LINK_IFELSE(
-            [AC_LANG_PROGRAM(
-                [
-                    #define RAR_SMP
-                    #include "rar.hpp"
-                ],
-                [
-                    GetNumberOfThreads();
-                ])],
-            [AC_MSG_RESULT([yes])
-                UNRAR_CXXFLAGS="$UNRAR_CXXFLAGS -DRAR_SMP"
-            ],
-            [AC_MSG_RESULT([no])
-            ]
-        )
-        AC_LANG_POP
-        CPPFLAGS="$save_CPPFLAGS"
-        LDFLAGS="$save_LDFLAGS"
-        LIBS="$save_LIBS"
-        CXXFLAGS="$save_CXXFLAGS"
-    fi
 else
     UNRAR_LIBS="$with_unrar/libunrar.a"
-    UNRAR_CXXFLAGS="$UNRAR_CXXFLAGS -DRAR_SMP"
     AC_DEFINE(HAVE_STATIC_UNRAR,1,[Define if UnRAR library is linked statically])
 fi
+
 AC_SUBST(UNRAR_LIBS)
+
+########################################################
+# Check if we need to set -DRAR_SMP
+if test x"$UNRAR_LIBS" != x; then
+    save_CPPFLAGS="$CPPFLAGS"
+    CPPFLAGS="$CPPFLAGS $UNRAR_CPPFLAGS"
+    save_LDFLAGS=$LDFLAGS
+    LDFLAGS="$LDFLAGS $UNRAR_LDFLAGS"
+    save_LIBS=$LIBS
+    LIBS="$UNRAR_LIBS $LIBS"
+    save_CXXFLAGS="$CXXFLAGS"
+    CXXFLAGS="$CXXFLAGS $PTHREAD_CFLAGS"
+    AC_LANG_PUSH([C++])
+    AC_MSG_CHECKING([if unrar library needs -DRAR_SMP])
+    AC_LINK_IFELSE(
+        [AC_LANG_PROGRAM(
+            [
+                #define RAR_SMP
+                #include "rar.hpp"
+            ],
+            [
+                GetNumberOfThreads();
+            ])],
+        [AC_MSG_RESULT([yes])
+            UNRAR_CXXFLAGS="$UNRAR_CXXFLAGS -DRAR_SMP"
+        ],
+        [AC_MSG_RESULT([no])
+        ]
+    )
+    AC_LANG_POP
+    CPPFLAGS="$save_CPPFLAGS"
+    LDFLAGS="$save_LDFLAGS"
+    LIBS="$save_LIBS"
+    CXXFLAGS="$save_CXXFLAGS"
+fi
 ########################################################
 
 AM_ICONV
