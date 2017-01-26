@@ -126,6 +126,9 @@ static RETSIGTYPE sig_handler(int signum)
 #ifdef HAVE_STRUCT_SIGACTION_SA_SIGACTION
                         stack_trace(SIGSEGV, info, secret);
 #endif
+                        /* Make sure default handler for SIGSEGV is called */
+                        signal(signum, SIG_DFL);
+                        raise(signum);
                 } else {
                         printf("glibc validation failed\n");
                 }
