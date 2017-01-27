@@ -3574,6 +3574,7 @@ static int rar2_readdir2(const char *path, void *buffer,
         filler(buffer, ".", NULL, 0);
         filler(buffer, "..", NULL, 0);
 
+        dir_list_close(dir_list);
         dump_dir_list(FH_TOPATH(fi->fh), buffer, filler, dir_list);
 
         if (!entry_p) {
