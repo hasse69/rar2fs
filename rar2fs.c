@@ -4499,7 +4499,7 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                                 }
                                 pthread_join(op->thread, NULL);
                                 if (pclose_(op->fp, op->pid))
-                                        printd(4, "child closed abnormally");
+                                        printd(4, "child closed abnormally\n");
                                 printd(4, "PIPE %p closed towards child %05d\n",
                                                op->fp, op->pid);
 
@@ -5689,7 +5689,6 @@ int main(int argc, char *argv[])
                         return -1;
         }
 
-        fuse_opt_add_arg(&args, "-s");
         fuse_opt_add_arg(&args, "-osync_read,fsname=rar2fs,subtype=rar2fs,default_permissions");
         if (OPT_SET(OPT_KEY_DST))
                 fuse_opt_add_arg(&args, OPT_STR(OPT_KEY_DST, 0));
