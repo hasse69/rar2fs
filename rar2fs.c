@@ -4191,7 +4191,8 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
 
                         /* Create reader thread */
                         op->terminate = 1;
-                        pthread_create(&op->thread, &thread_attr, reader_task, (void *)op);
+                        if (pthread_create(&op->thread, &thread_attr, reader_task, (void *)op))
+                                goto open_error;
                         while (op->terminate);
                         WAKE_THREAD(op->pfd1, 0);
 
