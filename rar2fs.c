@@ -152,39 +152,6 @@ struct io_handle {
 /* Special DIR pointer for root folder in a file system loop. */
 #define FS_LOOP_ROOT_DP        ((DIR *)~0U)
 
-#define WAIT_THREAD(pfd) \
-        do {\
-                int fd = pfd[0];\
-                int nfsd = fd+1;\
-                fd_set rd;\
-                FD_ZERO(&rd);\
-                FD_SET(fd, &rd);\
-                int retval = select(nfsd, &rd, NULL, NULL, NULL); \
-                if (retval == -1) {\
-                        if (errno != EINTR) \
-                                perror("select");\
-                } else if (retval) {\
-                        /* FD_ISSET(0, &rfds) will be true. */\
-                        char buf[2];\
-                        NO_UNUSED_RESULT read(fd, buf, 1); /* consume byte */\
-                        printd(4, "%lu thread wakeup (%d, %u)\n",\
-                               (unsigned long)pthread_self(),\
-                               retval,\
-                               (int)buf[0]);\
-                } else {\
-                        perror("select");\
-                }\
-        } while (0)
-
-#define WAKE_THREAD(pfd, op) \
-        do {\
-                /* Wakeup the reader thread */ \
-                char buf[2]; \
-                buf[0] = (op); \
-                if (write((pfd)[1], buf, 1) != 1) \
-                        perror("write"); \
-        } while (0)
-
 /*
  * This is to the handle the workaround for the destroyed file pointer
  * position in some early libunrar5 versions when calling RARInitArchiveEx().
@@ -248,6 +215,64 @@ static const char *file_cmd[] = {
         NULL
 };
 #endif
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int __wait_thread(int *pfd)
+{
+        int fd = pfd[0];
+        int nfsd = fd+1;
+        int retval;
+        fd_set rd;
+
+        while (1) {
+                FD_ZERO(&rd);
+                FD_SET(fd, &rd);
+                retval = select(nfsd, &rd, NULL, NULL, NULL);
+                if (retval == -1) {
+                        if (errno != EINTR) {
+                                perror("WAIT THREAD: select");
+                                return -errno;
+                        }
+                } else if (retval) {
+                        /* FD_ISSET(0, &rfds) will be true. */
+                        char buf[2];
+                        NO_UNUSED_RESULT read(fd, buf, 1); /* consume byte */
+                        printd(4, "%lu thread wakeup (%d, %u)\n",
+                               (unsigned long)pthread_self(),
+                               retval,
+                               (int)buf[0]);
+                        break;
+                } else {
+                        perror("WAIT THREAD: select");
+                        return -errno;
+                }
+        }
+        return 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int __wake_thread(int *pfd, char op)
+{
+        char buf[2];
+        int ret;
+
+        buf[0] = op;
+        do {
+                /* Wakeup the reader thread */
+                ret = write((pfd)[1], buf, 1);
+                if (ret == -1 && errno != EINTR) {
+                        perror("__wake_thread: write");
+                        return -errno;
+                }
+        } while (ret != 1);
+        return 0;
+}
 
 /*!
  *****************************************************************************
@@ -1260,22 +1285,22 @@ static int lread_info(char *buf, size_t size, off_t offset,
  *****************************************************************************
  *
  ****************************************************************************/
-static void sync_thread_read(int *pfd1, int *pfd2)
+static int sync_thread_read(int *pfd1, int *pfd2)
 {
-       do {
-                errno = 0;
-                WAKE_THREAD(pfd1, 1);
-                WAIT_THREAD(pfd2);
-       } while (errno == EINTR);
+        if (__wake_thread(pfd1, 1))
+                return -errno;
+        if (__wait_thread(pfd2))
+                return -errno;
+        return 0;
 }
 
-static void sync_thread_noread(int *pfd1, int *pfd2)
+static int sync_thread_noread(int *pfd1, int *pfd2)
 {
-        do {
-                errno = 0;
-                WAKE_THREAD(pfd1, 2);
-                WAIT_THREAD(pfd2);
-        } while (errno == EINTR);
+        if (__wake_thread(pfd1, 2))
+                return -errno;
+        if (__wait_thread(pfd2))
+                return -errno;
+        return 0;
 }
 
 /*!
@@ -1486,7 +1511,8 @@ check_idx:
          * indication that the I/O buffer is set too small.
          */
         if ((off_t)(offset + size) > op->buf->offset) {
-                sync_thread_read(op->pfd1, op->pfd2);
+                if (sync_thread_read(op->pfd1, op->pfd2))
+                        return -EIO;
                 /* If there is still no data assume something went wrong.
                  * Also assume that, if the file is encrypted, the reason
                  * for the error is a missing or invalid password!
@@ -1531,7 +1557,8 @@ check_idx:
                 if (!op->terminate) {   /* make sure thread is running */
                         pthread_mutex_unlock(&op->mutex);
                         /* Take control of reader thread */
-                        sync_thread_noread(op->pfd1, op->pfd2); /* XXX really not needed due to call above */
+                        if (sync_thread_noread(op->pfd1, op->pfd2)) /* XXX really not needed due to call above */
+                                return -EIO;
                         while (!feof(op->fp) &&
                                         offset > op->buf->offset) {
                                 /* consume buffer */
@@ -1563,7 +1590,8 @@ check_idx:
                 n += readFrom(buf, op->buf, size, off);
                 op->pos += (off + size);
                 if (!op->terminate)
-                        WAKE_THREAD(op->pfd1, 0);
+                        if (__wake_thread(op->pfd1, 0))
+                                return -EIO;
         }
 
 out:
@@ -1911,7 +1939,7 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
                          * closed since SIGPIPE is not handled.
                          */
                         if (errno != EPIPE)
-                                perror("write");
+                                perror("extract_callback: write");
                         return -1;
                 }
         }
@@ -3644,8 +3672,10 @@ static void *reader_task(void *arg)
                 tv.tv_usec = 0;
                 FD_ZERO(&rd);
                 FD_SET(fd, &rd);
+                printd(4, "Reader thread waiting for request\n");
                 int retval = select(nfsd, &rd, NULL, NULL, &tv);
                 if (!retval) {
+                        printd(4, "Reader thread timeout\n");
                         /* timeout */
                         if (fs_terminated) {
                                 if (!pthread_mutex_trylock(&op->mutex)) {
@@ -3656,11 +3686,11 @@ static void *reader_task(void *arg)
                         continue;
                 }
                 if (retval == -1) {
-                        perror("select");
+                        perror("reader_task: select");
                         continue;
                 }
                 /* FD_ISSET(0, &rfds) will be true. */
-                printd(4, "Reader thread wakeup, select()=%d\n", retval);
+                printd(4, "Reader thread wakeup\n");
                 char buf[2];
                 NO_UNUSED_RESULT read(fd, buf, 1);      /* consume byte */
                 if (buf[0] < 2 /*&& !feof(op->fp)*/)
@@ -3669,7 +3699,7 @@ static void *reader_task(void *arg)
                         printd(4, "Reader thread acknowledge\n");
                         int fd = op->pfd2[1];
                         if (write(fd, buf, 1) != 1)
-                                perror("write");
+                                perror("reader_task: write");
                 }
 #if 0
                 /* Early termination */
@@ -4194,7 +4224,8 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                         if (pthread_create(&op->thread, &thread_attr, reader_task, (void *)op))
                                 goto open_error;
                         while (op->terminate);
-                        WAKE_THREAD(op->pfd1, 0);
+                        if (__wake_thread(op->pfd1, 0))
+                                goto open_error;
 
                         buf->idx.data_p = MAP_FAILED;
                         buf->idx.fd = -1;
@@ -4463,19 +4494,23 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                         } else {
                                 if (!op->terminate) {
                                         op->terminate = 1;
-                                        WAKE_THREAD(op->pfd1, 0);
+                                        printd(3, "Telling reader thread to shutdown\n");
+                                        (void)__wake_thread(op->pfd1, 0);
                                 }
                                 pthread_join(op->thread, NULL);
-                                if (pclose_(op->fp, op->pid)) {
-                                        printd(4, "child closed abnormaly");
-                                }
+                                if (pclose_(op->fp, op->pid))
+                                        printd(4, "child closed abnormally");
                                 printd(4, "PIPE %p closed towards child %05d\n",
                                                op->fp, op->pid);
 
                                 close(op->pfd1[0]);
+                                op->pfd1[0] = -1;
                                 close(op->pfd1[1]);
+                                op->pfd1[1] = -1;
                                 close(op->pfd2[0]);
+                                op->pfd2[0] = -1;
                                 close(op->pfd2[1]);
+                                op->pfd2[1] = -1;
 
 #ifdef DEBUG_READ
                                 fclose(op->dbg_fp);
