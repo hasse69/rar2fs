@@ -184,7 +184,7 @@ int optdb_save(int opt, const char *s)
                 int i;
                 printd(5, "option %d : ", opt);
                 for(i = 0; i < OPT_(opt)->n_elem; i++)
-                        if (opt != OPT_KEY_SEEK_LENGTH)
+                        if (!OPT_(opt)->type)
                                 printd(5, "\"%s\" ", OPT_(opt)->u.v_arr_str[i]);
                         else
                                 printd(5, "\"%ld\" ", OPT_(opt)->u.v_arr_int[i]);
