@@ -180,10 +180,10 @@ void sighandler_init()
         sigemptyset(&act.sa_mask);
 #ifdef HAVE_STRUCT_SIGACTION_SA_SIGACTION
         act.sa_sigaction = sig_handler;
-        act.sa_flags = SA_SIGINFO;
+        act.sa_flags = SA_SIGINFO | SA_NODEFER;
 #else
         act.sa_handler = sig_handler;
-        act.sa_flags = 0;
+        act.sa_flags = SA_NODEFER;
 #endif
         sigaction(SIGSEGV, &act, NULL);
 }
