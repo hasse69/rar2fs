@@ -82,7 +82,13 @@
 #define SYNCDIR_NO_FORCE 0
 #define SYNCDIR_FORCE 1
 
-struct vol_handle {
+#define RD_IDLE 0
+#define RD_WAKEUP 1
+#define RD_SYNC_NOREAD 2
+#define RD_SYNC_READ 3
+#define RD_READ_ASYNC 4
+
+struct volume_handle {
         FILE *fp;
         off_t pos;
 };
@@ -96,12 +102,11 @@ struct io_context {
         short vno;
         short vno_max;
         dir_elem_t *entry_p;
-        struct vol_handle *volHdl;
-        int pfd1[2];
-        int pfd2[2];
-        volatile int terminate;
+        struct volume_handle *volh;
         pthread_t thread;
-        pthread_mutex_t mutex;
+        pthread_mutex_t rd_req_mutex;
+        pthread_cond_t rd_req_cond;
+        int rd_req;
         /* mmap() data */
         void *mmap_addr;
         FILE *mmap_fp;
@@ -206,8 +211,8 @@ struct extract_cb_arg {
         void *arg;
 };
 
-static int extract_index(const dir_elem_t *entry_p, off_t offset);
-static int preload_index(struct io_buf *buf, const char *path);
+static int extract_index(const dir_elem_t *, off_t);
+static int preload_index(struct io_buf *, const char *);
 
 #if RARVER_MAJOR > 4
 static const char *file_cmd[] = {
@@ -220,36 +225,12 @@ static const char *file_cmd[] = {
  *****************************************************************************
  *
  ****************************************************************************/
-static int __wait_thread(int *pfd)
+static int __wait_thread(struct io_context *op)
 {
-        int fd = pfd[0];
-        int nfsd = fd+1;
-        int retval;
-        fd_set rd;
-
-        while (1) {
-                FD_ZERO(&rd);
-                FD_SET(fd, &rd);
-                retval = select(nfsd, &rd, NULL, NULL, NULL);
-                if (retval == -1) {
-                        if (errno != EINTR) {
-                                perror("WAIT THREAD: select");
-                                return -errno;
-                        }
-                } else if (retval) {
-                        /* FD_ISSET(0, &rfds) will be true. */
-                        char buf[2];
-                        NO_UNUSED_RESULT read(fd, buf, 1); /* consume byte */
-                        printd(4, "%lu thread wakeup (%d, %u)\n",
-                               (unsigned long)pthread_self(),
-                               retval,
-                               (int)buf[0]);
-                        break;
-                } else {
-                        perror("WAIT THREAD: select");
-                        return -errno;
-                }
-        }
+        pthread_mutex_lock(&op->rd_req_mutex);
+        while (op->rd_req) /* sync */
+                pthread_cond_wait(&op->rd_req_cond, &op->rd_req_mutex);
+        pthread_mutex_unlock(&op->rd_req_mutex);
         return 0;
 }
 
@@ -257,20 +238,14 @@ static int __wait_thread(int *pfd)
  *****************************************************************************
  *
  ****************************************************************************/
-static int __wake_thread(int *pfd, char op)
+static int __wake_thread(struct io_context *op, int req)
 {
-        char buf[2];
-        int ret;
-
-        buf[0] = op;
-        do {
-                /* Wakeup the reader thread */
-                ret = write((pfd)[1], buf, 1);
-                if (ret == -1 && errno != EINTR) {
-                        perror("__wake_thread: write");
-                        return -errno;
-                }
-        } while (ret != 1);
+        pthread_mutex_lock(&op->rd_req_mutex);
+        while (op->rd_req) /* sync */
+                pthread_cond_wait(&op->rd_req_cond, &op->rd_req_mutex);
+        op->rd_req = req;
+        pthread_cond_signal(&op->rd_req_cond);
+        pthread_mutex_unlock(&op->rd_req_mutex);
         return 0;
 }
 
@@ -354,14 +329,11 @@ static char *get_password(const char *file, char *buf, size_t len)
                                 if (!fp) {
                                         char *tmp1 = strdup(F);
                                         char *tmp2 = strdup(F);
-                                        char *tmp1_ = tmp1;
-                                        char *tmp2_ = tmp2;
-                                        tmp1 = dirname(tmp1);
-                                        tmp2 = basename(tmp2);
                                         F = malloc(strlen(file) + 8);
-                                        sprintf(F, "%s%s%s", tmp1, "/.", tmp2);
-                                        free(tmp1_);
-                                        free(tmp2_);
+                                        sprintf(F, "%s%s%s", dirname(tmp1),
+                                                        "/.", basename(tmp2));
+                                        free(tmp1);
+                                        free(tmp2);
                                         fp = fopen(F, "r");
                                         free(F);
                                 }
@@ -628,14 +600,50 @@ static dir_elem_t *path_lookup(const char *path, struct stat *stbuf)
  *****************************************************************************
  *
  ****************************************************************************/
+static int __stop_child(pid_t pid)
+{
+        pid_t wpid;
+        int status = 0;
+
+        killpg(pid, SIGKILL);
+
+        /* Sync */
+        do {
+                wpid = waitpid(pid, &status, WNOHANG | WUNTRACED);
+                if (wpid == -1) {
+                        /*
+                         * POSIX.1-2001 specifies that if the disposition of
+                         * SIGCHLD is set to SIG_IGN or the SA_NOCLDWAIT flag
+                         * is set for SIGCHLD (see sigaction(2)), then
+                         * children that terminate do not become zombies and
+                         * a call to wait() or waitpid() will block until all
+                         * children have terminated, and then fail with errno
+                         * set to ECHILD.
+                         */
+                        if (errno != ECHILD)
+                                perror("waitpid");
+                        return 0;
+                }
+        } while (!wpid || (!WIFEXITED(status) && !WIFSIGNALED(status)));
+        if (WIFEXITED(status))
+                return WEXITSTATUS(status);
+        return 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 static void *extract_to(const char *file, off_t sz, const dir_elem_t *entry_p,
                                 int oper)
 {
         ENTER_("%s", file);
 
+        FILE *tmp = NULL;
+        char *buffer = NULL;
         int out_pipe[2] = {-1, -1};
 
-        if (pipe(out_pipe) != 0)      /* make a pipe */
+        if (pipe(out_pipe))      /* make a pipe */
                 return MAP_FAILED;
 
         printd(3, "Extracting %" PRIu64 "bytes resident in %s\n", sz, entry_p->rar_p);
@@ -644,22 +652,20 @@ static void *extract_to(const char *file, off_t sz, const dir_elem_t *entry_p,
                 int ret;
                 close(out_pipe[0]);
                 ret = extract_rar(entry_p->rar_p, file, NULL,
-                                        (void *)(uintptr_t) out_pipe[1]);
+                                        (void *)(uintptr_t)out_pipe[1]);
                 close(out_pipe[1]);
                 _exit(ret);
         } else if (pid < 0) {
-                close(out_pipe[0]);
-                close(out_pipe[1]);
                 /* The fork failed. Report failure. */
-                return MAP_FAILED;
+                close(out_pipe[1]);
+                goto extract_error;
         }
 
         close(out_pipe[1]);
 
-        FILE *tmp = NULL;
-        char *buffer = malloc(sz);
+        buffer = malloc(sz);
         if (!buffer)
-                return MAP_FAILED;
+                goto extract_error;
 
         if (oper == E_TO_TMP)
                 tmp = tmpfile();
@@ -678,42 +684,35 @@ static void *extract_to(const char *file, off_t sz, const dir_elem_t *entry_p,
                 off += n;
         } while (n && off != sz);
 
-        /* Sync */
-        if (waitpid(pid, NULL, 0) == -1) {
-                /*
-                 * POSIX.1-2001 specifies that if the disposition of
-                 * SIGCHLD is set to SIG_IGN or the SA_NOCLDWAIT flag
-                 * is set for SIGCHLD (see sigaction(2)), then
-                 * children that terminate do not become zombies and
-                 * a call to wait() or waitpid() will block until all
-                 * children have terminated, and then fail with errno
-                 * set to ECHILD.
-                 */
-                if (errno != ECHILD)
-                        perror("waitpid");
-        }
-
-        /* Check for incomplete buffer error */
-        if (off != sz) {
-                free(buffer);
-                return MAP_FAILED;
-        }
+        if (off != sz)
+                goto extract_error;
 
         printd(4, "Read %" PRIu64 "bytes from PIPE %d\n", off, out_pipe[0]);
-        close(out_pipe[0]);
 
         if (tmp) {
-                if (!fwrite(buffer, sz, 1, tmp)) {
-                        fclose(tmp);
-                        tmp = MAP_FAILED;
-                } else {
+                if (!fwrite(buffer, sz, 1, tmp))
+                        goto extract_error;
+                else
                         fseeko(tmp, 0, SEEK_SET);
-                }
                 free(buffer);
-                return tmp;
+                buffer = (void *)tmp;
         }
 
+        (void)__stop_child(pid);
+
+        close(out_pipe[0]);
+
         return buffer;
+
+extract_error:
+        (void)__stop_child(pid);
+
+        if (tmp)
+                fclose(tmp);
+        free(buffer);
+        close(out_pipe[0]);
+
+        return MAP_FAILED;
 }
 
 /*!
@@ -839,33 +838,8 @@ error:
  ****************************************************************************/
 static int pclose_(FILE *fp, pid_t pid)
 {
-        pid_t wpid;
-        int status = 0;
-
         fclose(fp);
-        killpg(pid, SIGKILL);
-
-        /* Sync */
-        do {
-                wpid = waitpid(pid, &status, WNOHANG | WUNTRACED);
-                if (wpid == -1) {
-                        /*
-                         * POSIX.1-2001 specifies that if the disposition of
-                         * SIGCHLD is set to SIG_IGN or the SA_NOCLDWAIT flag
-                         * is set for SIGCHLD (see sigaction(2)), then
-                         * children that terminate do not become zombies and
-                         * a call to wait() or waitpid() will block until all
-                         * children have terminated, and then fail with errno
-                         * set to ECHILD.
-                         */
-                        if (errno != ECHILD)
-                                perror("waitpid");
-                        return 0;
-                }
-        } while (!wpid || (!WIFEXITED(status) && !WIFSIGNALED(status)));
-        if (WIFEXITED(status))
-                return WEXITSTATUS(status);
-        return 0;
+        return __stop_child(pid);
 }
 
 /* Size of file in first volume number in which it exists */
@@ -1155,7 +1129,7 @@ static int lread_raw(char *buf, size_t size, off_t offset,
         while (size) {
                 FILE *fp;
                 off_t src_off = 0;
-                struct vol_handle *vol_p = NULL;
+                struct volume_handle *vh = NULL;
                 if (op->entry_p->flags.multipart) {
                         int vol;
                         /*
@@ -1184,12 +1158,12 @@ vol_ready:
                         if (vol != op->vno) {
                                 /* close/open */
                                 op->vno = vol;
-                                if (op->volHdl) {
-                                        vol_p = &op->volHdl[vol];
-                                        if (vol_p->fp) {
-                                                fp = vol_p->fp;
+                                if (op->volh) {
+                                        vh = &op->volh[vol];
+                                        if (vh->fp) {
+                                                fp = vh->fp;
                                                 src_off = VOL_REAL_SZ(vol) - chunk;
-                                                if (src_off != vol_p->pos)
+                                                if (src_off != vh->pos)
                                                         force_seek = 1;
                                                 goto seek_check;
                                         }
@@ -1221,8 +1195,8 @@ vol_ready:
                                         return 0;               /* EOF */
                                 }
                         } else {
-                                if (op->volHdl && op->volHdl[vol].fp)
-                                        fp = op->volHdl[vol].fp;
+                                if (op->volh && op->volh[vol].fp)
+                                        fp = op->volh[vol].fp;
                                 else
                                         fp = op->fp;
                         }
@@ -1257,8 +1231,8 @@ seek_check:
                 buf += n;
                 tot += n;
                 op->pos = offset;
-                if (vol_p)
-                        vol_p->pos += n;
+                if (vh)
+                        vh->pos += n;
         }
         return tot;
 }
@@ -1285,23 +1259,24 @@ static int lread_info(char *buf, size_t size, off_t offset,
  *****************************************************************************
  *
  ****************************************************************************/
-static int sync_thread_read(int *pfd1, int *pfd2)
+static int sync_thread_read(struct io_context* op)
 {
-        if (__wake_thread(pfd1, 1))
+        if (__wake_thread(op, RD_SYNC_READ))
                 return -errno;
-        if (__wait_thread(pfd2))
+        if (__wait_thread(op))
                 return -errno;
         return 0;
 }
 
-static int sync_thread_noread(int *pfd1, int *pfd2)
+static int sync_thread_noread(struct io_context* op)
 {
-        if (__wake_thread(pfd1, 2))
+        if (__wake_thread(op, RD_SYNC_NOREAD))
                 return -errno;
-        if (__wait_thread(pfd2))
+        if (__wait_thread(op))
                 return -errno;
         return 0;
 }
+
 
 /*!
  *****************************************************************************
@@ -1511,7 +1486,7 @@ check_idx:
          * indication that the I/O buffer is set too small.
          */
         if ((off_t)(offset + size) > op->buf->offset) {
-                if (sync_thread_read(op->pfd1, op->pfd2))
+                if (sync_thread_read(op))
                         return -EIO;
                 /* If there is still no data assume something went wrong.
                  * Also assume that, if the file is encrypted, the reason
@@ -1553,35 +1528,28 @@ check_idx:
                         }
                 }
 
-                pthread_mutex_lock(&op->mutex);
-                if (!op->terminate) {   /* make sure thread is running */
-                        pthread_mutex_unlock(&op->mutex);
-                        /* Take control of reader thread */
-                        if (sync_thread_noread(op->pfd1, op->pfd2)) /* XXX really not needed due to call above */
-                                return -EIO;
-                        while (!feof(op->fp) &&
-                                        offset > op->buf->offset) {
-                                /* consume buffer */
-                                op->pos += op->buf->used;
-                                op->buf->ri = op->buf->wi;
-                                op->buf->used = 0;
+                /* Take control of reader thread */
+                if (sync_thread_noread(op))
+                        return -EIO;
+                if (!feof(op->fp) && offset > op->buf->offset) {
+                        /* consume buffer */
+                        op->pos += op->buf->used;
+                        op->buf->ri = op->buf->wi;
+                        op->buf->used = 0;
+                        (void)readTo(op->buf, op->fp,
+                                        IOB_SAVE_HIST);
+                        sched_yield();
+                }
+
+                if (!feof(op->fp)) {
+                        op->buf->ri = offset & (IOB_SZ - 1);
+                        op->buf->used -= (offset - op->pos);
+                        op->pos = offset;
+
+                        /* Pull in rest of data if needed */
+                        if ((size_t)(op->buf->offset - offset) < size)
                                 (void)readTo(op->buf, op->fp,
                                                 IOB_SAVE_HIST);
-                                sched_yield();
-                        }
-
-                        if (!feof(op->fp)) {
-                                op->buf->ri = offset & (IOB_SZ - 1);
-                                op->buf->used -= (offset - op->pos);
-                                op->pos = offset;
-
-                                /* Pull in rest of data if needed */
-                                if ((size_t)(op->buf->offset - offset) < size)
-                                        (void)readTo(op->buf, op->fp,
-                                                        IOB_SAVE_HIST);
-                        }
-                } else {
-                        pthread_mutex_unlock(&op->mutex);
                 }
         }
 
@@ -1589,9 +1557,8 @@ check_idx:
                 int off = offset - op->pos;
                 n += readFrom(buf, op->buf, size, off);
                 op->pos += (off + size);
-                if (!op->terminate)
-                        if (__wake_thread(op->pfd1, 0))
-                                return -EIO;
+                if (__wake_thread(op, RD_READ_ASYNC))
+                        return -EIO;
         }
 
 out:
@@ -3659,59 +3626,42 @@ static int rar2_releasedir(const char *path, struct fuse_file_info *fi)
 static void *reader_task(void *arg)
 {
         struct io_context *op = (struct io_context *)arg;
-        op->terminate = 0;
 
-        printd(4, "Reader thread started, fp=%p\n", op->fp);
+        printd(4, "Reader thread started (fp:%p)\n", op->fp);
 
-        int fd = op->pfd1[0];
-        int nfsd = fd + 1;
-        while (!op->terminate) {
-                fd_set rd;
-                struct timeval tv;
-                tv.tv_sec = 1;
-                tv.tv_usec = 0;
-                FD_ZERO(&rd);
-                FD_SET(fd, &rd);
-                printd(4, "Reader thread waiting for request\n");
-                int retval = select(nfsd, &rd, NULL, NULL, &tv);
-                if (!retval) {
-                        printd(4, "Reader thread timeout\n");
-                        /* timeout */
-                        if (fs_terminated) {
-                                if (!pthread_mutex_trylock(&op->mutex)) {
-                                        op->terminate = 1;
-                                        pthread_mutex_unlock(&op->mutex);
+        for (;;) {
+                int req;
+                struct timespec ts;
+                pthread_mutex_lock(&op->rd_req_mutex);
+restart:
+                clock_gettime(CLOCK_REALTIME, &ts);
+                ts.tv_sec += 1;
+                while (!op->rd_req) {
+                        if (pthread_cond_timedwait(&op->rd_req_cond,
+                                        &op->rd_req_mutex, &ts) == ETIMEDOUT) {
+                                if (fs_terminated) {
+                                        pthread_mutex_unlock(&op->rd_req_mutex);
+                                        goto out;
                                 }
+                                goto restart;
                         }
                         continue;
                 }
-                if (retval == -1) {
-                        perror("reader_task: select");
-                        continue;
-                }
-                /* FD_ISSET(0, &rfds) will be true. */
-                printd(4, "Reader thread wakeup\n");
-                char buf[2];
-                NO_UNUSED_RESULT read(fd, buf, 1);      /* consume byte */
-                if (buf[0] < 2 /*&& !feof(op->fp)*/)
+                req = op->rd_req;
+                pthread_mutex_unlock(&op->rd_req_mutex);
+
+                printd(4, "Reader thread wakeup (fp:%p)\n", op->fp);
+                if (req > RD_SYNC_NOREAD && !feof(op->fp))
                         (void)readTo(op->buf, op->fp, IOB_SAVE_HIST);
-                if (buf[0]) {
-                        printd(4, "Reader thread acknowledge\n");
-                        int fd = op->pfd2[1];
-                        if (write(fd, buf, 1) != 1)
-                                perror("reader_task: write");
-                }
-#if 0
-                /* Early termination */
-                if (feof(op->fp)) {
-                        if (!pthread_mutex_trylock(&op->mutex)) {
-                                op->terminate = 1;
-                                pthread_mutex_unlock(&op->mutex);
-                        }
-                }
-#endif
+
+                pthread_mutex_lock(&op->rd_req_mutex);
+                op->rd_req = RD_IDLE;
+                pthread_cond_broadcast(&op->rd_req_cond); /* sync */
+                pthread_mutex_unlock(&op->rd_req_mutex);
         }
-        printd(4, "Reader thread stopped\n");
+
+out:
+        printd(4, "Reader thread stopped (fp:%p)\n", op->fp);
         return NULL;
 }
 
@@ -4097,9 +4047,9 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                                   */
                                                  op->vno_max = 901;  /* .rar -> .z99 */
                                         }
-                                        op->volHdl = malloc(op->vno_max * sizeof(struct vol_handle));
-                                        if (op->volHdl) {
-                                                memset(op->volHdl, 0, op->vno_max * sizeof(struct vol_handle));
+                                        op->volh = malloc(op->vno_max * sizeof(struct volume_handle));
+                                        if (op->volh) {
+                                                memset(op->volh, 0, op->vno_max * sizeof(struct volume_handle));
                                                 char *tmp = strdup(entry_p->rar_p);
                                                 int j = 0;
                                                 while (j < op->vno_max) {
@@ -4107,16 +4057,16 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                                         if (fp_ == NULL)
                                                                 break;
                                                         printd(3, "pre-open %s\n", tmp);
-                                                        op->volHdl[j].fp = fp_;
+                                                        op->volh[j].fp = fp_;
                                                         /*
                                                          * The file position is only a qualified
                                                          * guess. If it is wrong it will be adjusted
                                                          * later.
                                                          */
-                                                        op->volHdl[j].pos = VOL_REAL_SZ(j) -
+                                                        op->volh[j].pos = VOL_REAL_SZ(j) -
                                                                         (j ? VOL_NEXT_SZ : VOL_FIRST_SZ);
-                                                        printd(3, "SEEK src_off = %" PRIu64 "\n", op->volHdl[j].pos);
-                                                        fseeko(fp_, op->volHdl[j].pos, SEEK_SET);
+                                                        printd(3, "SEEK src_off = %" PRIu64 "\n", op->volh[j].pos);
+                                                        fseeko(fp_, op->volh[j].pos, SEEK_SET);
                                                         RARNextVolumeName(tmp, !entry_p->vtype);
                                                         ++j;
                                                 }
@@ -4125,7 +4075,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                                 printd(1, "Failed to allocate resource (%u)\n", __LINE__);
                                         }
                                 } else {
-                                        op->volHdl = NULL;
+                                        op->volh = NULL;
                                 }
 
                                 /*
@@ -4183,26 +4133,9 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                         printd(4, "PIPE %p created towards child %d\n",
                                                 op->fp, pid);
 
-                        /*
-                         * Create pipes to be used between threads.
-                         * Both these pipes are used for communication between
-                         * parent (this thread) and reader thread. One pipe is for
-                         * requests (w->r) and the other is for responses (r<-w).
-                         */
-                        op->pfd1[0] = -1;
-                        op->pfd1[1] = -1;
-                        op->pfd2[0] = -1;
-                        op->pfd2[1] = -1;
-                        if (pipe(op->pfd1) == -1) {
-                                perror("pipe");
-                                goto open_error;
-                        }
-                        if (pipe(op->pfd2) == -1) {
-                                perror("pipe");
-                                goto open_error;
-                        }
-
-                        pthread_mutex_init(&op->mutex, NULL);
+                        pthread_mutex_init(&op->rd_req_mutex, NULL);
+                        pthread_cond_init(&op->rd_req_cond, NULL);
+                        op->rd_req = RD_IDLE;
 
                         /*
                          * The below will take precedence over keep_cache.
@@ -4220,11 +4153,9 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
 #endif
 
                         /* Create reader thread */
-                        op->terminate = 1;
                         if (pthread_create(&op->thread, &thread_attr, reader_task, (void *)op))
                                 goto open_error;
-                        while (op->terminate);
-                        if (__wake_thread(op->pfd1, 0))
+                        if (sync_thread_noread(op))
                                 goto open_error;
 
                         buf->idx.data_p = MAP_FAILED;
@@ -4273,14 +4204,6 @@ open_error:
         if (fp)
                 pclose_(fp, pid);
         if (op) {
-                if (op->pfd1[0] >= 0)
-                        close(op->pfd1[0]);
-                if (op->pfd1[1] >= 0)
-                        close(op->pfd1[1]);
-                if (op->pfd2[0] >= 0)
-                        close(op->pfd2[0]);
-                if (op->pfd2[1] >= 0)
-                        close(op->pfd2[1]);
                 if (op->entry_p)
                         filecache_freeclone(op->entry_p);
                 free(op);
@@ -4481,37 +4404,27 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                 struct io_context *op = FH_TOCONTEXT(fi->fh);
                 if (op->fp) {
                         if (op->entry_p->flags.raw) {
-                                if (op->volHdl) {
+                                if (op->volh) {
                                         int j;
                                         for (j = 0; j < op->vno_max; j++) {
-                                                if (op->volHdl[j].fp)
-                                                        fclose(op->volHdl[j].fp);
+                                                if (op->volh[j].fp)
+                                                        fclose(op->volh[j].fp);
                                         }
-                                        free(op->volHdl);
+                                        free(op->volh);
                                 }
-                                fclose(op->fp);
                                 printd(3, "Closing file handle %p\n", op->fp);
+                                fclose(op->fp);
                         } else {
-                                if (!op->terminate) {
-                                        op->terminate = 1;
-                                        printd(3, "Telling reader thread to shutdown\n");
-                                        (void)__wake_thread(op->pfd1, 0);
-                                }
-                                pthread_join(op->thread, NULL);
+                                if (!pthread_cancel(op->thread))
+                                        pthread_join(op->thread, NULL);
+
+                                pthread_cond_destroy(&op->rd_req_cond);
+                                pthread_mutex_destroy(&op->rd_req_mutex);
+
                                 if (pclose_(op->fp, op->pid))
                                         printd(4, "child closed abnormally\n");
                                 printd(4, "PIPE %p closed towards child %05d\n",
                                                op->fp, op->pid);
-
-                                close(op->pfd1[0]);
-                                op->pfd1[0] = -1;
-                                close(op->pfd1[1]);
-                                op->pfd1[1] = -1;
-                                close(op->pfd2[0]);
-                                op->pfd2[0] = -1;
-                                close(op->pfd2[1]);
-                                op->pfd2[1] = -1;
-
 #ifdef DEBUG_READ
                                 fclose(op->dbg_fp);
 #endif
@@ -4527,7 +4440,6 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                                         }
                                         close(op->mmap_fd);
                                 }
-                                pthread_mutex_destroy(&op->mutex);
                         }
                 }
                 printd(3, "(%05d) %s [0x%-16" PRIx64 "]\n", getpid(), "FREE", fi->fh);
