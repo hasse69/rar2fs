@@ -2455,6 +2455,48 @@ static int CALLBACK list_callback(UINT msg,LPARAM UserData,LPARAM P1,LPARAM P2)
  *****************************************************************************
  *
  ****************************************************************************/
+void __add_filler(const char *path, struct dir_entry_list **buffer,
+                const char *file)
+{
+        size_t path_len;
+        size_t file_len;
+        char *match;
+
+        if (!buffer)
+                return;
+
+        path_len = strlen(path);
+        file_len = strlen(file);
+        match = strstr(file, path);
+        if (!match || path_len == file_len)
+                return;
+
+        /* Cut input file path on current lookup level */
+        char *file_dup = strdup(file);
+        char *s = file_dup + path_len + 1;
+        if (!CHRCMP(path , '/'))
+                --s;
+        s = strchr(s, '/');
+        if (s)
+                *s = '\0';
+
+        dir_elem_t *entry_p = filecache_get(file_dup);
+        if (entry_p != NULL) {
+                char *safe_path = strdup(entry_p->name_p);
+                *buffer = dir_entry_add_hash(
+                                        *buffer, basename(file_dup),
+                                        &entry_p->stat,
+                                        entry_p->dir_hash,
+                                        DIR_E_RAR);
+                free(safe_path);
+        }
+        free(file_dup);
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 static int listrar(const char *path, struct dir_entry_list **buffer,
                 const char *arch, int *final)
 {
@@ -2506,6 +2548,9 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         int is_root_path = (!strcmp(rar_root, path) || !CHRCMP(path, '/'));
 
         while (next) {
+                char *mp;
+                int display = 0;
+
                 DOS_TO_UNIX_PATH(next->hdr.FileName);
 
                 /* Skip compressed image files */
@@ -2517,75 +2562,65 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         continue;
                 }
 
-                int display = 0;
-                char *tmp2 = strdup(next->hdr.FileName);
-                char *rar_name = strdup(dirname(tmp2));
-                free(tmp2);
-                tmp2 = rar_name;
-
                 if (is_root_path) {
-                        if (!CHRCMP(rar_name, '.'))
-                                display = 1;
                         /*
-                         * Handle the rare case when the parent folder does not have
-                         * its own entry in the file header. The entry needs to be
-                         * faked by adding it to the cache. If the parent folder is
-                         * discovered later in the header the faked entry will be
-                         * invalidated and replaced with the real stats.
+                         * Handle the case when the parent folders do not have
+                         * their own entry in the file header or is located in
+                         * the end. The entries needs to be faked by adding it
+                         * to the cache. If the parent folder is discovered
+                         * later in the header the faked entry will be
+                         * invalidated and replaced with the real file stats.
                          */
-                        if (!display) {
-                                char *safe_path = strdup(rar_name);
-                                if (!strcmp(basename(safe_path), rar_name)) {
-                                        char *mp;
-                                        ABS_MP(mp, path, rar_name);
-                                        dir_elem_t *entry_p = filecache_get(mp);
-                                        if (entry_p == NULL) {
-                                                printd(3, "Adding %s to cache\n", mp);
-                                                entry_p = filecache_alloc(mp);
-                                                entry_p->name_p = strdup(mp);
-                                                entry_p->rar_p = strdup(arch);
-                                                entry_p->file_p = strdup(rar_name);
-                                                entry_p->flags.force_dir = 1;
-                                                entry_p->flags.unresolved = 1;
+                        char *safe_path = strdup(next->hdr.FileName);
+                        for (;;) {
+                                char *mp;
 
-                                                /* Check if part of a volume */
-                                                if (d.Flags & MHD_VOLUME) {
-                                                        entry_p->flags.multipart = 1;
-                                                        entry_p->vtype = VTYPE(arch, d.Flags);
-                                                        /*
-                                                         * Make sure parent folders are always searched
-                                                         * from the first volume file since sub-folders
-                                                         * might actually be placed elsewhere.
-                                                         */
-                                                        RARVolNameToFirstName_BUGGED(entry_p->rar_p, !entry_p->vtype);
-                                                } else {
-                                                        entry_p->flags.multipart = 0;
-                                                }
-                                                set_rarstats(entry_p, next, 1);
-                                        }
+                                if (!CHRCMP(dirname(safe_path), '.'))
+                                        break;
+                                ABS_MP(mp, path, safe_path);
 
-                                        if (buffer) {
-                                                *buffer = dir_entry_add_hash(
-                                                        *buffer, rar_name,
-                                                        &entry_p->stat, entry_p->dir_hash,
-                                                        DIR_E_RAR);
+                                dir_elem_t *entry_p = filecache_get(mp);
+                                if (entry_p == NULL) {
+                                        printd(3, "Adding %s to cache\n", mp);
+                                        entry_p = filecache_alloc(mp);
+                                        entry_p->name_p = strdup(mp);
+                                        entry_p->rar_p = strdup(arch);
+                                        entry_p->file_p = strdup(safe_path);
+                                        entry_p->flags.force_dir = 1;
+                                        entry_p->flags.unresolved = 1;
+
+                                        /* Check if part of a volume */
+                                        if (d.Flags & MHD_VOLUME) {
+                                                entry_p->flags.multipart = 1;
+                                                entry_p->vtype = VTYPE(arch, d.Flags);
+                                                /*
+                                                 * Make sure parent folders are always searched
+                                                 * from the first volume file since sub-folders
+                                                 * might actually be placed elsewhere.
+                                                 */
+                                                RARVolNameToFirstName_BUGGED(entry_p->rar_p, !entry_p->vtype);
+                                        } else {
+                                                entry_p->flags.multipart = 0;
                                         }
+                                        set_rarstats(entry_p, next, 1);
                                 }
-                                free(safe_path);
                         }
-                } else if (!strcmp(path + rar_root_len + 1, rar_name)) {
-                        display = 1;
-                }
-                free(tmp2);
-
-                char *mp;
-                if (!display) {
+                        free(safe_path);
                         ABS_MP(mp, (*rar_root ? rar_root : "/"),
                                         next->hdr.FileName);
                 } else {
-                        char *rar_dir = strdup(next->hdr.FileName);
-                        ABS_MP(mp, path, basename(rar_dir));
-                        free(rar_dir);
+                        char *safe_path = strdup(next->hdr.FileName);
+                        if (!strcmp(path + rar_root_len + 1,
+                                        dirname(safe_path))) {
+                                char *rar_dir = strdup(next->hdr.FileName);
+                                ABS_MP(mp, path, basename(rar_dir));
+                                free(rar_dir);
+                                display = 1;
+                        } else {
+                                ABS_MP(mp, (*rar_root ? rar_root : "/"),
+                                                next->hdr.FileName);
+                        }
+                        free(safe_path);
                 }
 
                 if (!IS_RAR_DIR(&next->hdr) && OPT_SET(OPT_KEY_FAKE_ISO)) {
@@ -2742,15 +2777,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 set_rarstats(entry_p, next, 0);
 
 cache_hit:
-                if (display && buffer) {
-                        char *safe_path = strdup(entry_p->name_p);
-                        *buffer = dir_entry_add_hash(
-                                        *buffer, basename(safe_path),
-                                        &entry_p->stat,
-                                        entry_p->dir_hash,
-                                        DIR_E_RAR);
-                        free(safe_path);
-                }
+                __add_filler(path, buffer, entry_p->name_p);
                 next = next->next;
         }
 
