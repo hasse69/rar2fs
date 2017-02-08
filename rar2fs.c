@@ -983,7 +983,38 @@ static int get_vformat(const char *s, int t, int *l, int *p)
  *****************************************************************************
  *
  ****************************************************************************/
-static void RARVolNameToFirstName_BUGGED(char *s, int vtype)
+static int __check_rar_header(const char *arch)
+{
+        HANDLE h;
+        RAROpenArchiveDataEx d;
+        struct RARHeaderDataEx header;
+
+        memset(&d, 0, sizeof(RAROpenArchiveDataEx));
+        d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
+        d.OpenMode = RAR_OM_LIST_INCSPLIT;
+        d.Callback = list_callback_noswitch;
+        d.UserData = (LPARAM)arch;
+        h = RAROpenArchiveEx(&d);
+
+        /* Check for fault */
+        if (d.OpenResult) {
+                if (h)
+                        RARCloseArchive(h);
+                return -1;
+        }
+        if (RARReadHeaderEx(h, &header))  {
+                RARCloseArchive(h);
+                return -1;
+        }
+        RARCloseArchive(h);
+        return 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int RARVolNameToFirstName_BUGGED(char *s, int vtype)
 {
         int len;
         int pos;
@@ -996,8 +1027,17 @@ static void RARVolNameToFirstName_BUGGED(char *s, int vtype)
                         s_copy[pos+len] = '0';
                 if (!access(s_copy, F_OK))
                         strcpy(s, s_copy);
+                else if (access(s, F_OK)){
+                        free(s_copy);
+                        return -1;
+                }
                 free(s_copy);
+                return __check_rar_header(s);
+         } else {
+                if (!access(s, F_OK))
+                        return __check_rar_header(s);
          }
+         return -1;
 }
 
 #if _POSIX_TIMERS < 1
@@ -2583,7 +2623,18 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                          * invalidated and replaced with the real file stats.
                          */
                         char *safe_path = strdup(next->hdr.FileName);
-                        for (;;) {
+                        char *first_arch = strdup(arch);
+                        /*
+                         * Make sure parent folders are always searched
+                         * from the first volume file since sub-folders
+                         * might actually be placed elsewhere.
+                         */
+                        if (RARVolNameToFirstName_BUGGED(first_arch,
+                                                 !VTYPE(arch, d.Flags))) {
+                                free(first_arch);
+                                first_arch = NULL;
+                        }
+                        for (;first_arch;) {
                                 char *mp;
 
                                 if (!CHRCMP(dirname(safe_path), '.'))
@@ -2595,28 +2646,24 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                         printd(3, "Adding %s to cache\n", mp);
                                         entry_p = filecache_alloc(mp);
                                         entry_p->name_p = strdup(mp);
-                                        entry_p->rar_p = strdup(arch);
+                                        entry_p->rar_p = strdup(first_arch);
                                         entry_p->file_p = strdup(safe_path);
                                         entry_p->flags.force_dir = 1;
                                         entry_p->flags.unresolved = 1;
+
+                                        set_rarstats(entry_p, next, 1);
 
                                         /* Check if part of a volume */
                                         if (d.Flags & MHD_VOLUME) {
                                                 entry_p->flags.multipart = 1;
                                                 entry_p->vtype = VTYPE(arch, d.Flags);
-                                                /*
-                                                 * Make sure parent folders are always searched
-                                                 * from the first volume file since sub-folders
-                                                 * might actually be placed elsewhere.
-                                                 */
-                                                RARVolNameToFirstName_BUGGED(entry_p->rar_p, !entry_p->vtype);
                                         } else {
                                                 entry_p->flags.multipart = 0;
                                         }
-                                        set_rarstats(entry_p, next, 1);
                                 }
                         }
                         free(safe_path);
+                        free(first_arch);
                         ABS_MP(mp, (*rar_root ? rar_root : "/"),
                                         next->hdr.FileName);
                 } else {
@@ -2735,7 +2782,13 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                 entry_p->vtype = VTYPE(arch, d.Flags);
                                 entry_p->vno_base = get_vformat(arch, entry_p->vtype, &len, &pos);
                                 char *tmp = strdup(arch);
-                                RARVolNameToFirstName_BUGGED(tmp, !entry_p->vtype);
+                                if (RARVolNameToFirstName_BUGGED(tmp, !entry_p->vtype)) {
+                                        __invalidate_cloak_for_file(entry_p->name_p);
+                                        filecache_invalidate(entry_p->name_p);
+                                        n_files = 0;
+                                        free(tmp);
+                                        goto out;
+                                }
                                 entry_p->vno_first = get_vformat(tmp, entry_p->vtype, NULL, NULL);
                                 free(tmp);
 
@@ -2779,7 +2832,12 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                  * from the first volume file since sub-folders
                                  * might actually be placed elsewhere.
                                  */
-                                RARVolNameToFirstName_BUGGED(entry_p->rar_p, !entry_p->vtype);
+                                if (RARVolNameToFirstName_BUGGED(entry_p->rar_p, !entry_p->vtype)) {
+                                        __invalidate_cloak_for_file(entry_p->name_p);
+                                        filecache_invalidate(entry_p->name_p);
+                                        n_files = 0;
+                                        goto out;
+                                }
                         } else {
                                 entry_p->flags.multipart = 0;
                         }
@@ -2792,6 +2850,7 @@ cache_hit:
                 next = next->next;
         }
 
+out:
         RARFreeListEx(&L);
         RARCloseArchive(hdl);
         free(tmp1);
@@ -2877,6 +2936,7 @@ static int syncdir_scan(const char *dir, const char *root,
         struct dirent **namelist;
         unsigned int f;
         int (*filter[]) (SCANDIR_ARG3) = {f1, f2}; /* f0 not needed */
+        int error_count = 0;
 
         ENTER_("%s", dir);
 
@@ -2924,10 +2984,12 @@ static int syncdir_scan(const char *dir, const char *root,
                                 if (!final) {
                                         char *arch;
                                         ABS_MP(arch, root, namelist[i]->d_name);
-                                        if (listrar(dir, next, arch, &final))
+                                        if (listrar(dir, next, arch, &final)) {
                                                 *next = dir_entry_add(*next,
                                                                namelist[i]->d_name,
                                                                NULL, DIR_E_NRM);
+                                                ++error_count;
+                                        }
                                 }
                         }
                         free(namelist[i]);
@@ -2936,7 +2998,7 @@ static int syncdir_scan(const char *dir, const char *root,
                 free(namelist);
         }
 
-        return 0;
+        return error_count ? -ENOENT : 0;
 }
 
 /*!
@@ -2966,7 +3028,7 @@ static inline int convert_fake_iso(char *name)
  *****************************************************************************
  *
  ****************************************************************************/
-static void readdir_scan(const char *dir, const char *root,
+static int readdir_scan(const char *dir, const char *root,
                 struct dir_entry_list **next,
                 struct dir_entry_list **next2)
 {
@@ -2974,6 +3036,7 @@ static void readdir_scan(const char *dir, const char *root,
         unsigned int f;
         unsigned int f_end;
         int (*filter[]) (SCANDIR_ARG3) = {f0, f1, f2};
+        int error_count = 0;
 
         ENTER_("%s", dir);
 
@@ -3054,10 +3117,12 @@ static void readdir_scan(const char *dir, const char *root,
                                 if (!final) {
                                         char *arch;
                                         ABS_MP(arch, root, namelist[i]->d_name);
-                                        if (listrar(dir, next2, arch, &final))
+                                        if (listrar(dir, next2, arch, &final)) {
+                                                ++error_count;
                                                 *next2 = dir_entry_add(*next2,
                                                                namelist[i]->d_name,
                                                                NULL, DIR_E_NRM);
+                                        }
                                 }
                         }
 
@@ -3068,6 +3133,7 @@ next_entry:
                 }
                 free(namelist);
         }
+        return error_count;
 }
 
 /*!
@@ -3453,7 +3519,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 if (!dir_list2)
                         return -ENOMEM;
                 next2 = dir_list2;
-                dir_list_open(next2);
+                dir_list_open(dir_list2);
         } else {
                 dir_list2 = dir_list_dup(entry_p->dir_entry_list_p);
                 pthread_mutex_unlock(&file_access_mutex);
@@ -3467,7 +3533,10 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                                 goto fill_buff;
                 }
                 ABS_ROOT(root, path);
-                readdir_scan(path, root, &next, &next2);
+                if (readdir_scan(path, root, &next, &next2)) {
+                        filecache_invalidate(cloak);
+                        goto dump_buff_nocache;
+                }
                 goto dump_buff;
         }
 
@@ -3548,6 +3617,18 @@ dump_buff:
 
         dump_dir_list(path, buffer, filler, &dir_list);
         dir_list_free(&dir_list);
+
+        return 0;
+
+dump_buff_nocache:
+
+        (void)dir_list_append(&dir_list, dir_list2);
+        dir_list_close(&dir_list);
+
+        dump_dir_list(path, buffer, filler, &dir_list);
+        dir_list_free(&dir_list);
+        dir_list_free(dir_list2);
+        free(dir_list2);
 
         return 0;
 }
@@ -4124,7 +4205,9 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                  * Since the file contents will never change this should save
                                  * us from some user space calls!
                                  */
+#if 0 /* disable for now (issue #66) */
                                 fi->keep_cache = 1;
+#endif
 
                                 /*
                                  * Make sure cache entry is filled in completely
