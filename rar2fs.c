@@ -554,7 +554,7 @@ static void __attribute__((unused)) __invalidate_cloak_for_file(const char *path
 *****************************************************************************
 *
 ****************************************************************************/
-static void __invalidate_cloak_for_rar(const char *path)
+static void __attribute__((unused)) __invalidate_cloak_for_rar(const char *path)
 {
         if (IS_RAR(path) || IS_CBR(path) || IS_NNN(path) ||
             IS_RXX(path)) {
@@ -4632,7 +4632,7 @@ static int rar2_create(const char *path, mode_t mode, struct fuse_file_info *fi)
                                 FH_SETENTRY(fi->fh, NULL);
                                 FH_SETFD(fi->fh, fd);
                         }
-                        __invalidate_cloak_for_rar(path);
+                        __invalidate_cloak_for_file(path);
                         return 0;
                 }
         }
@@ -4662,7 +4662,7 @@ static int rar2_rename(const char *oldpath, const char *newpath)
                 ABS_ROOT(oldroot, oldpath);
                 ABS_ROOT(newroot, newpath);
                 if (!rename(oldroot, newroot)) {
-                        __invalidate_cloak_for_rar(newpath);
+                        __invalidate_cloak_for_file(newpath);
                         return 0;
                 }
                 return -errno;
@@ -4698,7 +4698,7 @@ static int rar2_unlink(const char *path)
                 char *root;
                 ABS_ROOT(root, path);
                 if (!unlink(root)) {
-                        __invalidate_cloak_for_rar(path);
+                        __invalidate_cloak_for_file(path);
                         return 0;
                 }
                 return -errno;
