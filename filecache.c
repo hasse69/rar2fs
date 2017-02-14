@@ -26,94 +26,83 @@
     to develop a RAR (WinRAR) compatible archiver.
 */
 
-#include <platform.h>
+#include "platform.h"
 #include <memory.h>
 #include <string.h>
-#include <wchar.h>
-#include <libgen.h>
 #include <errno.h>
-#include <assert.h>
-#include <syslog.h>
-#include "debug.h"
+#include <pthread.h>
+#include "hashtable.h"
 #include "filecache.h"
-#include "optdb.h"
-#include "hash.h"
-#include "dirlist.h"
 
-extern char *src_path;
+#define FILECACHE_SZ  (1024)
+
+/* Hash table handle */
+static void *ht = NULL;
+
 pthread_mutex_t file_access_mutex;
-
-#define PATH_CACHE_SZ  (1024)
-static dir_elem_t path_cache[PATH_CACHE_SZ];
 
 #define FREE_CACHE_MEM(e)\
         do {\
-                free((e)->name_p);\
                 free((e)->rar_p);\
                 free((e)->file_p);\
                 free((e)->file2_p);\
-                if ((e)->flags.dir) {\
-                        if ((e)->dir_entry_list_p) {\
-                                dir_list_free((e)->dir_entry_list_p);\
-                                free((e)->dir_entry_list_p);\
-                                (e)->dir_entry_list_p = NULL;\
-                        }\
-                } else if ((e)->link_target_p) {\
+                if ((e)->link_target_p) {\
                         free((e)->link_target_p);\
                         (e)->link_target_p = NULL;\
                 }\
-                (e)->name_p = NULL;\
                 (e)->rar_p = NULL;\
                 (e)->file_p = NULL;\
                 (e)->file2_p = NULL;\
-                (e)->dir_entry_list_p = NULL;\
         } while(0)
 
 /*!
  *****************************************************************************
  *
  ****************************************************************************/
-dir_elem_t *filecache_alloc(const char *path)
+static void *__alloc()
 {
-        uint32_t hash = get_hash(path, 0);
-        dir_elem_t *p = &path_cache[(hash & (PATH_CACHE_SZ - 1))];
-        if (p->name_p) {
-                if (!strcmp(path, p->name_p))
-                        return p;
-                while (p->next_p) {
-                        p = p->next_p;
-                        if (hash == p->dir_hash && !strcmp(path, p->name_p))
-                                return p;
-                }
-                p->next_p = malloc(sizeof(dir_elem_t));
-                p = p->next_p;
-                memset(p, 0, sizeof(dir_elem_t));
-        }
-        p->dir_hash = hash;
-        return p;
+        struct filecache_entry *e;
+        e = malloc(sizeof(struct filecache_entry));
+        if (e)
+                memset(e, 0, sizeof(struct filecache_entry));
+        return e;
 }
 
 /*!
  *****************************************************************************
  *
  ****************************************************************************/
-dir_elem_t *filecache_get(const char *path)
+static void __free(void *data)
 {
-        uint32_t hash = get_hash(path, 0);
-        dir_elem_t *p = &path_cache[hash & (PATH_CACHE_SZ - 1)];
-        if (p->name_p) {
-                while (p) {
-                        /*
-                         * Checking the full hash here will inflict a small
-                         * cache hit penalty for the bucket but will   
-                         * instead improve speed when searching a collision
-                         * chain due to less calls needed to strcmp().
-                         */
-                        if (hash == p->dir_hash && !strcmp(path, p->name_p))
-                                return p;
-                        p = p->next_p;
-                }
-        }
+        struct filecache_entry *e = data;
+        if (e) 
+                FREE_CACHE_MEM(e);
+        free(e);
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+struct filecache_entry *filecache_alloc(const char *path)
+{
+        struct hash_table_entry *hte;
+        hte = hashtable_entry_alloc(ht, path);
+        if (hte)
+                return hte->user_data;
+        return NULL;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+struct filecache_entry *filecache_get(const char *path)
+{
+        struct hash_table_entry *hte;
+        hte = hashtable_entry_get(ht, path);
+        if (hte)
+                return hte->user_data;
         return NULL;
 }
 
@@ -123,86 +112,26 @@ dir_elem_t *filecache_get(const char *path)
  ****************************************************************************/
 void filecache_invalidate(const char *path)
 {
-        int i;
-        if (path) {
-                uint32_t hash = get_hash(path, PATH_CACHE_SZ);
-                printd(3, "Invalidating cache path %s\n", path);
-                dir_elem_t *e_p = &path_cache[hash];
-                dir_elem_t *p = e_p;
-
-                /* Search collision chain */
-                while (p->next_p) {
-                        dir_elem_t *prev_p = p;
-                        p = p->next_p;
-                        if (p->name_p && !strcmp(path, p->name_p)) {
-                                FREE_CACHE_MEM(p);
-                                prev_p->next_p = p->next_p;
-                                free(p);
-                                /* Entry purged. We can leave now. */
-                                return;
-                        }
-                }
-
-                /*
-                 * Entry not found in collision chain.
-                 * Most likely it is in the bucket, but double check.
-                 */
-                if (e_p->name_p && !strcmp(e_p->name_p, path)) {
-                        /* Need to relink collision chain */
-                        if (e_p->next_p) {
-                                dir_elem_t *tmp = e_p->next_p;
-                                FREE_CACHE_MEM(e_p);
-                                memcpy(e_p, e_p->next_p, 
-                                            sizeof(dir_elem_t));
-                                free(tmp);
-                        } else {
-                                FREE_CACHE_MEM(e_p);
-                                memset(e_p, 0, sizeof(dir_elem_t));
-                        }
-                }
-        } else {
-                printd(3, "Invalidating all cache entries\n");
-                for (i = 0; i < PATH_CACHE_SZ;i++) {
-                        dir_elem_t *e_p = &path_cache[i];
-                        dir_elem_t *p_next = e_p->next_p;
- 
-                        /* Search collision chain */
-                        while (p_next) {
-                                dir_elem_t *p = p_next;
-                                p_next = p->next_p;
-                                FREE_CACHE_MEM(p);
-                                free(p);
-                        }
-                        FREE_CACHE_MEM(e_p);
-                        memset(e_p, 0, sizeof(dir_elem_t));
-                }
-                syslog(LOG_DEBUG, "cache invalidated");
-        }
+        hashtable_entry_delete(ht, path);
 }
 
 /*!
  *****************************************************************************
  *
  ****************************************************************************/
-dir_elem_t *filecache_clone(const dir_elem_t *src)
+struct filecache_entry *filecache_clone(const struct filecache_entry *src)
 {
-        dir_elem_t* dest = malloc(sizeof(dir_elem_t));
+        struct filecache_entry* dest = malloc(sizeof(struct filecache_entry));
         if (dest != NULL) {
-                memcpy(dest, src, sizeof(dir_elem_t));
+                memcpy(dest, src, sizeof(struct filecache_entry));
                 errno = 0;
-                if (src->name_p)
-                        dest->name_p = strdup(src->name_p);
                 if (src->rar_p)
                         dest->rar_p = strdup(src->rar_p);
                 if (src->file_p)
                         dest->file_p = strdup(src->file_p);
                 if (src->file2_p)
                         dest->file2_p = strdup(src->file2_p);
-                if (src->flags.dir) {
-                        if (src->dir_entry_list_p)
-                                dest->dir_entry_list_p =
-                                        dir_list_dup(src->dir_entry_list_p);
-                } else if (src->link_target_p)
+                if (src->link_target_p)
                         dest->link_target_p = strdup(src->link_target_p);
                 if (errno != 0) {
                         filecache_freeclone(dest);
@@ -217,7 +146,8 @@ dir_elem_t *filecache_clone(const dir_elem_t *src)
  *
  ****************************************************************************/
 #define CP_ENTRY_F(f) dest->f = src->f
-void filecache_copy(const dir_elem_t *src, dir_elem_t *dest)
+void filecache_copy(const struct filecache_entry *src,
+                    struct filecache_entry *dest)
 {
         if (dest != NULL && src != NULL) {
                 free(dest->rar_p);
@@ -235,20 +165,9 @@ void filecache_copy(const dir_elem_t *src, dir_elem_t *dest)
                         dest->file2_p = strdup(src->file2_p);
                 else
                         dest->file2_p = NULL;
-                if (dest->flags.dir) {
-                        if (dest->dir_entry_list_p) {
-                                dir_list_free(dest->dir_entry_list_p);
-                                free(dest->dir_entry_list_p);
-                        }
-                } else if (dest->link_target_p)
+                if (dest->link_target_p)
                         free(dest->link_target_p);
-                if (src->flags.dir) {
-                        if (src->dir_entry_list_p)
-                                dest->dir_entry_list_p =
-                                        dir_list_dup(src->dir_entry_list_p);
-                        else
-                            dest->dir_entry_list_p = NULL;
-                } else if (src->link_target_p)
+                if (src->link_target_p)
                         dest->link_target_p = strdup(src->link_target_p);
                 else
                         dest->link_target_p = NULL;
@@ -273,7 +192,7 @@ void filecache_copy(const dir_elem_t *src, dir_elem_t *dest)
  *****************************************************************************
  *
  ****************************************************************************/
-void filecache_freeclone(dir_elem_t *dest)
+void filecache_freeclone(struct filecache_entry *dest)
 {
         FREE_CACHE_MEM(dest);
         free(dest);
@@ -285,7 +204,12 @@ void filecache_freeclone(dir_elem_t *dest)
  ****************************************************************************/
 void filecache_init()
 {
-        memset(path_cache, 0, sizeof(dir_elem_t)*PATH_CACHE_SZ);
+        struct hash_table_ops ops = {
+                .alloc = __alloc,
+                .free = __free,
+        };
+
+        ht = hashtable_init(FILECACHE_SZ, &ops);
         pthread_mutex_init(&file_access_mutex, NULL);
 }
 
@@ -295,7 +219,8 @@ void filecache_init()
  ****************************************************************************/
 void filecache_destroy()
 {
-        filecache_invalidate(NULL);
         pthread_mutex_destroy(&file_access_mutex);
+        hashtable_destroy(ht);
+        ht = NULL;
 }
 

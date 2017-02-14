@@ -29,6 +29,7 @@
 #include <platform.h>
 #include <string.h>
 #include "dirlist.h"
+#include "hash.h"
 
 #define DIR_LIST_HEAD_ ((void*)-1)
 
@@ -117,33 +118,20 @@ void dir_list_free(struct dir_entry_list *root)
  *****************************************************************************
  *
  ****************************************************************************/
-struct dir_entry_list *dir_entry_add_hash(struct dir_entry_list *l,
-                const char *key, struct stat *st, uint32_t hash, int type)
+struct dir_entry_list *dir_entry_add(struct dir_entry_list *l, const char *key,
+                struct stat *st, int type)
 {
+        uint32_t hash = get_hash(key, 0);
         if (l->entry.head_flag != DIR_LIST_HEAD_) {
                 if (hash == l->entry.hash)
                         if (!strcmp(key, l->entry.name))
                                 return l;
         }
-        if (dir_entry_add(l, key, st, type) != l) {
-                l = l->next;
-                l->entry.hash = hash;
-        }
-        return l;
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-struct dir_entry_list *dir_entry_add(struct dir_entry_list *l, const char *key,
-                struct stat *st, int type)
-{
         l->next = malloc(sizeof(struct dir_entry_list));
         if (l->next) {
                 l = l->next;
                 l->entry.name = strdup(key);
-                l->entry.hash = 0;
+                l->entry.hash = hash;
                 l->entry.st = st;
                 l->entry.type = type;
                 l->entry.valid = 1; /* assume entry is valid */

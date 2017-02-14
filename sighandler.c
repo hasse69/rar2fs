@@ -32,7 +32,8 @@
 #include <pthread.h>
 #include <sys/wait.h>
 #include "debug.h"
-#include "filecache.h"
+
+extern void __handle_sigusr1();
 
 #ifdef HAVE_STRUCT_SIGACTION_SA_SIGACTION
 #if !defined ( HAVE_EXECINFO_H ) || !defined ( HAVE_UCONTEXT_H )
@@ -115,10 +116,7 @@ static RETSIGTYPE sig_handler(int signum)
         {
         case SIGUSR1:
                 printd(4, "Caught signal SIGUSR1\n");
-                printd(3, "Invalidating path cache\n");
-                pthread_mutex_lock(&file_access_mutex);
-                filecache_invalidate(NULL);
-                pthread_mutex_unlock(&file_access_mutex);
+                __handle_sigusr1();
                 break;
         case SIGSEGV:
                 if (!glibc_test) {

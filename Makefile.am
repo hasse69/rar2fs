@@ -12,6 +12,8 @@ rar2fs_SOURCES = 		dllext.cpp \
 				filecache.c \
 				iobuffer.c \
 				sighandler.c \
+				hashtable.c \
+				dircache.c \
 				dirlist.c \
 				rar2fs.c \
 				compat.h \
@@ -21,6 +23,8 @@ rar2fs_SOURCES = 		dllext.cpp \
 				filecache.h \
 				iobuffer.h \
 				sighandler.h \
+                                hashtable.h \
+                                dircache.h \
 				debug.h \
 				dllwrapper.h \
 				index.h \

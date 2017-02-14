@@ -32,22 +32,15 @@
 #include <platform.h>
 #include <sys/stat.h>
 #include <pthread.h>
-#include <hash.h>
 
-typedef struct dir_elem dir_elem;
 __extension__
-struct dir_elem {
-        char *name_p;
+struct filecache_entry {
         char *rar_p;
         char *file_p;
         char *file2_p;
-        union {
-                char *link_target_p;
-                struct dir_entry_list *dir_entry_list_p;
-        };
+        char *link_target_p;
         short method;                /* for getxattr() */
         struct stat stat;
-        uint32_t dir_hash;
         off_t offset;                /* >0: offset in rar file (raw read) */
         union {
                 off_t vsize_first;   /* >0: volume file size (raw read) */
@@ -75,7 +68,7 @@ struct dir_elem {
                         unsigned int vsize_resolved:1;
                         unsigned int :17;
                         unsigned int unresolved:1;
-                        unsigned int dir:1;
+                        unsigned int xdir:1;
                         unsigned int check_atime:1;
                         unsigned int direct_io:1;
                         unsigned int avi_tested:1;
@@ -85,7 +78,7 @@ struct dir_elem {
                         unsigned int avi_tested:1;
                         unsigned int direct_io:1;
                         unsigned int check_atime:1;
-                        unsigned int dir:1;
+                        unsigned int xdir:1;
                         unsigned int unresolved:1;
                         unsigned int :17;
                         unsigned int vsize_resolved:1;
@@ -101,9 +94,7 @@ struct dir_elem {
                 } flags;
                 uint32_t flags_uint32;
         };
-        struct dir_elem *next_p;
 };
-typedef struct dir_elem dir_elem_t;
 
 #define LOCAL_FS_ENTRY ((void*)-1)
 #define LOOP_FS_ENTRY ((void*)-2)
@@ -126,33 +117,25 @@ typedef struct dir_elem dir_elem_t;
                 strcat((s), file); \
         } while(0)
 
-#define CLOAK_PATH(s, path) \
-        do { \
-                const char *p = (path); \
-                (s) = alloca(strlen(p) + 3); \
-                strcpy((s), "%"); \
-                strcat((s), p); \
-        } while (0)
-
 extern pthread_mutex_t file_access_mutex;
 
-dir_elem_t *
+struct filecache_entry *
 filecache_alloc(const char *path);
 
-dir_elem_t *
+struct filecache_entry *
 filecache_get(const char *path);
 
 void
 filecache_invalidate(const char *path);
 
-dir_elem_t *
-filecache_clone(const dir_elem_t *src);
+struct filecache_entry *
+filecache_clone(const struct filecache_entry *src);
 
 void
-filecache_copy(const dir_elem_t *src, dir_elem_t *dest);
+filecache_copy(const struct filecache_entry *src, struct filecache_entry *dest);
 
 void
-filecache_freeclone(dir_elem_t *dest);
+filecache_freeclone(struct filecache_entry *dest);
 
 void
 filecache_init();
