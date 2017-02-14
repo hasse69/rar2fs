@@ -310,15 +310,23 @@ static char *get_password(const char *file, char *buf, size_t len)
                 char *f[2] = {NULL, NULL};
                 int l[2] = {0, 0};
                 int i;
+                int lx;
 
+                /* In case this is a new-style volume we must try to figure
+                 * out the file format. */
                 (void)get_vformat(file, 1, NULL, &l[0]);
-                if (l[0]) {
-                        while (file[l[0]] != '.') --l[0];
+                lx = l[0];
+                while (lx && file[lx] != '.') --lx;
+                if (lx) {
+                        l[0] = lx;
                         f[0] = strdup(file);
                 }
-                (void)get_vformat(file, 0, NULL, &l[1]);
-                if (l[1]) {
-                        l[1] -= 2;
+                /* In case this is an old-style volume, or even not a volume at
+                 * all, simply placing the index behind .rar or .rNN should be
+                 * enough to locate the password file. */
+                lx = strlen(file);
+                if (lx > 4) {
+                        l[1] = lx - 4;
                         f[1] = strdup(file);
                 }
                 for (i = 0; i < 2; i++) {
