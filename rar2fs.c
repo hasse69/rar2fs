@@ -1724,6 +1724,8 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
         if (d.OpenResult) {
                 if (h)
                         RARCloseArchive(h);
+                if (d.OpenResult == ERAR_MISSING_PASSWORD)
+			files = -EPERM;
                 goto out;
         }
 
@@ -5022,8 +5024,7 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
         char *a2 = realpath(dst_path_in, p2);
         if (!a1 || !a2 || !strcmp(a1, a2)) {
                 if (verbose)
-                        printf("%s: invalid source and/or mount point\n",
-                                                prog);
+                        printf("%s: invalid source and/or mount point\n", prog);
                 return -1;
         }
         dir_list_open(arch_list);
@@ -5037,14 +5038,27 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
 
         /* Check path type(s), destination path *must* be a folder */
         (void)stat(a2, &st);
-        if (!S_ISDIR(st.st_mode) ||
-                        (mount_type == MOUNT_ARCHIVE &&
-                        !collect_files(a1, arch_list))) {
+        if (!S_ISDIR(st.st_mode)) {
                 if (verbose)
-                        printf("%s: invalid source and/or mount point\n",
-                                                prog);
+                        printf("%s: invalid source and/or mount point\n", prog);
                 return -1;
         }
+
+        /* Check file collection at archive mount */
+        if (mount_type == MOUNT_ARCHIVE) {
+                int ret = collect_files(a1, arch_list);
+                if (ret == -EPERM) {
+                        if (verbose)
+                                printf("%s: bad or missing password\n", prog);
+                        return -1;
+                } else if (ret <= 0) {
+                        if (verbose)
+                                printf("%s: invalid source and/or mount point\n",
+                                                prog);
+                        return -1;
+                }
+        }
+
         /* Do not try to use 'a1' after this call since dirname() will destroy it! */
         *src_path_out = mount_type == MOUNT_FOLDER
                 ? strdup(a1) : strdup(dirname(a1));
