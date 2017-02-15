@@ -5650,7 +5650,7 @@ int main(int argc, char *argv[])
                         return -1;
         }
 
-        fuse_opt_add_arg(&args, "-osync_read,fsname=rar2fs,subtype=rar2fs,default_permissions");
+        fuse_opt_add_arg(&args, "-osync_read,fsname=rar2fs,subtype=rar2fs");
         if (OPT_SET(OPT_KEY_DST))
                 fuse_opt_add_arg(&args, OPT_STR(OPT_KEY_DST, 0));
 
