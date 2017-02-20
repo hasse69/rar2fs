@@ -2477,15 +2477,16 @@ void __add_filler(const char *path, struct dir_entry_list **buffer,
 
         path_len = strlen(path);
         file_len = strlen(file);
+        if (path_len > 1) {
         match = strstr(file, path);
-        if (!match || path_len == file_len)
-                return;
+                if (!match || path_len == file_len || file[path_len] != '/')
+                        return;
+                ++path_len;
+        }
 
         /* Cut input file path on current lookup level */
         char *file_dup = strdup(file);
-        char *s = file_dup + path_len + 1;
-        if (!CHRCMP(path , '/'))
-                --s;
+        char *s = file_dup + path_len;
         s = strchr(s, '/');
         if (s)
                 *s = '\0';
