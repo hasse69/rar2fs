@@ -988,6 +988,19 @@ static int __check_rar_header(const char *arch)
         HANDLE h;
         RAROpenArchiveDataEx d;
         struct RARHeaderDataEx header;
+        static char *last_arch = NULL;
+
+        /* Cache and skip if we are trying to inspect the same file over
+         * and over again.
+         * Note that this is *NOT* a thread safe operation and the resource
+         * needs to be protected. Currently it is implictly protected since
+         * this function is only called from RARVolNameToFirstName_BUGGED()
+         * which holds the file access lock when ever necessary. This might
+         * change though and then this logic needs to be revisited! */
+        if (last_arch && !strcmp(arch, last_arch))
+                return 0;
+        free(last_arch);
+        last_arch = strdup(arch);
 
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
