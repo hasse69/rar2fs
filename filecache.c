@@ -45,14 +45,10 @@ pthread_mutex_t file_access_mutex;
         do {\
                 free((e)->rar_p);\
                 free((e)->file_p);\
-                free((e)->file2_p);\
-                if ((e)->link_target_p) {\
-                        free((e)->link_target_p);\
-                        (e)->link_target_p = NULL;\
-                }\
+                free((e)->link_target_p);\
+                (e)->link_target_p = NULL;\
                 (e)->rar_p = NULL;\
                 (e)->file_p = NULL;\
-                (e)->file2_p = NULL;\
         } while(0)
 
 /*!
@@ -129,8 +125,6 @@ struct filecache_entry *filecache_clone(const struct filecache_entry *src)
                         dest->rar_p = strdup(src->rar_p);
                 if (src->file_p)
                         dest->file_p = strdup(src->file_p);
-                if (src->file2_p)
-                        dest->file2_p = strdup(src->file2_p);
                 if (src->link_target_p)
                         dest->link_target_p = strdup(src->link_target_p);
                 if (errno != 0) {
@@ -160,11 +154,6 @@ void filecache_copy(const struct filecache_entry *src,
                         dest->file_p = strdup(src->file_p);
                 else
                         dest->file_p = NULL;
-                free(dest->file2_p);
-                if (src->file2_p)
-                        dest->file2_p = strdup(src->file2_p);
-                else
-                        dest->file2_p = NULL;
                 if (dest->link_target_p)
                         free(dest->link_target_p);
                 if (src->link_target_p)
@@ -174,7 +163,6 @@ void filecache_copy(const struct filecache_entry *src,
 
                 CP_ENTRY_F(stat);
                 CP_ENTRY_F(offset);
-                CP_ENTRY_F(msize);
                 CP_ENTRY_F(vsize_real_first);
                 CP_ENTRY_F(vsize_real_next);
                 CP_ENTRY_F(vsize_next);

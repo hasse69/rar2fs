@@ -49,16 +49,12 @@ enum {
         OPT_KEY_PREOPEN_IMG,
         OPT_KEY_SHOW_COMP_IMG,
         OPT_KEY_SEEK_LENGTH,
-        OPT_KEY_SEEK_DEPTH,
-        OPT_KEY_NO_PASSWD, /* Obsolete */
         OPT_KEY_NO_SMP,
-        OPT_KEY_UNRAR_PATH, /* Obsolete */
         OPT_KEY_NO_LIB_CHECK,
         OPT_KEY_HIST_SIZE,
         OPT_KEY_BUF_SIZE,
         OPT_KEY_SAVE_EOF,
         OPT_KEY_NO_EXPAND_CBR,
-        OPT_KEY_FLAT_ONLY,
         OPT_KEY_ATIME,
         OPT_KEY_ATIME_RAR,
         OPT_KEY_END, /* Must *always* be last key */

@@ -164,11 +164,8 @@ struct RARWcb
 extern "C" {
 #endif
 
-HANDLE       PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *ArchiveData, FileHandle, bool IsArchiveWorkaround);
-int          PASCAL RARFreeArchive(HANDLE hArcData);
 int          PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* fList, int *ResultCode);
 void         PASCAL RARFreeListEx(RARArchiveListEx* fList);
-FileHandle   PASCAL RARGetFileHandle(HANDLE hArcData);
 void         PASCAL RARNextVolumeName(char*, bool);
 void         PASCAL RARVolNameToFirstName(char*, bool);
 void         PASCAL RARGetFileInfo(HANDLE hArcData, const char *FileName, struct RARWcb *wcb);

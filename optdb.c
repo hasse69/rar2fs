@@ -46,12 +46,8 @@ static struct opt_entry opt_entry_[] = {
         {{NULL,}, 0, 0, 0, 0, 1},
         {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 0},
-        {{NULL,}, 0, 0, 0, 0, 0},
-        {{NULL,}, 0, 0, 0, 0, 0},
-        {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 1},
         {{NULL,}, 0, 0, 0, 0, 1},
-        {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 0},
@@ -134,8 +130,6 @@ int optdb_save(int opt, const char *s)
 
         switch (opt)
         {
-        case OPT_KEY_SEEK_DEPTH:
-                break;
         case OPT_KEY_SEEK_LENGTH:
         case OPT_KEY_HIST_SIZE:
         {

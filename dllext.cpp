@@ -46,12 +46,6 @@ using namespace std;
 #undef St
 #define St(x) L""x""
 
-#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
-static int RarErrorToDll(RAR_EXIT ErrCode);
-#else
-static int RarErrorToDll(int ErrCode);
-#endif
-
 struct DataSet
 {
   CommandData Cmd;
@@ -71,172 +65,6 @@ struct DataSet
   DataSet():Arc(&Cmd), Extract(&Cmd) {};
 #endif
 };
-
-HANDLE PASCAL RARInitArchiveEx(struct RAROpenArchiveDataEx *r, FileHandle fh, 
-    const bool IsArchiveWorkaround)
-{
-  DataSet *Data=NULL;
-  try
-  {
-    r->OpenResult=0;
-    Data=new DataSet;
-    Data->Cmd.DllError=0;
-    Data->OpenMode=r->OpenMode;
-#if RARVER_MAJOR < 5
-    Data->Cmd.FileArgs->AddString("*");
-
-    char AnsiArcName[NM];
-    if (r->ArcName==NULL && r->ArcNameW!=NULL)
-    {
-      WideToChar(r->ArcNameW,AnsiArcName,NM);
-      r->ArcName=AnsiArcName;
-    }
-
-    Data->Cmd.AddArcName(r->ArcName,r->ArcNameW);
-#else
-    Data->Cmd.FileArgs.AddString(L"*");
-
-    char *ArcName = NULL;
-    if (r->ArcName!=NULL && r->ArcNameW==NULL)
-    {
-      ArcName = r->ArcName;
-    }
-
-    wchar ArcNameW[NM];
-    GetWideName(ArcName,r->ArcNameW,ArcNameW,ASIZE(ArcNameW));
-
-    Data->Cmd.AddArcName(ArcNameW);
-#endif
-    Data->Cmd.Overwrite=OVERWRITE_ALL;
-    Data->Cmd.VersionControl=1;
-    Data->Cmd.Callback=r->Callback;
-    Data->Cmd.UserData=r->UserData;
-    ((FileExt*)&Data->Arc)->SetHandle(fh);
-    ((FileExt*)&Data->Arc)->SkipHandle();
-#if RARVER_MAJOR > 4
-    int64 SavePos = Data->Arc.Tell();   // IsArchive() might destroy file position!
-#endif
-    if (!Data->Arc.IsArchive(false))
-    {
-      r->OpenResult=Data->Cmd.DllError!=0 ? Data->Cmd.DllError:ERAR_BAD_ARCHIVE;
-      delete Data;
-      return(NULL);
-    }
-#if RARVER_MAJOR > 4
-    // Restore file position!
-    if (IsArchiveWorkaround)
-    {
-      if (Data->Arc.Format >= RARFMT50)
-        Data->Arc.Seek(SavePos + Data->Arc.Tell() + 1, SEEK_SET); 
-      else
-        Data->Arc.Seek(SavePos + Data->Arc.Tell(), SEEK_SET);  
-      Data->Arc.RawSeek(Data->Arc.Tell(), SEEK_SET);  
-    }
-    else
-    {
-      Data->Arc.RawSeek(SavePos, SEEK_SET);  
-    }
-#endif
-#if RARVER_MAJOR < 5
-    r->Flags=Data->Arc.MainHead.Flags;
-
-    Array<byte> CmtData;
-    if (r->CmtBufSize!=0 && Data->Arc.GetComment(&CmtData,NULL))
-    {
-      r->Flags|=2;
-      size_t Size=CmtData.Size()+1;
-      r->CmtState=Size>r->CmtBufSize ? ERAR_SMALL_BUF:1;
-      r->CmtSize=(uint)Min(Size,r->CmtBufSize);
-      memcpy(r->CmtBuf,&CmtData[0],r->CmtSize-1);
-      if (Size<=r->CmtBufSize)
-        r->CmtBuf[r->CmtSize-1]=0;
-    }
-    else
-      r->CmtState=r->CmtSize=0;
-    if (Data->Arc.Signed)
-      r->Flags|=0x20;
-#else
-    r->Flags = 0;
-
-    if (Data->Arc.Volume)
-      r->Flags|=0x01;
-    if (Data->Arc.Locked)
-      r->Flags|=0x04;
-    if (Data->Arc.Solid)
-      r->Flags|=0x08;
-    if (Data->Arc.NewNumbering)
-      r->Flags|=0x10;
-    if (Data->Arc.Signed)
-      r->Flags|=0x20;
-    if (Data->Arc.Protected)
-      r->Flags|=0x40;
-    if (Data->Arc.Encrypted)
-      r->Flags|=0x80;
-    if (Data->Arc.FirstVolume)
-      r->Flags|=0x100;
-
-    Array<wchar> CmtDataW;
-    if (r->CmtBufSize!=0 && Data->Arc.GetComment(&CmtDataW))
-    {
-      Array<char> CmtData(CmtDataW.Size()*4+1);
-      memset(&CmtData[0],0,CmtData.Size());
-      WideToChar(&CmtDataW[0],&CmtData[0],CmtData.Size()-1);
-      size_t Size=strlen(&CmtData[0])+1;
-
-      r->Flags|=2;
-      r->CmtState=Size>r->CmtBufSize ? ERAR_SMALL_BUF:1;
-      r->CmtSize=(uint)Min(Size,r->CmtBufSize);
-      memcpy(r->CmtBuf,&CmtData[0],r->CmtSize-1);
-      if (Size<=r->CmtBufSize)
-        r->CmtBuf[r->CmtSize-1]=0;
-    }
-    else
-      r->CmtState=r->CmtSize=0;
-#endif
-#if  RARVER_MAJOR > 5 || ( RARVER_MAJOR == 5 && RARVER_MINOR >= 10 )
-    Data->Extract.ExtractArchiveInit(Data->Arc);
-#else
-    Data->Extract.ExtractArchiveInit(&Data->Cmd,Data->Arc);
-#endif
-    return((HANDLE)Data);
-  }
-#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
-  catch (RAR_EXIT ErrCode)
-  {
-    if (Data!=NULL && Data->Cmd.DllError!=0)
-      r->OpenResult=Data->Cmd.DllError;
-    else
-      r->OpenResult=RarErrorToDll(ErrCode);
-    if (Data != NULL)
-      delete Data;
-    return(NULL);
-  }
-  catch (std::bad_alloc) // Catch 'new' exception.
-  {
-    r->OpenResult=ERAR_NO_MEMORY;
-    if (Data != NULL)
-      delete Data;
-  }
-#else
-  catch (int ErrCode)
-  {
-    r->OpenResult=RarErrorToDll(ErrCode);
-    if (Data != NULL)
-      delete Data;
-  }
-#endif
-  return(NULL);
-}
-
-
-int PASCAL RARFreeArchive(HANDLE hArcData)
-{
-  DataSet *Data=(DataSet *)hArcData;
-  bool Success=Data==NULL ? false:true;
-  delete Data;
-  return(Success ? 0:ERAR_ECLOSE);
-}
-
 
 int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, int *ResultCode)
 {
@@ -381,13 +209,6 @@ void PASCAL RARFreeListEx(RARArchiveListEx* L)
   }
 }
 
-FileHandle PASCAL RARGetFileHandle(HANDLE hArcData)
-{
-  DataSet *Data=(DataSet*)hArcData;
-  return Data->Arc.GetHandle()!=BAD_HANDLE?Data->Arc.GetHandle():NULL;
-}
-
-
 void PASCAL RARNextVolumeName(char* arch, bool oldstylevolume)
 {
 #if RARVER_MAJOR < 5
@@ -446,58 +267,6 @@ void PASCAL RARGetFileInfo(HANDLE hArcData, const char *FileName, struct RARWcb 
   wcb->bytes = 0;
 #endif
 }
-
-
-#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
-static int RarErrorToDll(RAR_EXIT ErrCode)
-#else
-static int RarErrorToDll(int ErrCode)
-#endif
-{
-#if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
-  switch(ErrCode)
-  {
-    case RARX_FATAL:
-      return(ERAR_EREAD);
-    case RARX_CRC:
-      return(ERAR_BAD_DATA);
-    case RARX_WRITE:
-      return(ERAR_EWRITE);
-    case RARX_OPEN:
-      return(ERAR_EOPEN);
-    case RARX_CREATE:
-      return(ERAR_ECREATE);
-    case RARX_MEMORY:
-      return(ERAR_NO_MEMORY);
-    case RARX_SUCCESS:
-      return(0);
-    default:
-      ;
-  }
-#else
-  switch(ErrCode)
-  {
-    case FATAL_ERROR:
-      return(ERAR_EREAD);
-    case CRC_ERROR:
-      return(ERAR_BAD_DATA);
-    case WRITE_ERROR:
-      return(ERAR_EWRITE);
-    case OPEN_ERROR:
-      return(ERAR_EOPEN);
-    case CREATE_ERROR:
-      return(ERAR_ECREATE);
-    case MEMORY_ERROR:
-      return(ERAR_NO_MEMORY);
-    case SUCCESS:
-      return(0);
-    default:
-      ;
-  }
-#endif
-  return(ERAR_UNKNOWN);
-}
-
 
 #if RARVER_MAJOR > 4
 // For compatibility with existing translations we use %s to print Unicode

@@ -37,15 +37,11 @@ __extension__
 struct filecache_entry {
         char *rar_p;
         char *file_p;
-        char *file2_p;
         char *link_target_p;
         short method;                /* for getxattr() */
         struct stat stat;
         off_t offset;                /* >0: offset in rar file (raw read) */
-        union {
-                off_t vsize_first;   /* >0: volume file size (raw read) */
-                off_t msize;         /* >0: mmap size */
-        };
+        off_t vsize_first;           /* >0: volume file size (raw read) */
         off_t vsize_real_first;
         off_t vsize_real_next;
         off_t vsize_next;
@@ -61,12 +57,11 @@ struct filecache_entry {
                         unsigned int multipart:1;
                         unsigned int image:1;
                         unsigned int fake_iso:1;
-                        unsigned int mmap:2;
                         unsigned int force_dir:1;
                         unsigned int vsize_fixup_needed:1;
                         unsigned int encrypted:1;
                         unsigned int vsize_resolved:1;
-                        unsigned int :17;
+                        unsigned int :19;
                         unsigned int unresolved:1;
                         unsigned int xdir:1;
                         unsigned int check_atime:1;
@@ -80,12 +75,11 @@ struct filecache_entry {
                         unsigned int check_atime:1;
                         unsigned int xdir:1;
                         unsigned int unresolved:1;
-                        unsigned int :17;
+                        unsigned int :19;
                         unsigned int vsize_resolved:1;
                         unsigned int encrypted:1;
                         unsigned int vsize_fixup_needed:1;
                         unsigned int force_dir:1;
-                        unsigned int mmap:2;
                         unsigned int fake_iso:1;
                         unsigned int image:1;
                         unsigned int multipart:1;

@@ -108,10 +108,6 @@ struct io_context {
         pthread_mutex_t rd_req_mutex;
         pthread_cond_t rd_req_cond;
         int rd_req;
-        /* mmap() data */
-        void *mmap_addr;
-        FILE *mmap_fp;
-        int mmap_fd;
         /* debug */
 #ifdef DEBUG_READ
         FILE *dbg_fp;
@@ -158,16 +154,6 @@ struct io_handle {
 /* Special DIR pointer for root folder in a file system loop. */
 #define FS_LOOP_ROOT_DP        ((DIR *)~0U)
 
-/*
- * This is to the handle the workaround for the destroyed file pointer
- * position in some early libunrar5 versions when calling RARInitArchiveEx().
- */
-#ifdef HAVE_FMEMOPEN
-#define INIT_FP_ARG_(fp) (fp),0
-#else
-#define INIT_FP_ARG_(fp) (fp),1
-#endif
-
 #ifdef HAVE_ICONV
 static iconv_t icd;
 #endif
@@ -195,7 +181,7 @@ static mode_t umask_ = 0022;
 #endif
 #define BLKDEV_SIZE() (blkdev_size > 0 ? blkdev_size : 0)
 
-static int extract_rar(char *arch, const char *file, FILE *fp, void *arg);
+static int extract_rar(char *arch, const char *file, void *arg);
 static int get_vformat(const char *s, int t, int *l, int *p);
 static int CALLBACK list_callback_noswitch(UINT, LPARAM UserData, LPARAM, LPARAM);
 
@@ -635,155 +621,10 @@ static int __stop_child(pid_t pid)
  *****************************************************************************
  *
  ****************************************************************************/
-static void *extract_to(const char *file, off_t sz,
-                        const struct filecache_entry *entry_p,
-                        int oper)
+static FILE *popen_(const struct filecache_entry *entry_p, pid_t *cpid)
 {
-        ENTER_("%s", file);
-
-        FILE *tmp = NULL;
-        char *buffer = NULL;
-        int out_pipe[2] = {-1, -1};
-
-        if (pipe(out_pipe))      /* make a pipe */
-                return MAP_FAILED;
-
-        printd(3, "Extracting %" PRIu64 "bytes resident in %s\n", sz, entry_p->rar_p);
-        pid_t pid = fork();
-        if (pid == 0) {
-                int ret;
-                close(out_pipe[0]);
-                ret = extract_rar(entry_p->rar_p, file, NULL,
-                                        (void *)(uintptr_t)out_pipe[1]);
-                close(out_pipe[1]);
-                _exit(ret);
-        } else if (pid < 0) {
-                /* The fork failed. Report failure. */
-                close(out_pipe[1]);
-                goto extract_error;
-        }
-
-        close(out_pipe[1]);
-
-        buffer = malloc(sz);
-        if (!buffer)
-                goto extract_error;
-
-        if (oper == E_TO_TMP)
-                tmp = tmpfile();
-
-        off_t off = 0;
-        ssize_t n;
-        do {
-                /* read from pipe into buffer */
-                n = read(out_pipe[0], buffer + off, sz - off);
-                if (n == -1) {
-                        if (errno == EINTR)
-                                continue;
-                        perror("read");
-                        break;
-                }
-                off += n;
-        } while (n && off != sz);
-
-        if (off != sz)
-                goto extract_error;
-
-        printd(4, "Read %" PRIu64 "bytes from PIPE %d\n", off, out_pipe[0]);
-
-        if (tmp) {
-                if (!fwrite(buffer, sz, 1, tmp))
-                        goto extract_error;
-                else
-                        fseeko(tmp, 0, SEEK_SET);
-                free(buffer);
-                buffer = (void *)tmp;
-        }
-
-        (void)__stop_child(pid);
-
-        close(out_pipe[0]);
-
-        return buffer;
-
-extract_error:
-        (void)__stop_child(pid);
-
-        if (tmp)
-                fclose(tmp);
-        free(buffer);
-        close(out_pipe[0]);
-
-        return MAP_FAILED;
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-static FILE *popen_(const struct filecache_entry *entry_p, pid_t *cpid, void **mmap_addr,
-                FILE **mmap_fp, int *mmap_fd)
-{
-        char *maddr = MAP_FAILED;
-        FILE *fp = NULL;
         int fd = -1;
         int pfd[2] = {-1,};
-
-        if (entry_p->flags.mmap) {
-                fd = open(entry_p->rar_p, O_RDONLY);
-                if (fd == -1) {
-                        perror("open");
-                        goto error;
-                }
-
-                if (entry_p->flags.mmap == 2) {
-#ifdef HAVE_FMEMOPEN
-                        maddr = extract_to(entry_p->file_p, entry_p->msize,
-                                                entry_p, E_TO_MEM);
-                        if (maddr != MAP_FAILED) {
-                                fp = fmemopen(maddr, entry_p->msize, "r");
-                                if (fp == NULL) {
-                                        perror("fmemopen");
-                                        goto error;
-                                }
-                        }
-#else
-                        fp = extract_to(entry_p->file_p, entry_p->msize,
-                                                entry_p, E_TO_TMP);
-                        if (fp == MAP_FAILED) {
-                                printd(1, "Extract to tmpfile failed\n");
-                                goto error;
-                        }
-#endif
-                } else {
-#if defined ( HAVE_FMEMOPEN ) && defined ( HAVE_MMAP )
-                        maddr = mmap(0, P_ALIGN_(entry_p->msize), PROT_READ,
-                                                MAP_SHARED, fd, 0);
-                        if (maddr != MAP_FAILED) {
-                                fp = fmemopen(maddr + entry_p->offset,
-                                                        entry_p->msize -
-                                                        entry_p->offset, "r");
-                                if (fp == NULL) {
-                                        perror("fmemopen");
-                                        goto error;
-                                }
-                        } else {
-                                perror("mmap");
-                                goto error;
-                        }
-#else
-                        fp = fopen(entry_p->rar_p, "r");
-                        if (fp)
-                                fseeko(fp, entry_p->offset, SEEK_SET);
-                        else
-                                goto error;
-#endif
-                }
-
-                *mmap_addr = maddr;
-                *mmap_fp = fp;
-                *mmap_fd = fd;
-        }
 
         pid_t pid;
         if (pipe(pfd) == -1) {
@@ -797,10 +638,8 @@ static FILE *popen_(const struct filecache_entry *entry_p, pid_t *cpid, void **m
                 setpgid(getpid(), 0);
                 close(pfd[0]);  /* Close unused read end */
                 ret = extract_rar(entry_p->rar_p,
-                                  entry_p->flags.mmap
-                                        ? entry_p->file2_p
-                                        : entry_p->file_p,
-                                  fp, (void *)(uintptr_t) pfd[1]);
+                                  entry_p->file_p,
+                                  (void *)(uintptr_t) pfd[1]);
                 close(pfd[1]);
                 _exit(ret);
         } else if (pid < 0) {
@@ -814,16 +653,6 @@ static FILE *popen_(const struct filecache_entry *entry_p, pid_t *cpid, void **m
         return fdopen(pfd[0], "r");
 
 error:
-        if (maddr != MAP_FAILED) {
-#ifdef HAVE_MMAP
-                if (entry_p->flags.mmap == 1)
-                        munmap(maddr, P_ALIGN_(entry_p->msize));
-                else
-#endif
-                        free(maddr);
-        }
-        if (fp)
-                fclose(fp);
         if (fd >= 0)
                 close(fd);
         if (pfd[0] >= 0)
@@ -1993,7 +1822,7 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
  *****************************************************************************
  *
  ****************************************************************************/
-static int extract_rar(char *arch, const char *file, FILE *fp, void *arg)
+static int extract_rar(char *arch, const char *file, void *arg)
 {
         int ret = 0;
         struct RAROpenArchiveDataEx d;
@@ -2008,9 +1837,7 @@ static int extract_rar(char *arch, const char *file, FILE *fp, void *arg)
         d.Callback = extract_callback;
         d.UserData = (LPARAM)&cb_arg;
         struct RARHeaderDataEx header;
-        HANDLE hdl = fp
-                ? RARInitArchiveEx(&d, INIT_FP_ARG_(fp))
-                : RAROpenArchiveEx(&d);
+        HANDLE hdl = RAROpenArchiveEx(&d);
         if (d.OpenResult)
                 goto extract_error;
 
@@ -2030,12 +1857,8 @@ static int extract_rar(char *arch, const char *file, FILE *fp, void *arg)
 
 extract_error:
 
-        if (hdl) {
-                if (!fp)
-                        RARCloseArchive(hdl);
-                else
-                        RARFreeArchive(hdl);
-        }
+        if (hdl) 
+                RARCloseArchive(hdl);
 
         return ret;
 }
@@ -2210,262 +2033,6 @@ static struct filecache_entry *lookup_filecopy(const char *path,
                 free(tmp);
         }
         return e_p;
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-static void resolve_filecopy(RARArchiveListEx *next, RARArchiveListEx *root)
-
-{
-        char *tmp = malloc(sizeof(next->LinkTarget));
-        if (tmp) {
-                if (wide_to_char(tmp, next->LinkTargetW,
-                                        sizeof(next->LinkTarget)) != (size_t)-1) {
-                        DOS_TO_UNIX_PATH(tmp);
-                        RARArchiveListEx *next2 = root;
-                        while (next2) {
-                                if (!strcmp(next2->hdr.FileName, tmp)) {
-                                        memcpy(&next->hdr, &next2->hdr, sizeof(struct RARHeaderDataEx));
-                                        next->HeadSize = next2->HeadSize;
-                                        next->Offset = next2->Offset;
-                                        next->FileDataEnd = next2->FileDataEnd;
-                                        break;
-                                }
-                                next2 = next2->next;
-                        }
-                }
-                free(tmp);
-        }
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-static int listrar_rar(const char *path, struct dir_entry_list **buffer,
-                const char *arch, HANDLE hdl, const RARArchiveListEx *next,
-                const struct filecache_entry *entry_p, unsigned int mh_flags,
-                char *mp)
-{
-        printd(3, "%llu byte RAR file %s found in archive %s\n",
-                GET_RAR_PACK_SZ(&next->hdr), mp, arch);
-
-        int result = 1;
-        RAROpenArchiveDataEx d2;
-        memset(&d2, 0, sizeof(RAROpenArchiveDataEx));
-        d2.ArcName = mp;
-        d2.OpenMode = RAR_OM_LIST;
-
-        HANDLE hdl2 = NULL;
-        FILE *fp = NULL;
-        char *maddr = MAP_FAILED;
-        off_t msize = 0;
-        int mflags = 0;
-
-        if (next->hdr.Method == FHD_STORING &&
-                        !(mh_flags & (MHD_PASSWORD | MHD_VOLUME))) {
-                struct stat st;
-                int fd = fileno(RARGetFileHandle(hdl));
-                if (fd == -1)
-                        goto file_error;
-                (void)fstat(fd, &st);
-#if defined ( HAVE_FMEMOPEN ) && defined ( HAVE_MMAP )
-                if (!IS_BLKDEV() || BLKDEV_SIZE()) {
-                        msize = IS_BLKDEV() ? BLKDEV_SIZE() : st.st_size;
-                        maddr = mmap(0, P_ALIGN_(msize), PROT_READ,
-                                                MAP_SHARED, fd, 0);
-                        if (maddr != MAP_FAILED)
-                                fp = fmemopen(maddr + (next->Offset + next->HeadSize),
-                                                GET_RAR_PACK_SZ(&next->hdr), "r");
-                } else {
-#endif
-                        msize = st.st_size;
-                        fp = fopen(entry_p->rar_p, "r");
-                        if (fp)
-                                fseeko(fp, next->Offset + next->HeadSize,
-                                                        SEEK_SET);
-#if defined ( HAVE_FMEMOPEN ) && defined ( HAVE_MMAP )
-                }
-#endif
-                mflags = 1;
-        } else {
-#ifdef HAVE_FMEMOPEN
-                maddr = extract_to(next->hdr.FileName, GET_RAR_SZ(&next->hdr),
-                                                        entry_p, E_TO_MEM);
-                if (maddr != MAP_FAILED)
-                        fp = fmemopen(maddr, GET_RAR_SZ(&next->hdr), "r");
-#else
-                fp = extract_to(next->hdr.FileName, GET_RAR_SZ(&next->hdr),
-                                                        entry_p, E_TO_TMP);
-                if (fp == MAP_FAILED) {
-                        fp = NULL;
-                        printd(1, "Extract to tmpfile failed\n");
-                }
-#endif
-                msize = GET_RAR_SZ(&next->hdr);
-                mflags = 2;
-        }
-
-        if (fp) {
-#ifndef HAVE_MMAP
-                hdl2 = RARInitArchiveEx(&d2, fp, 1);
-#else
-                hdl2 = IS_BLKDEV() && !BLKDEV_SIZE()
-                        ? RARInitArchiveEx(&d2, fp, 1)
-                        : RARInitArchiveEx(&d2, INIT_FP_ARG_(fp));
-#endif
-        }
-        if (!fp || d2.OpenResult || (d2.Flags & MHD_VOLUME))
-                goto file_error;
-
-        int dll_result;
-        RARArchiveListEx LL;
-        RARArchiveListEx *next2 = &LL;
-        if (!RARListArchiveEx(hdl2, next2, &dll_result))
-                goto file_error;
-
-        char *tmp1 = strdup(mp);
-        char *rar_root = dirname(tmp1);
-        size_t rar_root_len = strlen(rar_root);
-        size_t path_len = strlen(path);
-        int is_root_path = !strcmp(rar_root, path);
-
-        while (next2) {
-                struct filecache_entry *entry2_p;
-                DOS_TO_UNIX_PATH(next2->hdr.FileName);
-
-                printd(3, "File inside archive is %s\n", next2->hdr.FileName);
-
-                /* Skip compressed image files */
-                if (!OPT_SET(OPT_KEY_SHOW_COMP_IMG) &&
-                                next2->hdr.Method != FHD_STORING &&
-                                IS_IMG(next2->hdr.FileName)) {
-                        next2 = next2->next;
-                        continue;
-                }
-
-                int display = 0;
-                char *rar_file;
-                ABS_MP(rar_file, rar_root, next2->hdr.FileName);
-                char *tmp2 = strdup(next2->hdr.FileName);
-                char *rar_name = dirname(tmp2);
-
-                if (is_root_path) {
-                        if (!CHRCMP(rar_name, '.'))
-                                display = 1;
-
-                        /*
-                         * Handle the rare case when the parent folder does not have
-                         * its own entry in the file header. The entry needs to be
-                         * faked by adding it to the cache. If the parent folder is
-                         * discovered later in the header the faked entry will be
-                         * invalidated and replaced with the real stats.
-                         */
-                        if (!display) {
-                                char *safe_path = strdup(rar_name);
-                                if (!strcmp(basename(safe_path), rar_name)) {
-                                        char *mp;
-                                        ABS_MP(mp, path, rar_name);
-                                        entry2_p = filecache_get(mp);
-                                        if (entry2_p == NULL) {
-                                                printd(3, "Adding %s to cache\n", mp);
-                                                entry2_p = filecache_alloc(mp);
-                                                entry2_p->rar_p = strdup(arch);
-                                                entry2_p->file_p = strdup(next->hdr.FileName);
-                                                entry2_p->file2_p = strdup(rar_name);
-                                                entry2_p->flags.force_dir = 1;
-                                                entry2_p->flags.mmap = mflags;
-                                                entry2_p->msize = msize;
-                                                set_rarstats(entry2_p, next2, 1);
-                                        }
-                                        if (buffer) {
-                                                *buffer = dir_entry_add(
-                                                        *buffer, rar_name,
-                                                        &entry2_p->stat,
-                                                        DIR_E_RAR);
-                                        }
-                                }
-                                free(safe_path);
-                        }
-                } else {
-                        if (rar_root_len < path_len)
-                                if (!strcmp(path + rar_root_len + 1, rar_name))
-                                        display = 1;
-                }
-
-                printd(3, "Looking up %s in cache\n", rar_file);
-                entry2_p = filecache_get(rar_file);
-                if (entry2_p)  {
-                        /*
-                         * Check if this was a forced/fake entry. In that
-                         * case update it with proper stats.
-                         */
-                        if (entry2_p->flags.force_dir) {
-                                set_rarstats(entry2_p, next2, 0);
-                                entry2_p->flags.force_dir = 0;
-                        }
-                        goto cache_hit;
-                }
-
-                /* Allocate a cache entry for this file */
-                printd(3, "Adding %s to cache\n", rar_file);
-                entry2_p = filecache_alloc(rar_file);
-
-                if (next2->LinkTargetFlags & LINK_T_FILECOPY) {
-                        struct filecache_entry *e_p;
-                        e_p = lookup_filecopy(path, next2, rar_root, 0);
-                        if (e_p) {
-                                filecache_copy(e_p, entry2_p);
-                                /* Preserve stats of original file */
-                                set_rarstats(entry2_p, next2, 0);
-                                goto cache_hit;
-                        }
-                }
-                entry2_p->rar_p = strdup(arch);
-                entry2_p->file_p = strdup(next->hdr.FileName);
-                entry2_p->file2_p = strdup(next2->hdr.FileName);
-                entry2_p->offset = (next->Offset + next->HeadSize);
-                entry2_p->flags.mmap = mflags;
-                entry2_p->msize = msize;
-                entry2_p->method = next2->hdr.Method;
-                entry2_p->flags.multipart = 0;
-                entry2_p->flags.raw = 0;        /* no raw support yet */
-                entry2_p->flags.save_eof = 0;
-                set_rarstats(entry2_p, next2, 0);
-
-cache_hit:
-
-                if (display && buffer) {
-                        char *safe_path = strdup(next2->hdr.FileName);
-                        *buffer = dir_entry_add(
-                                        *buffer, basename(safe_path),
-                                        &entry2_p->stat,
-                                        DIR_E_RAR);
-                        free(safe_path);
-                }
-                free(tmp2);
-                next2 = next2->next;
-        }
-        RARFreeListEx(&LL);
-        free(tmp1);
-        result = 0;
-
-file_error:
-        if (hdl2)
-                RARFreeArchive(hdl2);
-        if (fp)
-                fclose(fp);
-        if (maddr != MAP_FAILED) {
-#ifdef HAVE_MMAP
-                if (mflags == 1)
-                        munmap(maddr, P_ALIGN_(msize));
-                else
-#endif
-                        free(maddr);
-        }
-        return result;
 }
 
 /*!
@@ -2750,22 +2317,6 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 entry_p->file_p = strdup(next->hdr.FileName);
                 entry_p->flags.vsize_resolved = 1; /* Assume sizes will be resolved */
                 entry_p->flags.unresolved = 1;
-
-                /* Check for .rar file inside archive */
-                if (!OPT_SET(OPT_KEY_FLAT_ONLY) && IS_RAR(mp)
-                                        && !IS_RAR_DIR(&next->hdr)) {
-                        /* Only process files split across multiple volumes once */
-                        int inval = (d.Flags & MHD_VOLUME) &&
-                                        (next->hdr.Flags & LHD_SPLIT_BEFORE);
-                        if (!inval && next->LinkTargetFlags & LINK_T_FILECOPY)
-                                resolve_filecopy(next, &L);
-                        if (inval || !listrar_rar(path, buffer, arch, hdl, next, entry_p, d.Flags, mp)) {
-                                /* We are done with this rar file (.rar will never display!) */
-                                filecache_invalidate(mp);
-                                next = next->next;
-                                continue;
-                        }
-                }
 
                 if (next->LinkTargetFlags & LINK_T_FILECOPY) {
                         struct filecache_entry *e_p;
@@ -3933,73 +3484,9 @@ static int extract_rar_file_info(struct filecache_entry *entry_p, struct RARWcb 
                 return 0;
         }
 
-        FILE *fp = NULL;
-        char *maddr = MAP_FAILED;
-        HANDLE hdl2 = NULL;
-
-        if (entry_p->flags.mmap) {
-                if (entry_p->flags.mmap == 1) {
-                        int fd = fileno(RARGetFileHandle(hdl));
-                        if (fd == -1)
-                                goto file_error;
-#if defined ( HAVE_FMEMOPEN ) && defined ( HAVE_MMAP )
-                        maddr = mmap(0, P_ALIGN_(entry_p->msize), PROT_READ,
-                                                MAP_SHARED, fd, 0);
-                        if (maddr != MAP_FAILED)
-                                fp = fmemopen(maddr + entry_p->offset,
-                                        (entry_p->msize - entry_p->offset), "r");
-#else
-                        fp = fopen(entry_p->rar_p, "r");
-                        if (fp)
-                                fseeko(fp, entry_p->offset, SEEK_SET);
-#endif
-                } else {
-#ifdef HAVE_FMEMOPEN
-                        maddr = extract_to(entry_p->file_p, entry_p->msize,
-                                                entry_p, E_TO_MEM);
-                        if (maddr != MAP_FAILED)
-                                fp = fmemopen(maddr, entry_p->msize, "r");
-#else
-                        fp = extract_to(entry_p->file_p, entry_p->msize,
-                                                entry_p, E_TO_TMP);
-                        if (fp == MAP_FAILED) {
-                                fp = NULL;
-                                printd(1, "Extract to tmpfile failed\n");
-                        }
-#endif
-                }
-                if (fp) {
-                        RAROpenArchiveDataEx d2;
-                        memset(&d2, 0, sizeof(RAROpenArchiveDataEx));
-                        d2.ArcName = NULL;
-                        d2.OpenMode = RAR_OM_LIST;
-                        d2.Callback = list_callback;
-                        d2.UserData = (LPARAM)entry_p->rar_p;
-
-                        hdl2 = RARInitArchiveEx(&d2, INIT_FP_ARG_(fp));
-                        if (d2.OpenResult || (d2.Flags & MHD_VOLUME))
-                                goto file_error;
-                        RARGetFileInfo(hdl2, entry_p->file2_p, wcb);
-                }
-        } else {
-                RARGetFileInfo(hdl, entry_p->file_p, wcb);
-        }
-
-file_error:
-
-        if (fp)
-                fclose(fp);
-        if (maddr != MAP_FAILED) {
-#ifdef HAVE_MMAP
-                if (entry_p->flags.mmap == 1)
-                        munmap(maddr, P_ALIGN_(entry_p->msize));
-                else
-#endif
-                        free(maddr);
-        }
+        RARGetFileInfo(hdl, entry_p->file_p, wcb);
         RARCloseArchive(hdl);
-        if (hdl2)
-                RARFreeArchive(hdl2);
+
         return 0;
 }
 
@@ -4198,10 +3685,6 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                         goto open_error;
                 }
 
-                void *mmap_addr = NULL;
-                FILE *mmap_fp = NULL;
-                int mmap_fd = 0;
-
                 buf = malloc(P_ALIGN_(sizeof(struct io_buf) + IOB_SZ));
                 if (!buf)
                         goto open_error;
@@ -4215,7 +3698,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                 op->entry_p = NULL;
 
                 /* Open PIPE(s) and create child process */
-                fp = popen_(entry_p, &pid, &mmap_addr, &mmap_fp, &mmap_fd);
+                fp = popen_(entry_p, &pid);
                 if (fp != NULL) {
                         FH_SETIO(fi->fh, io);
                         FH_SETTYPE(fi->fh, IO_TYPE_RAR);
@@ -4268,9 +3751,6 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                         entry_p->flags.avi_tested = 0;
                                 }
                         }
-                        op->mmap_addr = mmap_addr;
-                        op->mmap_fp = mmap_fp;
-                        op->mmap_fd = mmap_fd;
 
                         if (entry_p->flags.save_eof && !entry_p->flags.avi_tested) {
                                 if (check_avi_type(op))
@@ -4374,16 +3854,6 @@ static void *rar2_init(struct fuse_conn_info *conn)
         dircache_init();
         iobuffer_init();
         sighandler_init();
-
-#ifdef HAVE_FMEMOPEN
-        /* Check fmemopen() support */
-        {
-                char tmp[64];
-                glibc_test = 1;
-                fclose(fmemopen(tmp, 64, "r"));
-                glibc_test = 0;
-        }
-#endif
 
         return NULL;
 }
@@ -4527,18 +3997,6 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
 #ifdef DEBUG_READ
                                 fclose(op->dbg_fp);
 #endif
-                                if (op->entry_p->flags.mmap) {
-                                        fclose(op->mmap_fp);
-                                        if (op->mmap_addr != MAP_FAILED) {
-#ifdef HAVE_MMAP
-                                                if (op->entry_p->flags.mmap == 1)
-                                                        munmap(op->mmap_addr, P_ALIGN_(op->entry_p->msize));
-                                                else
-#endif
-                                                        free(op->mmap_addr);
-                                        }
-                                        close(op->mmap_fd);
-                                }
                         }
                 }
                 printd(3, "(%05d) %s [0x%-16" PRIx64 "]\n", getpid(), "FREE", fi->fh);
@@ -5500,7 +4958,6 @@ static void print_help()
         printf("    --fake-iso[=E1[;E2...]] fake .iso extension for specified image file types\n");
         printf("    --exclude=F1[;F2...]    exclude file filter\n");
         printf("    --seek-length=n\t    set number of volume files that are traversed in search for headers [0=All]\n");
-        printf("    --flat-only\t\t    only expand first level of nested RAR archives\n");
 #ifndef USE_STATIC_IOB_
         printf("    --iob-size=n\t    I/O buffer size in 'power of 2' MiB (1,2,4,8, etc.) [4]\n");
         printf("    --hist-size=n\t    I/O buffer history size as a percentage (0-75) of total buffer size [50]\n");
@@ -5537,11 +4994,6 @@ static struct option longopts[] = {
         {"fake-iso",    optional_argument, NULL, OPT_ADDR(OPT_KEY_FAKE_ISO)},
         {"exclude",     required_argument, NULL, OPT_ADDR(OPT_KEY_EXCLUDE)},
         {"seek-length", required_argument, NULL, OPT_ADDR(OPT_KEY_SEEK_LENGTH)},
-        /*
-         * --seek-depth=n is obsolete and replaced by --flat-only
-         * Provided here only for backwards compatibility.
-         */
-        {"seek-depth",  required_argument, NULL, OPT_ADDR(OPT_KEY_SEEK_DEPTH)},
 #if defined ( HAVE_SCHED_SETAFFINITY ) && defined ( HAVE_CPU_SET_T )
         {"no-smp",            no_argument, NULL, OPT_ADDR(OPT_KEY_NO_SMP)},
 #endif
@@ -5553,7 +5005,6 @@ static struct option longopts[] = {
 #endif
         {"save-eof",          no_argument, NULL, OPT_ADDR(OPT_KEY_SAVE_EOF)},
         {"no-expand-cbr",     no_argument, NULL, OPT_ADDR(OPT_KEY_NO_EXPAND_CBR)},
-        {"flat-only",         no_argument, NULL, OPT_ADDR(OPT_KEY_FLAT_ONLY)},
         {"relatime",          no_argument, NULL, OPT_ADDR(OPT_KEY_ATIME)},
 #if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
         {"relatime-rar",      no_argument, NULL, OPT_ADDR(OPT_KEY_ATIME_RAR)},
