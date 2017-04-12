@@ -25,7 +25,11 @@ as the main archive/volume file but with a
 .I .pwd
 extension. It may also be prefixed with a dot
 .B '.'
-character to hide it from simple list operations in traditional UNIX style. The latter variant has less precedence than the former. Be aware that a password must be stored in plaintext format and is thus not protected in any way from unauthorized access.
+character to hide it from simple list operations in traditional UNIX style. The latter variant has less precedence than the former.
+It is also possible to specify a password per archive using the
+.I .rarconfig
+file described below.
+Be aware that a password must be stored in plaintext format and is thus not protected in any way from unauthorized access.
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
@@ -88,7 +92,10 @@ set number of volume files that are traversed in search for headers [0=All]
 .br
 
 Normally the RAR specific header(s) describing the files contained in a volume is located in the first volume file. Providing a value of 1 here should thus be sufficient to cover most cases. The default is 0, meaning that the complete set of volumes files are searched for headers.
-The lower the value (starting from 1) the faster the display of folders containing a lot of RAR volumes (or volumes with a lot of files) will become since the number of open/search/close requests can be reduced.
+The lower the value (starting from 1) the faster the display of folders containing a lot of RAR volumes (or volumes with a lot of files) will become since the number of open/search/close requests can be reduced but with less chance that all files are found and displayed.
+It is also possible to specify the seek length per archive using the
+.I .rarconfig
+file described below. This adds the possibility to find all files without any significant performance loss.
 .TP
 .B --exclude="<file>[;<file>;...]"
 .TP
@@ -137,6 +144,10 @@ tool directly. Start of playback will also be delayed since almost the entire ar
 
 This option is only supported for AVI 1.0 and multi-part OpenDML (AVI 2.0) files created by a properly configured muxer. Badly configured muxers will expose themselves by generating invalid frame counts. The latter is automatically detected by
 .BR rar2fs .
+
+It is also possible to enable/disable this option per archive using the
+.I .rarconfig
+file described below.
 .TP
 .B --no-lib-check
 disable dynamic library consistency check
@@ -197,6 +208,16 @@ which effectively means that both these options does not need to be specified. U
 makes sense only if updates of the source RAR files are not wanted for some reason. There is a slight overhead inflicted by using
 .I --relatime-rar
 since in the case of large RAR volume archives a lot of files will need a new timestamp. The access time is updated only at first read access after a file was opened which means overhead should be almost negligible.
+.TP
+.B --config=file
+specify per archive configuration file
+
+Use this file instead of the default
+.I .rarconfig
+that should be placed directly under the source folder.
+Refer to
+.I rarconfig.example
+for an explanation of syntax and details on how this feature can be used.
 .br
 .SH "SEE ALSO"
 .br

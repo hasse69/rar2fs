@@ -34,6 +34,7 @@
 #include "debug.h"
 
 extern void __handle_sigusr1();
+extern void __handle_sighup();
 
 #ifdef HAVE_STRUCT_SIGACTION_SA_SIGACTION
 #if !defined ( HAVE_EXECINFO_H ) || !defined ( HAVE_UCONTEXT_H )
@@ -118,6 +119,11 @@ static RETSIGTYPE sig_handler(int signum)
                 printd(4, "Caught signal SIGUSR1\n");
                 __handle_sigusr1();
                 break;
+        case SIGHUP:
+                printd(4, "Caught signal SIGHUP\n");
+                __handle_sigusr1();
+                __handle_sighup();
+                break;
         case SIGSEGV:
                 if (!glibc_test) {
                         printd(4, "Caught signal SIGSEGV\n");
@@ -173,6 +179,7 @@ void sighandler_init()
         /* make sure a system call is restarted to avoid exit */
         act.sa_flags |= SA_RESTART;
         sigaction(SIGUSR1, &act, NULL);
+        sigaction(SIGHUP, &act, NULL);
 
         sigaction(SIGSEGV, NULL, &act);
         sigemptyset(&act.sa_mask);

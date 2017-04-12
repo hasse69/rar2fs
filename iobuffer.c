@@ -151,7 +151,7 @@ size_t copyFrom(char *dest, struct io_buf *src, size_t size, size_t pos)
  ****************************************************************************/
 void iobuffer_init()
 {
-        int bsz = OPT_INT(OPT_KEY_BUF_SIZE,0);
+        int bsz = OPT_INT(OPT_KEY_BUF_SIZE, 0);
         iob_sz = bsz ? (bsz * 1024 * 1024) : IOB_SZ_DEFAULT;
         int hsz = OPT_SET(OPT_KEY_HIST_SIZE) ? OPT_INT(OPT_KEY_HIST_SIZE, 0) : 50;
         iob_hist_sz = IOB_SZ * (hsz / 100.0);

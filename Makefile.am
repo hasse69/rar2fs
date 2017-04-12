@@ -1,11 +1,11 @@
 ACLOCAL_AMFLAGS = -I m4
-AM_CFLAGS = -Wall 
+AM_CFLAGS = -Wall -fno-stack-protector
 AM_CXXFLAGS = $(UNRAR_CXXFLAGS) -Wall -Wno-reorder
 AM_CPPFLAGS = $(UNRAR_CPPFLAGS) $(FUSE_CPPFLAGS)
 bin_PROGRAMS = rar2fs mkr2i
 dist_man_MANS = rar2fs.1
 
-EXTRA_DIST = get-version.sh
+EXTRA_DIST = get-version.sh rarconfig.example
 
 rar2fs_SOURCES = 		dllext.cpp \
 				optdb.c \
@@ -15,6 +15,7 @@ rar2fs_SOURCES = 		dllext.cpp \
 				hashtable.c \
 				dircache.c \
 				dirlist.c \
+				rarconfig.c \
 				rar2fs.c \
 				compat.h \
 				optdb.h \
@@ -25,6 +26,7 @@ rar2fs_SOURCES = 		dllext.cpp \
 				sighandler.h \
                                 hashtable.h \
                                 dircache.h \
+                                rarconfig.h \
 				debug.h \
 				dllwrapper.h \
 				index.h \

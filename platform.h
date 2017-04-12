@@ -136,6 +136,10 @@ typedef bool _Bool;
 # define MAP_FAILED      ((void *) -1)
 #endif
 
+#if !defined __GNUC__
+# define __attribute__(x)
+#endif
+
 #endif
 
 

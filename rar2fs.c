@@ -73,15 +73,10 @@
 #include "optdb.h"
 #include "sighandler.h"
 #include "dirlist.h"
-
-#define E_TO_MEM 0
-#define E_TO_TMP 1
+#include "rarconfig.h"
 
 #define MOUNT_FOLDER  0
 #define MOUNT_ARCHIVE 1
-
-#define SYNCDIR_NO_FORCE 0
-#define SYNCDIR_FORCE 1
 
 #define RD_IDLE 0
 #define RD_WAKEUP 1
@@ -208,6 +203,103 @@ static const char *file_cmd[] = {
 };
 #endif
 
+#define IS_UNIX_MODE_(l) \
+        ((l)->UnpVer >= 50 \
+                ? (l)->HostOS == HOST_UNIX \
+                : (l)->HostOS == HOST_UNIX || (l)->HostOS == HOST_BEOS)
+#define IS_RAR_DIR(l) \
+        ((l)->UnpVer >= 20 \
+                ? (((l)->Flags&LHD_DIRECTORY)==LHD_DIRECTORY) \
+                : (IS_UNIX_MODE_(l) \
+                        ? (l)->FileAttr & S_IFDIR \
+                        : (l)->FileAttr & 0x10))
+#define GET_RAR_MODE(l) \
+                (IS_UNIX_MODE_(l) \
+                        ? (l)->FileAttr \
+                        : IS_RAR_DIR(l) \
+                                ? (S_IFDIR|(0777&~umask_)) \
+                                : (S_IFREG|(0666&~umask_)))
+#define GET_RAR_SZ(l) \
+        (IS_RAR_DIR(l) ? 4096 : (((l)->UnpSizeHigh * 0x100000000ULL) | \
+                (l)->UnpSize))
+#define GET_RAR_PACK_SZ(l) \
+        (IS_RAR_DIR(l) ? 4096 : (((l)->PackSizeHigh * 0x100000000ULL) | \
+                (l)->PackSize))
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int get_save_eof(char *rar)
+{
+        if (rar) {
+                char *s = OPT_STR(OPT_KEY_SRC, 0);
+                int save_eof;
+
+                if (strstr(rar, s))
+                        rar += strlen(s);
+                save_eof = rarconfig_getprop(int, rar, RAR_SAVE_EOF_PROP);
+                if (save_eof >= 0)
+                        return save_eof;
+                save_eof = rarconfig_getprop(int, basename(rar),
+                                        RAR_SAVE_EOF_PROP);
+                if (save_eof >= 0)
+                        return save_eof;
+        }
+        return OPT_SET(OPT_KEY_SAVE_EOF) ? 1 : 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static const char *get_alias(const char *rar, const char *file)
+{
+        if (rar) {
+                char *file_abs;
+                char *rar_safe;
+                char *s = OPT_STR(OPT_KEY_SRC, 0);
+                const char *alias;
+
+                ABS_MP(file_abs, "/", file);
+
+                if (strstr(rar, s))
+                        rar += strlen(s);
+                alias = rarconfig_getalias(rar, file_abs);
+                if (alias)
+                        return alias + 1;
+                rar_safe = strdup(rar);
+                alias = rarconfig_getalias(basename(rar_safe), file_abs);
+                free(rar_safe);
+                if (alias)
+                        return alias + 1;
+        }
+        return file;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int get_seek_length(char *rar)
+{
+        if (rar) {
+                char *s = OPT_STR(OPT_KEY_SRC, 0);
+                int seek_len;
+
+                if (strstr(rar, s))
+                        rar += strlen(s);
+                seek_len = rarconfig_getprop(int, rar, RAR_SEEK_LENGTH_PROP);
+                if (seek_len >= 0)
+                        return seek_len;
+                seek_len = rarconfig_getprop(int, basename(rar),
+                                        RAR_SEEK_LENGTH_PROP);
+                if (seek_len >= 0)
+                        return seek_len;
+        }
+        return OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
+}
+
 /*!
  *****************************************************************************
  *
@@ -235,6 +327,20 @@ void __handle_sigusr1()
         pthread_mutex_lock(&dir_access_mutex);
         dircache_invalidate(NULL);
         pthread_mutex_unlock(&dir_access_mutex);
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+__attribute__((visibility("hidden")))
+void __handle_sighup()
+{
+        if (mount_type == MOUNT_FOLDER) {
+                rarconfig_destroy();
+                rarconfig_init(OPT_STR(OPT_KEY_SRC, 0),
+                               OPT_STR(OPT_KEY_CONFIG, 0));
+        }
 }
 
 /*!
@@ -317,73 +423,113 @@ static inline int is_nnn_vol(const char *name)
  *
  ****************************************************************************/
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
+#define prop_type_ wchar
+#define prop_alloc_type_ wchar_t
+#define prop_memcpy_ wmemcpy
 static wchar_t *get_password(const char *file, wchar_t *buf, size_t len)
 #else
+#define prop_type_ char
+#define prop_alloc_type_ char
+#define prop_memcpy_ memcpy
 static char *get_password(const char *file, char *buf, size_t len)
 #endif
 {
-        if (file) {
-                char *f[2] = {NULL, NULL};
-                int l[2] = {0, 0};
-                int i;
-                int lx;
+        char *f[2] = {NULL, NULL};
+        int l[2] = {0, 0};
+        int i;
+        int lx;
+        char *rar;
+        char *tmp;
+        char *s;
+        const prop_alloc_type_ *password;
 
-                /* In case this is a new-style volume we must try to figure
-                 * out the file format. */
-                (void)get_vformat(file, 1, NULL, &l[0]);
-                lx = l[0];
-                while (lx && file[lx] != '.') --lx;
-                if (lx) {
-                        l[0] = lx;
-                        f[0] = strdup(file);
-                }
-                /* In case this is an old-style volume, or even not a volume at
-                 * all, simply placing the index behind .rar or .rNN should be
-                 * enough to locate the password file. */
-                lx = strlen(file);
-                if (lx > 4) {
-                        l[1] = lx - 4;
-                        f[1] = strdup(file);
-                }
-                for (i = 0; i < 2; i++) {
-                        if (f[i]) {
-                                char *F = f[i];
-                                strcpy(F + l[i], ".pwd");
-                                FILE *fp = fopen(F, "r");
-                                if (!fp) {
-                                        char *tmp1 = strdup(F);
-                                        char *tmp2 = strdup(F);
-                                        F = malloc(strlen(file) + 8);
-                                        sprintf(F, "%s%s%s", dirname(tmp1),
-                                                        "/.", basename(tmp2));
-                                        free(tmp1);
-                                        free(tmp2);
-                                        fp = fopen(F, "r");
-                                        free(F);
-                                }
-                                if (fp) {
+        if (!file)
+                return NULL;
+
+        rar = strdup(file);
+        tmp = rar;
+        s = OPT_STR(OPT_KEY_SRC, 0);
+
+        if (strstr(rar, s))
+                rar += strlen(s);
+        password = rarconfig_getprop(prop_type_, rar,
+                                RAR_PASSWORD_PROP);
+        if (password) {
+                prop_memcpy_(buf, password, len);
+                free(tmp);
+                return buf;
+        }
+        password = rarconfig_getprop(prop_type_, basename(rar),
+                                RAR_PASSWORD_PROP);
+        if (password) {
+                prop_memcpy_(buf, password, len);
+                free(tmp);
+                return buf;
+        }
+        free(tmp);
+
+        /* In case this is a new-style volume we must try to figure
+         * out the file format. */
+        (void)get_vformat(file, 1, NULL, &l[0]);
+        lx = l[0];
+
+        while (lx && file[lx] != '.') --lx;
+        if (lx) {
+                l[0] = lx;
+                f[0] = strdup(file);
+        }
+        /* In case this is an old-style volume, or even not a volume at
+         * all, simply placing the index behind .rar or .rNN should be
+         * enough to locate the password file. */
+        lx = strlen(file);
+        if (lx > 4) {
+                l[1] = lx - 4;
+                f[1] = strdup(file);
+        }
+        for (i = 0; i < 2; i++) {
+                if (f[i]) {
+                        char *F = f[i];
+                        strcpy(F + l[i], ".pwd");
+                        FILE *fp = fopen(F, "r");
+                        if (!fp) {
+                                char *tmp1 = strdup(F);
+                                char *tmp2 = strdup(F);
+                                F = malloc(strlen(file) + 8);
+                                sprintf(F, "%s%s%s", dirname(tmp1),
+                                                "/.", basename(tmp2));
+                                free(tmp1);
+                                free(tmp2);
+                                fp = fopen(F, "r");
+                                free(F);
+                        }
+                        if (fp) {
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
-                                        buf = fgetws(buf, len, fp);
-                                        if (buf) {
-                                                wchar_t *eol = wcspbrk(buf, L"\r\n");
-                                                if (eol != NULL)
-                                                        *eol = 0;
-                                        }
-#else
-                                        buf = fgets(buf, len, fp);
-#endif
-                                        fclose(fp);
-                                        free(f[0]);
-                                        free(f[1]);
-                                        return buf;
+                                buf = fgetws(buf, len, fp);
+                                if (buf) {
+                                        wchar_t *eol = wcspbrk(buf, L"\r\n");
+                                        if (eol != NULL)
+                                                *eol = 0;
                                 }
+#else
+                                buf = fgets(buf, len, fp);
+#endif
+                                fclose(fp);
+                                free(f[0]);
+                                free(f[1]);
+                                return buf;
                         }
                 }
-                free(f[0]);
-                free(f[1]);
         }
+
+        free(f[0]);
+        free(f[1]);
+
         return NULL;
 }
+
+#undef prop_type_
+#undef prop_alloc_type_
+#undef prop_memcpy_
 
 /*!
  *****************************************************************************
@@ -865,7 +1011,7 @@ static int RARVolNameToFirstName_BUGGED(char *s, int vtype)
         if (get_vformat(s, !vtype, &len, &pos) == 1) {
                 char *s_copy = strdup(s);
                 while (--len >= 0)
-                        s_copy[pos+len] = '0';
+                        s_copy[pos + len] = '0';
                 if (!access(s_copy, F_OK))
                         strcpy(s, s_copy);
                 else if (access(s, F_OK)){
@@ -936,7 +1082,6 @@ static void update_atime(const char* path, struct filecache_entry *entry_p,
 #if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
                 tp[1].tv_nsec = UTIME_OMIT;
                 tmp1 = strdup(entry_p->rar_p);
-                RARVolNameToFirstName_BUGGED(tmp1, !entry_p->vtype);
                 char *tmp2 = strdup(tmp1);
                 int res = utimensat(0, dirname(tmp2), tp, AT_SYMLINK_NOFOLLOW);
                 if (!res && OPT_SET(OPT_KEY_ATIME_RAR)) {
@@ -1635,29 +1780,6 @@ out:
         return files;
 }
 
-#define IS_UNIX_MODE_(l) \
-        ((l)->UnpVer >= 50 \
-                ? (l)->HostOS == HOST_UNIX \
-                : (l)->HostOS == HOST_UNIX || (l)->HostOS == HOST_BEOS)
-#define IS_RAR_DIR(l) \
-        ((l)->UnpVer >= 20 \
-                ? (((l)->Flags&LHD_DIRECTORY)==LHD_DIRECTORY) \
-                : (IS_UNIX_MODE_(l) \
-                        ? (l)->FileAttr & S_IFDIR \
-                        : (l)->FileAttr & 0x10))
-#define GET_RAR_MODE(l) \
-                (IS_UNIX_MODE_(l) \
-                        ? (l)->FileAttr \
-                        : IS_RAR_DIR(l) \
-                                ? (S_IFDIR|(0777&~umask_)) \
-                                : (S_IFREG|(0666&~umask_)))
-#define GET_RAR_SZ(l) \
-        (IS_RAR_DIR(l) ? 4096 : (((l)->UnpSizeHigh * 0x100000000ULL) | \
-                (l)->UnpSize))
-#define GET_RAR_PACK_SZ(l) \
-        (IS_RAR_DIR(l) ? 4096 : (((l)->PackSizeHigh * 0x100000000ULL) | \
-                (l)->PackSize))
-
 /*!
  ****************************************************************************
  *
@@ -2131,8 +2253,144 @@ void __add_filler(const char *path, struct dir_entry_list **buffer,
  *****************************************************************************
  *
  ****************************************************************************/
+static void __listrar_incache(struct filecache_entry *entry_p,
+                RARArchiveListEx *next)
+{
+        if (!entry_p->flags.vsize_resolved) {
+              entry_p->vsize_real_next = next->FileDataEnd;
+              /* If GET_RAR_PACK_SZ() returns 0 keep next size as is.
+               * This will prevent a division by zero problem later when file
+               * is accessed. */
+              entry_p->vsize_next = GET_RAR_PACK_SZ(&next->hdr)
+                      ? (off_t)GET_RAR_PACK_SZ(&next->hdr)
+                      : entry_p->vsize_next;
+              entry_p->flags.vsize_resolved = 1;
+              /* Check if we might need to compensate for the 1-byte/2-byte
+               * RAR5 (and later?) volume number in next main archive header. */
+              if (next->hdr.UnpVer >= 50) {
+                       /* If base is last or next to last volume with one extra
+                        * byte in header this and next volume size have already
+                        * been resolved. */
+                      if ((entry_p->vno_base - entry_p->vno_first + 1) < 128) {
+                              if (entry_p->stat.st_size >
+                                            (entry_p->vsize_first +
+                                            (entry_p->vsize_next *
+                                                    (128 - (entry_p->vno_base - entry_p->vno_first + 1)))))
+                                      entry_p->flags.vsize_fixup_needed = 1;
+                      }
+              }
+        }
+        /*
+         * Check if this was a forced/fake entry. In that case update it
+         * with proper stats.
+         */
+        if (entry_p->flags.force_dir) {
+                set_rarstats(entry_p, next, 0);
+                entry_p->flags.force_dir = 0;
+        }
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int __listrar_tocache(struct filecache_entry *entry_p,
+                RARArchiveListEx *next, const char *arch, char *first_arch,
+                RAROpenArchiveDataEx *d)
+{
+        entry_p->rar_p = strdup(first_arch);
+        entry_p->file_p = strdup(next->hdr.FileName);
+        entry_p->flags.vsize_resolved = 1; /* Assume sizes will be resolved */
+        entry_p->flags.unresolved = 1;
+
+        if (next->hdr.Method == FHD_STORING &&
+                        !(next->hdr.Flags & LHD_PASSWORD) &&
+                        !IS_RAR_DIR(&next->hdr)) {
+                entry_p->flags.raw = 1;
+                if ((d->Flags & MHD_VOLUME)) {   /* volume ? */
+                        int len, pos;
+
+                        entry_p->flags.multipart = 1;
+                        entry_p->flags.image = IS_IMG(next->hdr.FileName);
+                        entry_p->vtype = VTYPE(d->Flags);
+                        entry_p->vno_base = get_vformat(arch,
+                                        entry_p->vtype, &len, &pos);
+                        entry_p->vno_first = get_vformat(entry_p->rar_p,
+                                        entry_p->vtype, NULL, NULL);
+                        if (len > 0) {
+                                entry_p->vlen = len;
+                                entry_p->vpos = pos;
+                                if (!IS_RAR_DIR(&next->hdr)) {
+                                        entry_p->vsize_real_first = next->FileDataEnd;
+                                        entry_p->vsize_first = GET_RAR_PACK_SZ(&next->hdr);
+                                        /*
+                                         * Assume next volume to hold same amount
+                                         * of data as the first. It will be adjusted
+                                         * later if needed.
+                                         */
+                                        entry_p->vsize_next = entry_p->vsize_first;
+                                        entry_p->flags.vsize_resolved = 0;
+                                }
+                        } else {
+                                entry_p->flags.raw = 0;
+                                entry_p->flags.save_eof =
+                                                get_save_eof(entry_p->rar_p);
+                        }
+                } else {
+                        entry_p->flags.multipart = 0;
+                        entry_p->offset = (next->Offset + next->HeadSize);
+                }
+        } else {        /* Folder or Compressed and/or Encrypted */
+                entry_p->flags.raw = 0;
+                /* Check if part of a volume */
+                if (d->Flags & MHD_VOLUME) {
+                        entry_p->flags.multipart = 1;
+                        entry_p->vtype = VTYPE(d->Flags);
+                } else {
+                        entry_p->flags.multipart = 0;
+                }
+                if (!IS_RAR_DIR(&next->hdr)) {
+                        entry_p->flags.save_eof = get_save_eof(entry_p->rar_p);
+                        if (next->hdr.Flags & LHD_PASSWORD)
+                                entry_p->flags.encrypted = 1;
+                }
+        }
+        entry_p->method = next->hdr.Method;
+        set_rarstats(entry_p, next, 0);
+
+        return 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static void __listrar_tocache_forcedir(struct filecache_entry *entry_p,
+                RARArchiveListEx *next, const char *file, char *first_arch,
+                RAROpenArchiveDataEx *d)
+{
+        entry_p->rar_p = strdup(first_arch);
+        entry_p->file_p = strdup(file);
+        entry_p->flags.force_dir = 1;
+        entry_p->flags.unresolved = 1;
+
+        set_rarstats(entry_p, next, 1);
+
+        /* Check if part of a volume */
+        if (d->Flags & MHD_VOLUME) {
+                entry_p->flags.multipart = 1;
+                entry_p->vtype = VTYPE(d->Flags);
+        } else {
+                entry_p->flags.multipart = 0;
+        }
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 static int listrar(const char *path, struct dir_entry_list **buffer,
-                const char *arch, int *final)
+                const char *arch, char **first_arch, int *final)
 {
         ENTER_("%s   arch=%s", path, arch);
 
@@ -2178,8 +2436,23 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         free(tmp1);
         tmp1 = rar_root;
         rar_root += strlen(OPT_STR2(OPT_KEY_SRC, 0));
-        size_t rar_root_len = strlen(rar_root);
         int is_root_path = (!strcmp(rar_root, path) || !CHRCMP(path, '/'));
+
+        if (*first_arch == NULL) {
+                /* The caller is responsible for freeing this! */
+                *first_arch = strdup(arch);
+
+                /* Make sure parent folders are always searched from the first
+                 * volume file since sub-folders might actually be placed
+                 * elsewhere. Also the alias function depends on this. */
+                if ((d.Flags & MHD_VOLUME) && RARVolNameToFirstName_BUGGED(
+                                         *first_arch, !VTYPE(d.Flags))) {
+                        free(*first_arch);
+                        *first_arch = NULL;
+                        n_files = 0;
+                        goto out;
+                }
+        }
 
         while (next) {
                 char *mp;
@@ -2196,73 +2469,40 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         continue;
                 }
 
+                /* Handle the case when the parent folders do not have
+                 * their own entry in the file header or is located in
+                 * the end. The entries needs to be faked by adding it
+                 * to the cache. If the parent folder is discovered
+                 * later in the header the faked entry will be
+                 * invalidated and replaced with the real file stats. */
                 if (is_root_path) {
-                        /*
-                         * Handle the case when the parent folders do not have
-                         * their own entry in the file header or is located in
-                         * the end. The entries needs to be faked by adding it
-                         * to the cache. If the parent folder is discovered
-                         * later in the header the faked entry will be
-                         * invalidated and replaced with the real file stats.
-                         */
                         char *safe_path = strdup(next->hdr.FileName);
-                        char *first_arch = strdup(arch);
-                        /*
-                         * Make sure parent folders are always searched
-                         * from the first volume file since sub-folders
-                         * might actually be placed elsewhere.
-                         */
-                        if ((d.Flags & MHD_VOLUME) &&
-                                RARVolNameToFirstName_BUGGED(first_arch,
-                                                 !VTYPE(d.Flags))) {
-                                free(first_arch);
-                                first_arch = NULL;
-                        }
-                        for (;first_arch;) {
-                                char *mp;
+                        while (1) {
+                                char *mp2;
 
                                 if (!CHRCMP(dirname(safe_path), '.'))
                                         break;
-                                ABS_MP(mp, path, safe_path);
+                                /* Aliasing is not support for directories */
+                                ABS_MP(mp2, path, safe_path);
 
-                                struct filecache_entry *entry_p = filecache_get(mp);
+                                struct filecache_entry *entry_p = filecache_get(mp2);
                                 if (entry_p == NULL) {
-                                        printd(3, "Adding %s to cache\n", mp);
-                                        entry_p = filecache_alloc(mp);
-                                        entry_p->rar_p = strdup(first_arch);
-                                        entry_p->file_p = strdup(safe_path);
-                                        entry_p->flags.force_dir = 1;
-                                        entry_p->flags.unresolved = 1;
-
-                                        set_rarstats(entry_p, next, 1);
-
-                                        /* Check if part of a volume */
-                                        if (d.Flags & MHD_VOLUME) {
-                                                entry_p->flags.multipart = 1;
-                                                entry_p->vtype = VTYPE(d.Flags);
-                                        } else {
-                                                entry_p->flags.multipart = 0;
-                                        }
+                                        printd(3, "Adding %s to cache\n", mp2);
+                                        entry_p = filecache_alloc(mp2);
+                                        __listrar_tocache_forcedir(entry_p, next,
+                                                        safe_path, *first_arch, &d);
                                 }
                         }
                         free(safe_path);
-                        free(first_arch);
+                }
+
+                /* Aliasing is not support for directories */
+                if (!IS_RAR_DIR(&next->hdr))
+                        ABS_MP(mp, (*rar_root ? rar_root : "/"),
+                                        get_alias(*first_arch, next->hdr.FileName));
+                else
                         ABS_MP(mp, (*rar_root ? rar_root : "/"),
                                         next->hdr.FileName);
-                } else {
-                        char *safe_path = strdup(next->hdr.FileName);
-                        if (!strcmp(path + rar_root_len + 1,
-                                        dirname(safe_path))) {
-                                char *rar_dir = strdup(next->hdr.FileName);
-                                ABS_MP(mp, path, basename(rar_dir));
-                                free(rar_dir);
-                                display = 1;
-                        } else {
-                                ABS_MP(mp, (*rar_root ? rar_root : "/"),
-                                                next->hdr.FileName);
-                        }
-                        free(safe_path);
-                }
 
                 if (!IS_RAR_DIR(&next->hdr) && OPT_SET(OPT_KEY_FAKE_ISO)) {
                         int l = OPT_CNT(OPT_KEY_FAKE_ISO)
@@ -2275,54 +2515,13 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 printd(3, "Looking up %s in cache\n", mp);
                 struct filecache_entry *entry_p = filecache_get(mp);
                 if (entry_p)  {
-                        if (!entry_p->flags.vsize_resolved) {
-                              entry_p->vsize_real_next = next->FileDataEnd;
-                              /* If GET_RAR_PACK_SZ() returns 0 keep next size
-                               * as is. This will prevent a division by zero
-                               * problem later when file is accessed. */
-                              entry_p->vsize_next = GET_RAR_PACK_SZ(&next->hdr)
-                                      ? (off_t)GET_RAR_PACK_SZ(&next->hdr)
-                                      : entry_p->vsize_next;
-                              entry_p->flags.vsize_resolved = 1;
-                              /*
-                               * Check if we might need to compensate for the
-                               * 1-byte/2-byte RAR5 (and later?) volume number
-                               * in next main archive header.
-                               */
-                              if (next->hdr.UnpVer >= 50) {
-                                      /*
-                                       * If base is last or next to last volume
-                                       * with one extra byte in header this and
-                                       * next volume size have already been
-                                       * resolved.
-                                       */
-                                      if ((entry_p->vno_base - entry_p->vno_first + 1) < 128) {
-                                              if (entry_p->stat.st_size >
-                                                            (entry_p->vsize_first +
-                                                            (entry_p->vsize_next * 
-                                                                    (128 - (entry_p->vno_base - entry_p->vno_first + 1)))))
-                                                      entry_p->flags.vsize_fixup_needed = 1;
-                                      }
-                              }
-                        }
-                        /*
-                         * Check if this was a forced/fake entry. In that
-                         * case update it with proper stats.
-                         */
-                        if (entry_p->flags.force_dir) {
-                                set_rarstats(entry_p, next, 0);
-                                entry_p->flags.force_dir = 0;
-                        }
+                        __listrar_incache(entry_p, next);
                         goto cache_hit;
                 }
 
                 /* Allocate a cache entry for this file */
                 printd(3, "Adding %s to cache\n", mp);
                 entry_p = filecache_alloc(mp);
-                entry_p->rar_p = strdup(arch);
-                entry_p->file_p = strdup(next->hdr.FileName);
-                entry_p->flags.vsize_resolved = 1; /* Assume sizes will be resolved */
-                entry_p->flags.unresolved = 1;
 
                 if (next->LinkTargetFlags & LINK_T_FILECOPY) {
                         struct filecache_entry *e_p;
@@ -2335,80 +2534,10 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         }
                 }
 
-                if (next->hdr.Method == FHD_STORING &&
-                                !(next->hdr.Flags & LHD_PASSWORD) &&
-                                !IS_RAR_DIR(&next->hdr)) {
-                        entry_p->flags.raw = 1;
-                        if ((d.Flags & MHD_VOLUME)) {   /* volume ? */
-                                int len, pos;
-
-                                entry_p->flags.multipart = 1;
-                                entry_p->flags.image = IS_IMG(next->hdr.FileName);
-                                entry_p->vtype = VTYPE(d.Flags);
-                                entry_p->vno_base = get_vformat(arch, entry_p->vtype, &len, &pos);
-                                char *tmp = strdup(arch);
-                                if (RARVolNameToFirstName_BUGGED(tmp, !entry_p->vtype)) {
-                                        __dircache_invalidate_for_file(mp);
-                                        filecache_invalidate(mp);
-                                        n_files = 0;
-                                        free(tmp);
-                                        goto out;
-                                }
-                                entry_p->vno_first = get_vformat(tmp, entry_p->vtype, NULL, NULL);
-                                free(tmp);
-
-                                if (len > 0) {
-                                        entry_p->vlen = len;
-                                        entry_p->vpos = pos;
-                                        if (!IS_RAR_DIR(&next->hdr)) {
-                                                entry_p->vsize_real_first = next->FileDataEnd;
-                                                entry_p->vsize_first = GET_RAR_PACK_SZ(&next->hdr);
-                                                /*
-                                                 * Assume next volume to hold same amount
-                                                 * of data as the first. It will be adjusted
-                                                 * later if needed.
-                                                 */
-                                                entry_p->vsize_next = entry_p->vsize_first;
-                                                entry_p->flags.vsize_resolved = 0;
-                                        }
-                                } else {
-                                        entry_p->flags.raw = 0;
-                                        entry_p->flags.save_eof =
-                                                OPT_SET(OPT_KEY_SAVE_EOF) ? 1 : 0;
-                                }
-                        } else {
-                                entry_p->flags.multipart = 0;
-                                entry_p->offset = (next->Offset + next->HeadSize);
-                        }
-                } else {        /* Folder or Compressed and/or Encrypted */
-                        entry_p->flags.raw = 0;
-                        if (!IS_RAR_DIR(&next->hdr)) {
-                                entry_p->flags.save_eof =
-                                        OPT_SET(OPT_KEY_SAVE_EOF) ? 1 : 0;
-                                if (next->hdr.Flags & LHD_PASSWORD)
-                                        entry_p->flags.encrypted = 1;
-                        }
-                        /* Check if part of a volume */
-                        if (d.Flags & MHD_VOLUME) {
-                                entry_p->flags.multipart = 1;
-                                entry_p->vtype = VTYPE(d.Flags);
-                                /*
-                                 * Make sure parent folders are always searched
-                                 * from the first volume file since sub-folders
-                                 * might actually be placed elsewhere.
-                                 */
-                                if (RARVolNameToFirstName_BUGGED(entry_p->rar_p, !entry_p->vtype)) {
-                                        __dircache_invalidate_for_file(mp);
-                                        filecache_invalidate(mp);
-                                        n_files = 0;
-                                        goto out;
-                                }
-                        } else {
-                                entry_p->flags.multipart = 0;
-                        }
+                if (__listrar_tocache(entry_p, next, arch, *first_arch, &d)) {
+                        n_files = 0;
+                        goto out;
                 }
-                entry_p->method = next->hdr.Method;
-                set_rarstats(entry_p, next, 0);
 
 cache_hit:
                 __add_filler(path, buffer, mp);
@@ -2502,6 +2631,8 @@ static int syncdir_scan(const char *dir, const char *root,
         unsigned int f;
         int (*filter[]) (SCANDIR_ARG3) = {f1, f2}; /* f0 not needed */
         int error_count = 0;
+        int seek_len = 0;
+        char *first_arch = NULL;
 
         ENTER_("%s", dir);
 
@@ -2541,15 +2672,22 @@ static int syncdir_scan(const char *dir, const char *root,
                                                         pos))
                                                 vno = 0;
                         }
-                        if (!vno)
+
+                        char *arch;
+                        ABS_MP(arch, root, namelist[i]->d_name);
+
+                        if (!vno) {
                                 final = 0;
+                                seek_len = get_seek_length(arch);
+                                free(first_arch);
+                                first_arch = NULL;
+                        }
+
                         /* We always need to scan at least two volume files */
-                        if (!OPT_INT(OPT_KEY_SEEK_LENGTH, 0) ||
-                                        vno <= OPT_INT(OPT_KEY_SEEK_LENGTH, 0)) {
+                        if (!seek_len || vno <= seek_len) {
                                 if (!final) {
-                                        char *arch;
-                                        ABS_MP(arch, root, namelist[i]->d_name);
-                                        if (listrar(dir, next, arch, &final)) {
+                                        if (listrar(dir, next, arch, &first_arch,
+                                                                &final)) {
                                                 *next = dir_entry_add(*next,
                                                                namelist[i]->d_name,
                                                                NULL, DIR_E_NRM);
@@ -2562,6 +2700,8 @@ static int syncdir_scan(const char *dir, const char *root,
                 }
                 free(namelist);
         }
+
+        free(first_arch);
 
         return error_count ? -ENOENT : 0;
 }
@@ -2602,6 +2742,8 @@ static int readdir_scan(const char *dir, const char *root,
         unsigned int f_end;
         int (*filter[]) (SCANDIR_ARG3) = {f0, f1, f2};
         int error_count = 0;
+        int seek_len = 0;
+        char *first_arch = NULL;
 
         ENTER_("%s", dir);
 
@@ -2674,15 +2816,21 @@ static int readdir_scan(const char *dir, const char *root,
                                                         pos))
                                                 vno = 0;
                         }
-                        if (!vno)
+
+                        char *arch;
+                        ABS_MP(arch, root, namelist[i]->d_name);
+
+                        if (!vno) {
                                 final = 0;
+                                seek_len = get_seek_length(arch);
+                                free(first_arch);
+                                first_arch = NULL;
+                        }
+
                         /* We always need to scan at least two volume files */
-                        if (!OPT_INT(OPT_KEY_SEEK_LENGTH, 0) ||
-                                        vno <= OPT_INT(OPT_KEY_SEEK_LENGTH, 0)) {
+                        if (!seek_len || vno <= seek_len) {
                                 if (!final) {
-                                        char *arch;
-                                        ABS_MP(arch, root, namelist[i]->d_name);
-                                        if (listrar(dir, next2, arch, &final)) {
+                                        if (listrar(dir, next2, arch, &first_arch, &final)) {
                                                 ++error_count;
                                                 *next2 = dir_entry_add(*next2,
                                                                namelist[i]->d_name,
@@ -2698,6 +2846,9 @@ next_entry:
                 }
                 free(namelist);
         }
+
+        free(first_arch);
+
         return error_count;
 }
 
@@ -2705,7 +2856,7 @@ next_entry:
  *****************************************************************************
  *
  ****************************************************************************/
-static int syncdir(const char *path, int force_sync)
+static int syncdir(const char *path)
 {
         ENTER_("%s", path);
 
@@ -2715,18 +2866,11 @@ static int syncdir(const char *path, int force_sync)
         struct dir_entry_list *dir_list; /* internal list root */
         struct dir_entry_list *next;
 
-        if (force_sync == SYNCDIR_NO_FORCE) {
-                pthread_mutex_lock(&dir_access_mutex);
-                entry_p = dircache_get(path);
-                pthread_mutex_unlock(&dir_access_mutex);
-                if (entry_p)
-                        return 0;
-        } else {
-                pthread_mutex_lock(&dir_access_mutex);
-                dircache_invalidate(path);
-                pthread_mutex_unlock(&dir_access_mutex);
-                entry_p = NULL;
-        }
+        pthread_mutex_lock(&dir_access_mutex);
+        entry_p = dircache_get(path);
+        pthread_mutex_unlock(&dir_access_mutex);
+        if (entry_p)
+                return 0;
 
         ABS_ROOT(root, path);
         dp = opendir(root);
@@ -2767,6 +2911,7 @@ static int syncrar(const char *path)
         struct dircache_entry *entry_p;
         struct dir_entry_list *dir_list; /* internal list root */
         struct dir_entry_list *next;
+        char *first_arch;
 
         pthread_mutex_lock(&dir_access_mutex);
         entry_p = dircache_get(path);
@@ -2783,13 +2928,15 @@ static int syncrar(const char *path)
         int c = 0;
         int final = 0;
         /* We always need to scan at least two volume files */
-        int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
+        int c_end = get_seek_length(NULL);
         c_end = c_end ? c_end + 1 : c_end;
         struct dir_entry_list *arch_next = arch_list_root.next;
 
         dir_list_open(dir_list);
+        first_arch = arch_next->entry.name;
         while (arch_next) {
-                (void)listrar(path, &next, arch_next->entry.name, &final);
+                (void)listrar(path, &next, arch_next->entry.name,
+                                        &first_arch, &final);
                 if ((++c == c_end) || final)
                         break;
                 arch_next = arch_next->next;
@@ -2834,7 +2981,7 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         if (OPT_FILTER(path))
                 return -ENOENT;
         char *safe_path = strdup(path);
-        res = syncdir(dirname(safe_path), SYNCDIR_NO_FORCE);
+        res = syncdir(dirname(safe_path));
         free(safe_path);
         if (res)
                 return res;
@@ -3106,10 +3253,10 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 pthread_mutex_unlock(&file_access_mutex);
                 if (multipart) {
                         int final = 0;
-                        int vol_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
+                        int vol_end = get_seek_length(entry2_p->rar_p);
                         vol_end = vol_end ? vol_end + 1 : vol_end;
                         printd(3, "Search for local directory in %s\n", tmp);
-                        while (!listrar(path, &next2, tmp, &final)) {
+                        while (!listrar(path, &next2, tmp, &tmp, &final)) {
                                 if ((++vol == vol_end) || final) {
                                         free(tmp);
                                         goto fill_buff;
@@ -3120,7 +3267,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 } else {
                         if (tmp) {
                                 printd(3, "Search for local directory in %s\n", tmp);
-                                if (!listrar(path, &next2, tmp, NULL)) {
+                                if (!listrar(path, &next2, tmp, &tmp, NULL)) {
                                         free(tmp);
                                         goto fill_buff;
                                 }
@@ -3200,6 +3347,7 @@ static int rar2_readdir2(const char *path, void *buffer,
         if (!entry_p) {
                 int c = 0;
                 int final = 0;
+                char *first_arch;
                 pthread_mutex_unlock(&dir_access_mutex);
                 dir_list = malloc(sizeof(struct dir_entry_list));
                 struct dir_entry_list *next = dir_list;
@@ -3207,14 +3355,16 @@ static int rar2_readdir2(const char *path, void *buffer,
                         return -ENOMEM;
 
                 /* We always need to scan at least two volume files */
-                int c_end = OPT_INT(OPT_KEY_SEEK_LENGTH, 0);
+                int c_end = get_seek_length(NULL);
                 c_end = c_end ? c_end + 1 : c_end;
                 struct dir_entry_list *arch_next = arch_list_root.next;
 
                 dir_list_open(next);
+                first_arch = arch_next->entry.name;
                 while (arch_next) {
                         (void)listrar(FH_TOPATH(fi->fh), &next,
                                                         arch_next->entry.name,
+                                                        &first_arch,
                                                         &final);
                         if ((++c == c_end) || final)
                                 break;
@@ -3751,7 +3901,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                 fi->direct_io = 0;
                         } else {
                                 /* Was the file removed ? */
-                                if (OPT_SET(OPT_KEY_SAVE_EOF) && !entry_p->flags.save_eof) {
+                                if (get_save_eof(entry_p->rar_p) && !entry_p->flags.save_eof) {
                                         entry_p->flags.save_eof = 1;
                                         entry_p->flags.avi_tested = 0;
                                 }
@@ -3855,6 +4005,9 @@ static void *rar2_init(struct fuse_conn_info *conn)
 
         (void)conn;             /* touch */
 
+        if (mount_type == MOUNT_FOLDER)
+                rarconfig_init(OPT_STR(OPT_KEY_SRC, 0),
+                               OPT_STR(OPT_KEY_CONFIG, 0));
         filecache_init();
         dircache_init();
         iobuffer_init();
@@ -3873,6 +4026,7 @@ static void rar2_destroy(void *data)
 
         (void)data;             /* touch */
 
+        rarconfig_destroy();
         iobuffer_destroy();
         dircache_destroy();
         filecache_destroy();
@@ -4011,7 +4165,7 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                         if (op->buf->idx.data_p != MAP_FAILED &&
                                         op->buf->idx.mmap)
                                 munmap((void *)op->buf->idx.data_p,
-                                                P_ALIGN_(op->buf->idx.data_p->head.size));
+                                        P_ALIGN_(op->buf->idx.data_p->head.size));
 #endif
                         if (op->buf->idx.data_p != MAP_FAILED &&
                                         !op->buf->idx.mmap)
@@ -4178,7 +4332,7 @@ static int rar2_create(const char *path, mode_t mode, struct fuse_file_info *fi)
  *****************************************************************************
  *
  ****************************************************************************/
-static int rar2_eperm_stub()
+static int rar2_eperm()
 {
         return -EPERM;
 }
@@ -4835,17 +4989,17 @@ static int work(struct fuse_args *args)
         } else {
                 rar2_operations.getattr         = rar2_getattr2;
                 rar2_operations.readdir         = rar2_readdir2;
-                rar2_operations.create          = (void *)rar2_eperm_stub;
-                rar2_operations.rename          = (void *)rar2_eperm_stub;
-                rar2_operations.mknod           = (void *)rar2_eperm_stub;
-                rar2_operations.unlink          = (void *)rar2_eperm_stub;
-                rar2_operations.mkdir           = (void *)rar2_eperm_stub;
-                rar2_operations.rmdir           = (void *)rar2_eperm_stub;
-                rar2_operations.write           = (void *)rar2_eperm_stub;
-                rar2_operations.truncate        = (void *)rar2_eperm_stub;
-                rar2_operations.chmod           = (void *)rar2_eperm_stub;
-                rar2_operations.chown           = (void *)rar2_eperm_stub;
-                rar2_operations.symlink         = (void *)rar2_eperm_stub;
+                rar2_operations.create          = (void *)rar2_eperm;
+                rar2_operations.rename          = (void *)rar2_eperm;
+                rar2_operations.mknod           = (void *)rar2_eperm;
+                rar2_operations.unlink          = (void *)rar2_eperm;
+                rar2_operations.mkdir           = (void *)rar2_eperm;
+                rar2_operations.rmdir           = (void *)rar2_eperm;
+                rar2_operations.write           = (void *)rar2_eperm;
+                rar2_operations.truncate        = (void *)rar2_eperm;
+                rar2_operations.chmod           = (void *)rar2_eperm;
+                rar2_operations.chown           = (void *)rar2_eperm;
+                rar2_operations.symlink         = (void *)rar2_eperm;
         }
 
         struct fuse *f = NULL;
@@ -4977,6 +5131,7 @@ static void print_help()
 #if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
         printf("    --relatime-rar\t    like --relatime but also update main archive file(s)\n");
 #endif
+        printf("    --config=file\t    config file name [source/.rarconfig]\n");
 }
 
 /* FUSE API specific keys continue where 'optdb' left off */
@@ -5014,6 +5169,7 @@ static struct option longopts[] = {
 #if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
         {"relatime-rar",      no_argument, NULL, OPT_ADDR(OPT_KEY_ATIME_RAR)},
 #endif
+        {"config",      required_argument, NULL, OPT_ADDR(OPT_KEY_CONFIG)},
         {NULL,                          0, NULL, 0}
 };
 

@@ -57,6 +57,7 @@ enum {
         OPT_KEY_NO_EXPAND_CBR,
         OPT_KEY_ATIME,
         OPT_KEY_ATIME_RAR,
+        OPT_KEY_CONFIG,
         OPT_KEY_END, /* Must *always* be last key */
         OPT_KEY_LAST = (OPT_KEY_END - 1) 
 };

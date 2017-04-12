@@ -112,7 +112,8 @@ void hashtable_entry_delete(void *h, const char *key)
                         struct hash_table_entry *prev = p;
                         p = p->next;
                         if (p->key && !strcmp(key, p->key)) {
-                                ht->ops.free(p->user_data);
+                                if (p->user_data)
+                                        ht->ops.free(p->user_data);
                                 prev->next = p->next;
                                 free(p->key);
                                 free(p);
@@ -129,7 +130,8 @@ void hashtable_entry_delete(void *h, const char *key)
                         /* Need to relink collision chain */
                         if (b->next) {
                                 struct hash_table_entry *tmp = b->next;
-                                ht->ops.free(b->user_data);
+                                if (b->user_data)
+                                        ht->ops.free(b->user_data);
                                 free(b->key);
                                 memcpy(b, b->next,
                                             sizeof(struct hash_table_entry));
@@ -150,11 +152,13 @@ void hashtable_entry_delete(void *h, const char *key)
                         while (next) {
                                 struct hash_table_entry *p = next;
                                 next = p->next;
-                                ht->ops.free(p->user_data);
+                                if (p->user_data)
+                                        ht->ops.free(p->user_data);
                                 free(p->key);
                                 free(p);
                         }
-                        ht->ops.free(b->user_data);
+                        if (b->user_data)
+                                ht->ops.free(b->user_data);
                         free(b->key);
                         memset(b, 0, sizeof(struct hash_table_entry));
                 }
