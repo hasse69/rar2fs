@@ -310,7 +310,7 @@ static inline int is_nnn_vol(const char *name)
 #define IS_NNN(s) (is_nnn_vol(s))
 
 #define VTYPE(f, flags) \
-        (IS_RAR(f) || IS_RXX(f)) ? (flags & MHD_NEWNUMBERING) ? 1 : 0 : 1
+        ((IS_RAR(f) || IS_RXX(f)) ? (flags & MHD_NEWNUMBERING) ? 1 : 0 : 1)
 
 /*!
  *****************************************************************************
@@ -2333,8 +2333,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                 !(next->hdr.Flags & LHD_PASSWORD) &&
                                 !IS_RAR_DIR(&next->hdr)) {
                         entry_p->flags.raw = 1;
-                        if ((d.Flags & MHD_VOLUME) &&   /* volume ? */
-                                        ((next->hdr.Flags & (LHD_SPLIT_BEFORE | LHD_SPLIT_AFTER)))) {
+                        if ((d.Flags & MHD_VOLUME)) {   /* volume ? */
                                 int len, pos;
 
                                 entry_p->flags.multipart = 1;
