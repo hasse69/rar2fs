@@ -309,8 +309,8 @@ static inline int is_nnn_vol(const char *name)
 #define IS_RXX(s) (is_rxx_vol(s))
 #define IS_NNN(s) (is_nnn_vol(s))
 
-#define VTYPE(f, flags) \
-        ((IS_RAR(f) || IS_RXX(f)) ? (flags & MHD_NEWNUMBERING) ? 1 : 0 : 1)
+#define VTYPE(flags) \
+        ((flags & MHD_NEWNUMBERING) ? 1 : 0)
 
 /*!
  *****************************************************************************
@@ -2207,8 +2207,9 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                          * from the first volume file since sub-folders
                          * might actually be placed elsewhere.
                          */
-                        if (RARVolNameToFirstName_BUGGED(first_arch,
-                                                 !VTYPE(arch, d.Flags))) {
+                        if ((d.Flags & MHD_VOLUME) &&
+                                RARVolNameToFirstName_BUGGED(first_arch,
+                                                 !VTYPE(d.Flags))) {
                                 free(first_arch);
                                 first_arch = NULL;
                         }
@@ -2233,7 +2234,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                         /* Check if part of a volume */
                                         if (d.Flags & MHD_VOLUME) {
                                                 entry_p->flags.multipart = 1;
-                                                entry_p->vtype = VTYPE(arch, d.Flags);
+                                                entry_p->vtype = VTYPE(d.Flags);
                                         } else {
                                                 entry_p->flags.multipart = 0;
                                         }
@@ -2338,7 +2339,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
 
                                 entry_p->flags.multipart = 1;
                                 entry_p->flags.image = IS_IMG(next->hdr.FileName);
-                                entry_p->vtype = VTYPE(arch, d.Flags);
+                                entry_p->vtype = VTYPE(d.Flags);
                                 entry_p->vno_base = get_vformat(arch, entry_p->vtype, &len, &pos);
                                 char *tmp = strdup(arch);
                                 if (RARVolNameToFirstName_BUGGED(tmp, !entry_p->vtype)) {
@@ -2385,7 +2386,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         /* Check if part of a volume */
                         if (d.Flags & MHD_VOLUME) {
                                 entry_p->flags.multipart = 1;
-                                entry_p->vtype = VTYPE(arch, d.Flags);
+                                entry_p->vtype = VTYPE(d.Flags);
                                 /*
                                  * Make sure parent folders are always searched
                                  * from the first volume file since sub-folders
