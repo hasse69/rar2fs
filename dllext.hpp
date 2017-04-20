@@ -42,12 +42,6 @@
 #include "headers5.hpp"
 #endif
 
-#ifdef _UNIX
-#define FileHandle FILE*
-#else
-#define FileHandle HANDLE;
-#endif
-
 #define  LINK_T_UNICODE     0x00000001U
 #define  LINK_T_FILECOPY    0x00000002U
 

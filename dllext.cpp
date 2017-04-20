@@ -109,12 +109,21 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, int *ResultCod
        */
       memset(&N->RawTime, 0, sizeof(struct RARArchiveListEx::RawTime_));
 #if RARVER_MAJOR > 4 
+#if RARVER_MAJOR > 5 || (RARVER_MAJOR == 5 && RARVER_MINOR >= 50)
+      if (Arc.FileHead.mtime.IsSet())
+        N->RawTime.mtime = Arc.FileHead.mtime.GetUnixNS() - 116444736000000000ULL;
+      if (Arc.FileHead.ctime.IsSet())
+        N->RawTime.ctime = Arc.FileHead.ctime.GetUnixNS() - 116444736000000000ULL;
+      if (Arc.FileHead.atime.IsSet())
+        N->RawTime.atime = Arc.FileHead.atime.GetUnixNS() - 116444736000000000ULL;
+#else
       if (Arc.FileHead.mtime.IsSet())
         N->RawTime.mtime = Arc.FileHead.mtime.GetRaw() - 116444736000000000ULL;
       if (Arc.FileHead.ctime.IsSet())
         N->RawTime.ctime = Arc.FileHead.ctime.GetRaw() - 116444736000000000ULL;
       if (Arc.FileHead.atime.IsSet())
         N->RawTime.atime = Arc.FileHead.atime.GetRaw() - 116444736000000000ULL;
+#endif
 #endif
 
 #if RARVER_MAJOR > 4

@@ -31,7 +31,11 @@
 
 #include <version.hpp>
 
+#if RARVER_MAJOR > 5 || (RARVER_MAJOR == 5 && RARVER_MINOR >= 50)
+typedef off_t FileHandle;
+#else
 typedef FILE* FileHandle;
+#endif
 #define BAD_HANDLE NULL
 
 class FileExt
