@@ -836,10 +836,14 @@ static int __check_rar_header(const char *arch)
         if (d.OpenResult) {
                 if (h)
                         RARCloseArchive(h);
+                free(last_arch);
+                last_arch = NULL;
                 return -1;
         }
         if (RARReadHeaderEx(h, &header))  {
                 RARCloseArchive(h);
+                free(last_arch);
+                last_arch = NULL;
                 return -1;
         }
         RARCloseArchive(h);
@@ -856,8 +860,9 @@ static int RARVolNameToFirstName_BUGGED(char *s, int vtype)
         int pos;
 
         RARVolNameToFirstName(s, vtype);
-        int n = get_vformat(s, !vtype, &len, &pos);
-        if (n == 1) {
+        if (!IS_RAR(s) && !IS_NNN(s))
+                return -1;
+        if (get_vformat(s, !vtype, &len, &pos) == 1) {
                 char *s_copy = strdup(s);
                 while (--len >= 0)
                         s_copy[pos+len] = '0';
