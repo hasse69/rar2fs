@@ -1,5 +1,19 @@
 rar2fs ChangeLog file.
 
+2017-04-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+	* Release v1.24.1
+
+	* [rar2fs #74]
+
+	Update for UnRAR source 5.5.3
+
+	* Fix an issue with volume consistency check
+
+	* Fix usage of VTYPE macro
+
+	* Fix a volume detection bug
+
 2017-03-31  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
 	* Release v1.24.0
