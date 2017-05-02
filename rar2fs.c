@@ -820,7 +820,7 @@ static int pclose_(FILE *fp, pid_t pid)
 }
 
 /* Size of file in first volume number in which it exists */
-#define VOL_FIRST_SZ op->entry_p->vsize_first
+#define VOL_FIRST_SZ (op->entry_p->vsize_first)
 
 /*
  * Size of file in the following volume numbers (if situated in more than one).
@@ -835,7 +835,7 @@ static int pclose_(FILE *fp, pid_t pid)
  * throw an error if trying to read beyond EOF. The important thing here
  * is that the volumes files other than the first and last match this value.
  */
-#define VOL_NEXT_SZ op->entry_p->vsize_next
+#define VOL_NEXT_SZ (op->entry_p->vsize_next)
 
 /* Size of file data (including headers) in first volume number */
 #define VOL_REAL_SZ(x) \
@@ -1077,19 +1077,52 @@ no_check_atime:
  ****************************************************************************
  *
  ****************************************************************************/
+static void __get_vol_and_chunk_raw(struct io_context *op, off_t offset,
+                        int *vol, size_t *chunk)
+{
+        /*
+         * RAR5 (and later?) have a one byte volume number in the
+         * Main Archive Header for volume 1-127 and two bytes for the rest.
+         * Check if we need to compensate.
+         */
+        if (op->entry_p->flags.vsize_fixup_needed) {
+                int vol_contrib = 128 - op->entry_p->vno_base +
+                                op->entry_p->vno_first - 1;
+                off_t offset_fixup = VOL_FIRST_SZ +
+                                (vol_contrib * VOL_NEXT_SZ);
+                if (offset >= offset_fixup) {
+                        off_t offset_left = offset - offset_fixup;
+                        *vol = 1 + vol_contrib +
+                                (offset_left / (VOL_NEXT_SZ - 1));
+                        *chunk = (VOL_NEXT_SZ - 1) -
+                                (offset_left % (VOL_NEXT_SZ - 1));
+                        return;
+                }
+        }
+
+        *vol = offset < VOL_FIRST_SZ ? 0 :
+                1 + ((offset - VOL_FIRST_SZ) / VOL_NEXT_SZ);
+        *chunk = offset < VOL_FIRST_SZ ? VOL_FIRST_SZ - offset :
+                VOL_NEXT_SZ - ((offset - VOL_FIRST_SZ) % VOL_NEXT_SZ);
+}
+
+/*!
+ ****************************************************************************
+ *
+ ****************************************************************************/
 static int lread_raw(char *buf, size_t size, off_t offset,
                 struct fuse_file_info *fi)
 {
         size_t n = 0;
         struct io_context *op = FH_TOCONTEXT(fi->fh);
+        size_t chunk;
+        int tot = 0;
+        int force_seek = 0;
+
         op->seq++;
 
         printd(3, "PID %05d calling %s(), seq = %d, offset=%" PRIu64 "\n",
                getpid(), __func__, op->seq, offset);
-
-        size_t chunk;
-        int tot = 0;
-        int force_seek = 0;
 
         /*
          * Handle the case when a user tries to read outside file size.
@@ -1116,28 +1149,8 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                 if (op->entry_p->flags.multipart) {
                         int vol;
 
-                        /*
-                         * RAR5 (and later?) have a one byte volume number in
-                         * the Main Archive Header for volume 1-127 and two
-                         * bytes for the rest. Check if we need to compensate.
-                         */
-                        if (op->entry_p->flags.vsize_fixup_needed) {
-                                int vol_contrib = 128 - op->entry_p->vno_base + op->entry_p->vno_first - 1;
-                                if (offset >= (VOL_FIRST_SZ + (vol_contrib * VOL_NEXT_SZ))) {
-                                        off_t offset_left =
-                                                offset - (VOL_FIRST_SZ + (vol_contrib * VOL_NEXT_SZ));
-                                        vol = 1 + vol_contrib + (offset_left / (VOL_NEXT_SZ - 1));
-                                        chunk = (VOL_NEXT_SZ - 1) - (offset_left % (VOL_NEXT_SZ - 1));
-                                        goto vol_ready;
-                                }
-                        }
+                        __get_vol_and_chunk_raw(op, offset, &vol, &chunk);
 
-                        vol = offset < VOL_FIRST_SZ ? 0 :
-                                1 + ((offset - VOL_FIRST_SZ) / VOL_NEXT_SZ);
-                        chunk = offset < VOL_FIRST_SZ ? VOL_FIRST_SZ - offset :
-                                VOL_NEXT_SZ - ((offset - VOL_FIRST_SZ) % (VOL_NEXT_SZ));
-
-vol_ready:
                         /* keep current open file */
                         if (vol != op->vno) {
                                 /* close/open */
@@ -1396,7 +1409,7 @@ check_idx:
                         printd(3, "seq=%d    history access    offset=%" PRIu64
                                                 " size=%zu  op->pos=%" PRIu64
                                                 "  split=%d\n",
-                                                op->seq,offset, size,
+                                                op->seq, offset, size,
                                                 op->pos,
                                                 (offset + (off_t)size) > op->pos);
                         if ((uint32_t)(op->pos - offset) <= IOB_HIST_SZ) {
@@ -1619,13 +1632,13 @@ static int lread(char *buffer, size_t size, off_t offset,
 static int lopen(const char *path, struct fuse_file_info *fi)
 {
         ENTER_("%s", path);
-        int fd = open(path, fi->flags);
-        if (fd == -1)
-                return -errno;
         struct io_handle *io = malloc(sizeof(struct io_handle));
-        if (!io) {
-                close(fd);
-                return -EIO;
+        if (!io)
+                return -ENOMEM;
+        int fd = open(path, fi->flags);
+        if (fd == -1) {
+                free(io);
+                return -errno;
         }
         FH_SETIO(fi->fh, io);
         FH_SETTYPE(fi->fh, IO_TYPE_NRM);
@@ -4247,29 +4260,23 @@ static int rar2_create(const char *path, mode_t mode, struct fuse_file_info *fi)
         if (S_ISREG(mode)) {
                 if (!access_chk(path, 1)) {
                         char *root;
+                        struct io_handle *io = NULL;
                         ABS_ROOT(root, path);
-                        int fd = creat(root, mode);
-                        if (fd == -1)
-                                return -errno;
                         if (!FH_ISSET(fi->fh)) {
-                                struct io_handle *io =
-                                        malloc(sizeof(struct io_handle));
-                                /*
-                                 * Does not really matter what is returned in
-                                 * case of failure as long as it is not 0.
-                                 * Returning anything but 0 will avoid the
-                                 * _release() call but will still create the
-                                 * file when called from e.g. 'touch'.
-                                 */
-                                if (!io) {
-                                        close(fd);
-                                        return -EIO;
-                                }
+                                io = malloc(sizeof(struct io_handle));
+                                if (!io)
+                                        return -ENOMEM;
                                 FH_SETIO(fi->fh, io);
                                 FH_SETTYPE(fi->fh, IO_TYPE_NRM);
                                 FH_SETENTRY(fi->fh, NULL);
-                                FH_SETFD(fi->fh, fd);
                         }
+                        int fd = creat(root, mode);
+                        if (fd == -1) {
+                                free(io);
+                                return -errno;
+                        }
+                        if (io)
+                                FH_SETFD(fi->fh, fd);
                         __dircache_invalidate_for_file(path);
                         return 0;
                 }

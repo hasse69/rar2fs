@@ -63,7 +63,7 @@ struct filecache_entry {
                         unsigned int vsize_resolved:1;
                         unsigned int :19;
                         unsigned int unresolved:1;
-                        unsigned int xdir:1;
+                        unsigned int :1;
                         unsigned int check_atime:1;
                         unsigned int direct_io:1;
                         unsigned int avi_tested:1;
@@ -73,7 +73,7 @@ struct filecache_entry {
                         unsigned int avi_tested:1;
                         unsigned int direct_io:1;
                         unsigned int check_atime:1;
-                        unsigned int xdir:1;
+                        unsigned int :1;
                         unsigned int unresolved:1;
                         unsigned int :19;
                         unsigned int vsize_resolved:1;
