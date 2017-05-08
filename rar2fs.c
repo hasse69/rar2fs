@@ -952,54 +952,6 @@ static int get_vformat(const char *s, int t, int *l, int *p)
  *****************************************************************************
  *
  ****************************************************************************/
-static int __check_rar_header(const char *arch)
-{
-        HANDLE h;
-        RAROpenArchiveDataEx d;
-        struct RARHeaderDataEx header;
-        static char *last_arch = NULL;
-
-        /* Cache and skip if we are trying to inspect the same file over
-         * and over again.
-         * Note that this is *NOT* a thread safe operation and the resource
-         * needs to be protected. Currently it is implictly protected since
-         * this function is only called from RARVolNameToFirstName_BUGGED()
-         * which holds the file access lock when ever necessary. This might
-         * change though and then this logic needs to be revisited! */
-        if (last_arch && !strcmp(arch, last_arch))
-                return 0;
-        free(last_arch);
-        last_arch = strdup(arch);
-
-        memset(&d, 0, sizeof(RAROpenArchiveDataEx));
-        d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
-        d.OpenMode = RAR_OM_LIST_INCSPLIT;
-        d.Callback = list_callback_noswitch;
-        d.UserData = (LPARAM)arch;
-        h = RAROpenArchiveEx(&d);
-
-        /* Check for fault */
-        if (d.OpenResult) {
-                if (h)
-                        RARCloseArchive(h);
-                free(last_arch);
-                last_arch = NULL;
-                return -1;
-        }
-        if (RARReadHeaderEx(h, &header))  {
-                RARCloseArchive(h);
-                free(last_arch);
-                last_arch = NULL;
-                return -1;
-        }
-        RARCloseArchive(h);
-        return 0;
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
 static int RARVolNameToFirstName_BUGGED(char *s, int vtype)
 {
         int len;
@@ -1014,17 +966,9 @@ static int RARVolNameToFirstName_BUGGED(char *s, int vtype)
                         s_copy[pos + len] = '0';
                 if (!access(s_copy, F_OK))
                         strcpy(s, s_copy);
-                else if (access(s, F_OK)){
-                        free(s_copy);
-                        return -1;
-                }
                 free(s_copy);
-                return __check_rar_header(s);
-         } else {
-                if (!access(s, F_OK))
-                        return __check_rar_header(s);
          }
-         return -1;
+         return 0;
 }
 
 #if _POSIX_TIMERS < 1
@@ -1161,12 +1105,16 @@ static int lread_raw(char *buf, size_t size, off_t offset,
         if (op->entry_p->flags.check_atime)
                 check_atime(FH_TOPATH(fi->fh), op->entry_p);
 
+        if (!op->entry_p->flags.vsize_resolved)
+                return -EIO;
+
         while (size) {
                 FILE *fp;
                 off_t src_off = 0;
                 struct volume_handle *vh = NULL;
                 if (op->entry_p->flags.multipart) {
                         int vol;
+
                         /*
                          * RAR5 (and later?) have a one byte volume number in
                          * the Main Archive Header for volume 1-127 and two
@@ -2257,14 +2205,15 @@ static void __listrar_incache(struct filecache_entry *entry_p,
                 RARArchiveListEx *next)
 {
         if (!entry_p->flags.vsize_resolved) {
+              entry_p->vsize_next = GET_RAR_PACK_SZ(&next->hdr);
+              if (((next->hdr.Flags & LHD_SPLIT_AFTER) && entry_p->vsize_next) ||
+                              /* Handle files located in only two volumes */
+                              (entry_p->vsize_first + entry_p->vsize_next) ==
+                                      entry_p->stat.st_size)
+                      entry_p->flags.vsize_resolved = 1;
+              else
+                      goto vsize_done;
               entry_p->vsize_real_next = next->FileDataEnd;
-              /* If GET_RAR_PACK_SZ() returns 0 keep next size as is.
-               * This will prevent a division by zero problem later when file
-               * is accessed. */
-              entry_p->vsize_next = GET_RAR_PACK_SZ(&next->hdr)
-                      ? (off_t)GET_RAR_PACK_SZ(&next->hdr)
-                      : entry_p->vsize_next;
-              entry_p->flags.vsize_resolved = 1;
               /* Check if we might need to compensate for the 1-byte/2-byte
                * RAR5 (and later?) volume number in next main archive header. */
               if (next->hdr.UnpVer >= 50) {
@@ -2280,6 +2229,8 @@ static void __listrar_incache(struct filecache_entry *entry_p,
                       }
               }
         }
+
+vsize_done:
         /*
          * Check if this was a forced/fake entry. In that case update it
          * with proper stats.
@@ -2294,18 +2245,33 @@ static void __listrar_incache(struct filecache_entry *entry_p,
  *****************************************************************************
  *
  ****************************************************************************/
-static int __listrar_tocache(struct filecache_entry *entry_p,
+static struct filecache_entry *__listrar_tocache(char *file,
                 RARArchiveListEx *next, const char *arch, char *first_arch,
                 RAROpenArchiveDataEx *d)
 {
+        struct filecache_entry *entry_p;
+        int raw_mode;
+
+        if (next->hdr.Method == FHD_STORING &&
+                        !(next->hdr.Flags & LHD_PASSWORD) &&
+                        !IS_RAR_DIR(&next->hdr)) {
+                if (next->hdr.Flags & LHD_SPLIT_BEFORE)
+                        return NULL;
+                raw_mode = 1;
+        } else {
+                raw_mode = 0;
+        }
+
+        /* Allocate a cache entry for this file */
+        printd(3, "Adding %s to cache\n", file);
+        entry_p = filecache_alloc(file);
+
         entry_p->rar_p = strdup(first_arch);
         entry_p->file_p = strdup(next->hdr.FileName);
         entry_p->flags.vsize_resolved = 1; /* Assume sizes will be resolved */
         entry_p->flags.unresolved = 1;
 
-        if (next->hdr.Method == FHD_STORING &&
-                        !(next->hdr.Flags & LHD_PASSWORD) &&
-                        !IS_RAR_DIR(&next->hdr)) {
+        if (raw_mode) {
                 entry_p->flags.raw = 1;
                 if ((d->Flags & MHD_VOLUME)) {   /* volume ? */
                         int len, pos;
@@ -2329,7 +2295,8 @@ static int __listrar_tocache(struct filecache_entry *entry_p,
                                          * later if needed.
                                          */
                                         entry_p->vsize_next = entry_p->vsize_first;
-                                        entry_p->flags.vsize_resolved = 0;
+                                        if (next->hdr.Flags & (LHD_SPLIT_BEFORE | LHD_SPLIT_AFTER))
+                                                entry_p->flags.vsize_resolved = 0;
                                 }
                         } else {
                                 entry_p->flags.raw = 0;
@@ -2358,7 +2325,7 @@ static int __listrar_tocache(struct filecache_entry *entry_p,
         entry_p->method = next->hdr.Method;
         set_rarstats(entry_p, next, 0);
 
-        return 0;
+        return entry_p;
 }
 
 /*!
@@ -2519,14 +2486,12 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         goto cache_hit;
                 }
 
-                /* Allocate a cache entry for this file */
-                printd(3, "Adding %s to cache\n", mp);
-                entry_p = filecache_alloc(mp);
-
                 if (next->LinkTargetFlags & LINK_T_FILECOPY) {
                         struct filecache_entry *e_p;
                         e_p = lookup_filecopy(path, next, rar_root, display);
                         if (e_p) {
+                                printd(3, "Adding %s to cache\n", mp);
+                                entry_p = filecache_alloc(mp);
                                 filecache_copy(e_p, entry_p);
                                 /* Preserve stats of original file */
                                 set_rarstats(entry_p, next, 0);
@@ -2534,9 +2499,11 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         }
                 }
 
-                if (__listrar_tocache(entry_p, next, arch, *first_arch, &d)) {
-                        n_files = 0;
-                        goto out;
+                entry_p = __listrar_tocache(mp, next, arch, *first_arch, &d);
+                if (entry_p == NULL) {
+                        --n_files;
+                        next = next->next;
+                        continue;
                 }
 
 cache_hit:
@@ -2594,7 +2561,7 @@ static int f1(SCANDIR_ARG3 e)
          */
 #ifdef _DIRENT_HAVE_D_TYPE
         if (e->d_type != DT_UNKNOWN)
-                return (IS_RAR(e->d_name) || 
+                return (IS_RAR(e->d_name) ||
                                 IS_CBR(e->d_name) ||
                                 IS_NNN(e->d_name)) &&
                                 e->d_type == DT_REG;
@@ -2633,12 +2600,14 @@ static int syncdir_scan(const char *dir, const char *root,
         int error_count = 0;
         int seek_len = 0;
         char *first_arch = NULL;
+        int reset = 1;
 
         ENTER_("%s", dir);
-
         for (f = 0; f < (sizeof(filter) / sizeof(filter[0])); f++) {
                 int final = 0;
-                int vno = -1;
+                int vno = 0;
+                int vcnt = 0;
+                int vtype = f == 0 ? 1 : 0;
                 int i = 0;
                 int n = scandir(root, &namelist, filter[f], alphasort);
                 if (n < 0) {
@@ -2646,45 +2615,33 @@ static int syncdir_scan(const char *dir, const char *root,
                         return -errno;
                 }
                 while (i < n) {
-                        if (f == 1) {
-                                /* We know this is .rNN format so this should
-                                 * be a bit faster than calling get_vformat().
-                                 */
-                                const size_t SLEN = strlen(namelist[i]->d_name);
-                                if (namelist[i]->d_name[SLEN - 1] == '0' &&
-                                    namelist[i]->d_name[SLEN - 2] == '0') {
-                                        vno = 1;
-                                } else {
-                                        ++vno;
-                                }
-                        } else {
-                                int oldvno = vno;
-                                int pos;
-                                vno = get_vformat(namelist[i]->d_name, 1, /* new style */
-                                                  NULL, &pos);
-                                if (vno <= oldvno)
-                                        vno = 0;
-                                else if (vno > oldvno + 1)
-                                        vno = oldvno + 1;
-                                else
-                                        if(i && strncmp(namelist[i]->d_name,
-                                                        namelist[i - 1]->d_name,
-                                                        pos))
-                                                vno = 0;
-                        }
+                        int pos;
+                        int oldvno = vno;
+
+                        vno = get_vformat(namelist[i]->d_name, vtype,
+                                                NULL, &pos);
+                        if (vno <= oldvno)
+                                reset = 1;
+                        else if (vno == (oldvno + 1))
+                                if (i && strncmp(namelist[i]->d_name,
+                                                namelist[i - 1]->d_name,
+                                                pos))
+                                        reset = 1;
 
                         char *arch;
                         ABS_MP(arch, root, namelist[i]->d_name);
 
-                        if (!vno) {
+                        if (reset) {
                                 final = 0;
+                                reset = 0;
                                 seek_len = get_seek_length(arch);
                                 free(first_arch);
                                 first_arch = NULL;
+                                vcnt = 0;
                         }
 
                         /* We always need to scan at least two volume files */
-                        if (!seek_len || vno <= seek_len) {
+                        if (!seek_len || ++vcnt <= seek_len) {
                                 if (!final) {
                                         if (listrar(dir, next, arch, &first_arch,
                                                                 &final)) {
@@ -2744,6 +2701,7 @@ static int readdir_scan(const char *dir, const char *root,
         int error_count = 0;
         int seek_len = 0;
         char *first_arch = NULL;
+        int reset = 1;
 
         ENTER_("%s", dir);
 
@@ -2761,7 +2719,9 @@ static int readdir_scan(const char *dir, const char *root,
 
         for (f = 0; f < f_end; f++) {
                 int final = 0;
-                int vno = -1;
+                int vno = 0;
+                int vcnt = 0;
+                int vtype = f == 1 ? 1 : 0;
                 int i = 0;
                 int n = scandir(root, &namelist, filter[f], alphasort);
                 if (n < 0) {
@@ -2790,45 +2750,33 @@ static int readdir_scan(const char *dir, const char *root,
                                 free(tmp2);
                                 goto next_entry;
                         }
-                        if (f == 2) {
-                                /* We know this is .rNN format so this should
-                                 * be a bit faster than calling get_vformat().
-                                 */
-                                const size_t SLEN = strlen(namelist[i]->d_name);
-                                if (namelist[i]->d_name[SLEN - 1] == '0' &&
-                                    namelist[i]->d_name[SLEN - 2] == '0') {
-                                        vno = 1;
-                                } else {
-                                        ++vno;
-                                }
-                        } else { 
-                                int oldvno = vno;
-                                int pos;
-                                vno = get_vformat(namelist[i]->d_name, 1, /* new style */
-                                                  NULL, &pos);
-                                if (vno <= oldvno) 
-                                        vno = 0;
-                                else if (vno > oldvno + 1) 
-                                        vno = oldvno + 1;
-                                else 
-                                        if(i && strncmp(namelist[i]->d_name,
-                                                        namelist[i - 1]->d_name,
-                                                        pos))
-                                                vno = 0;
-                        }
+
+                        int pos;
+                        int oldvno = vno;
+                        vno = get_vformat(namelist[i]->d_name, vtype,
+                                                NULL, &pos);
+                        if (vno <= oldvno)
+                                reset = 1;
+                        else if (vno == (oldvno + 1))
+                                if (i && strncmp(namelist[i]->d_name,
+                                                namelist[i - 1]->d_name,
+                                                pos))
+                                        reset = 1;
 
                         char *arch;
                         ABS_MP(arch, root, namelist[i]->d_name);
 
-                        if (!vno) {
+                        if (reset) {
                                 final = 0;
+                                reset = 0;
                                 seek_len = get_seek_length(arch);
                                 free(first_arch);
                                 first_arch = NULL;
+                                vcnt = 0;
                         }
 
                         /* We always need to scan at least two volume files */
-                        if (!seek_len || vno <= seek_len) {
+                        if (!seek_len || ++vcnt <= seek_len) {
                                 if (!final) {
                                         if (listrar(dir, next2, arch, &first_arch, &final)) {
                                                 ++error_count;
