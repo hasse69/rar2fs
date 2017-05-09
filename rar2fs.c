@@ -957,18 +957,19 @@ static int RARVolNameToFirstName_BUGGED(char *s, int vtype)
         int len;
         int pos;
 
+        char *s_copy = strdup(s);
         RARVolNameToFirstName(s, vtype);
-        if (!IS_RAR(s) && !IS_NNN(s))
-                return -1;
-        if (get_vformat(s, !vtype, &len, &pos) == 1) {
-                char *s_copy = strdup(s);
-                while (--len >= 0)
-                        s_copy[pos + len] = '0';
-                if (!access(s_copy, F_OK))
-                        strcpy(s, s_copy);
+        if (!IS_RAR(s) && !IS_NNN(s)) {
                 free(s_copy);
-         }
-         return 0;
+                return -1;
+        }
+        if (get_vformat(s, !vtype, &len, &pos) == 1) {
+                while (--len >= 0 && s_copy[pos + len] == '0');
+                if (len < 0)
+                        s = strcpy(s, s_copy);
+        }
+        free(s_copy);
+        return 0;
 }
 
 #if _POSIX_TIMERS < 1
