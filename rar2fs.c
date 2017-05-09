@@ -1117,7 +1117,8 @@ static void __get_vol_and_chunk_raw(struct io_context *op, off_t offset,
 static int lread_raw(char *buf, size_t size, off_t offset,
                 struct fuse_file_info *fi)
 {
-        size_t n = 0;
+        FILE *fp = NULL;
+        ssize_t n = 0;
         struct io_context *op = FH_TOCONTEXT(fi->fh);
         size_t chunk;
         int tot = 0;
@@ -1147,7 +1148,6 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                 return -EIO;
 
         while (size) {
-                FILE *fp;
                 off_t src_off = 0;
                 struct volume_handle *vh = NULL;
                 if (op->entry_p->flags.multipart) {
@@ -1169,12 +1169,6 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                                                 goto seek_check;
                                         }
                                 }
-                                /*
-                                 * It is advisable to return 0 (EOF) here
-                                 * rather than -errno at failure. Some media
-                                 * players tend to react "better" on that and
-                                 * terminate playback as expected.
-                                 */
                                 char *tmp =
                                     get_vname(op->entry_p->vtype,
                                                 op->entry_p->rar_p,
@@ -1187,13 +1181,13 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                                         free(tmp);
                                         if (fp == NULL) {
                                                 perror("open");
-                                                return 0;       /* EOF */
+                                                goto read_error;
                                         }
                                         fclose(op->fp);
                                         op->fp = fp;
                                         force_seek = 1;
                                 } else {
-                                        return 0;               /* EOF */
+                                        return -EINVAL;
                                 }
                         } else {
                                 if (op->volh && op->volh[vol].fp)
@@ -1207,7 +1201,8 @@ seek_check:
                                 printd(3, "SEEK src_off = %" PRIu64 ", "
                                                 "VOL_REAL_SZ = %" PRIu64 "\n",
                                                 src_off, VOL_REAL_SZ(vol));
-                                fseeko(fp, src_off, SEEK_SET);
+                                if (fseeko(fp, src_off, SEEK_SET))
+                                        goto read_error;
                                 force_seek = 0;
                         }
                         printd(3, "size = %zu, chunk = %zu\n", size, chunk);
@@ -1218,13 +1213,16 @@ seek_check:
                         if (!offset || offset != op->pos) {
                                 src_off = offset + op->entry_p->offset;
                                 printd(3, "SEEK src_off = %" PRIu64 "\n", src_off);
-                                fseeko(fp, src_off, SEEK_SET);
+                                if (fseeko(fp, src_off, SEEK_SET))
+                                        goto read_error;
                         }
                 }
                 n = fread(buf, 1, chunk, fp);
+                if (ferror(fp))
+                        goto read_error;
                 printd(3, "Read %zu bytes from vol=%d, base=%d\n", n, op->vno,
                        op->entry_p->vno_base);
-                if (n != chunk)
+                if (n != (ssize_t)chunk)
                         size = n;
 
                 size -= n;
@@ -1236,6 +1234,12 @@ seek_check:
                         vh->pos += n;
         }
         return tot;
+
+read_error:
+        if (fp)
+                clearerr(fp);
+        memset(buf, 0, size);
+        return tot + size;
 }
 
 /*!
