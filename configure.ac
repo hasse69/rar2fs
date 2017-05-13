@@ -342,8 +342,26 @@ if test x"$cross_compiling" = x"no"; then
 else
     AC_MSG_RESULT([skipped])
 fi
-CPPFLAGS="$save_CPPFLAGS"
 ########################################################
+
+########################################################
+# Check for cygfuse
+AC_MSG_CHECKING([if we need to set -DCYGFUSE])
+AC_TRY_COMPILE(
+    [#include <fuse.h>
+    ],
+    [#ifndef FSP_FUSE_API
+         #error need -DCYGFUSE
+     #endif
+    ],
+    [AC_MSG_RESULT([yes])
+        FUSE_CPPFLAGS="$FUSE_CPPFLAGS -DCYGFUSE"
+    ],
+    [AC_MSG_RESULT([no])
+    ]
+)
+########################################################
+CPPFLAGS="$save_CPPFLAGS"
 
 save_CPPFLAGS="$CPPFLAGS"
 CPPFLAGS="$CPPFLAGS $UNRAR_CPPFLAGS"

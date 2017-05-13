@@ -317,7 +317,9 @@ static void __dircache_invalidate_for_file(const char *path)
  *****************************************************************************
  *
  ****************************************************************************/
+#ifndef __CYGWIN__
 __attribute__((visibility("hidden")))
+#endif
 void __handle_sigusr1()
 {
         printd(3, "Invalidating path cache\n");
@@ -333,7 +335,9 @@ void __handle_sigusr1()
  *****************************************************************************
  *
  ****************************************************************************/
+#ifndef __CYGWIN__
 __attribute__((visibility("hidden")))
+#endif
 void __handle_sighup()
 {
         if (mount_type == MOUNT_FOLDER) {
@@ -3445,9 +3449,8 @@ static int preload_index(struct io_buf *buf, const char *path)
 
         buf->idx.data_p = MAP_FAILED;
         int fd = open(r2i, O_RDONLY);
-        if (fd == -1) {
+        if (fd == -1)
                 return -1;
-        }
 
 #ifdef HAVE_MMAP
         /* Map the file into address space (1st pass) */
@@ -4648,10 +4651,12 @@ static int64_t get_blkdev_size(struct stat *st)
 static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
                 char **src_path_out, char **dst_path_out, int verbose)
 {
-        char p1[PATH_MAX];
-        char p2[PATH_MAX];
-        char *a1 = realpath(src_path_in, p1);
-        char *a2 = realpath(dst_path_in, p2);
+        char *a1 = realpath(src_path_in, NULL);
+#ifdef CYGFUSE
+        char *a2 = dst_path_in;
+#else
+        char *a2 = realpath(dst_path_in, NULL);
+#endif
         if (!a1 || !a2 || !strcmp(a1, a2)) {
                 if (verbose)
                         printf("%s: invalid source and/or mount point\n", prog);
@@ -4690,9 +4695,16 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
         }
 
         /* Do not try to use 'a1' after this call since dirname() will destroy it! */
+#ifndef CYGFUSE
+        char *tmp = a2;
+#endif
         *src_path_out = mount_type == MOUNT_FOLDER
                 ? strdup(a1) : strdup(dirname(a1));
         *dst_path_out = strdup(a2);
+        free(a1);
+#ifndef CYGFUSE
+        free(tmp);
+#endif
 
         /* Detect a possible file system loop */
         if (mount_type == MOUNT_FOLDER) {
@@ -4901,6 +4913,10 @@ static void release_stdio()
                 stderr_ = 0;
         }
 }
+
+#ifdef CYGFUSE
+#define fuse_exited(x) (0)
+#endif
 
 /*!
  *****************************************************************************
