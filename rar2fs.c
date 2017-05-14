@@ -4671,6 +4671,7 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
         if (mount_type == MOUNT_ARCHIVE && S_ISBLK(st.st_mode))
                 blkdev_size = get_blkdev_size(&st);
 
+#ifndef CYGFUSE
         /* Check path type(s), destination path *must* be a folder */
         (void)stat(a2, &st);
         if (!S_ISDIR(st.st_mode)) {
@@ -4678,6 +4679,7 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
                         printf("%s: invalid source and/or mount point\n", prog);
                 return -1;
         }
+#endif
 
         /* Check file collection at archive mount */
         if (mount_type == MOUNT_ARCHIVE) {
