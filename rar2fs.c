@@ -4978,7 +4978,6 @@ static int work(struct fuse_args *args)
 
         struct fuse *f = NULL;
         struct fuse_chan *ch = NULL;
-        struct fuse_session *se = NULL;
         pthread_t t;
         char *mp;
         int mt = 0;
@@ -5004,10 +5003,9 @@ static int work(struct fuse_args *args)
                       if (f == NULL) {
                               fuse_unmount(mp, ch);
                       } else {
-                              syslog(LOG_DEBUG, "mounted %s\n", mp);
-                              se = fuse_get_session(f);
-                              fuse_set_signal_handlers(se);
                               fuse_daemonize(fg);
+                              fuse_set_signal_handlers(fuse_get_session(f));
+                              syslog(LOG_DEBUG, "mounted %s\n", mp);
                       }
               }
         }
@@ -5038,10 +5036,10 @@ static int work(struct fuse_args *args)
         pthread_join(t, NULL);
 
         /* This is doing more or less the same as fuse_teardown(). */
-        fuse_remove_signal_handlers(se);
+        fuse_remove_signal_handlers(fuse_get_session(f));
         fuse_unmount(mp, ch);
-        syslog(LOG_DEBUG, "unmounted %s\n", mp);
         fuse_destroy(f);
+        syslog(LOG_DEBUG, "unmounted %s\n", mp);
         free(mp);
 
 #if defined ( HAVE_SCHED_SETAFFINITY ) && defined ( HAVE_CPU_SET_T )
