@@ -317,7 +317,7 @@ static void __dircache_invalidate_for_file(const char *path)
  *****************************************************************************
  *
  ****************************************************************************/
-#ifndef __CYGWIN__
+#ifdef HAVE_VISIBILITY_ATTRIB
 __attribute__((visibility("hidden")))
 #endif
 void __handle_sigusr1()
@@ -335,7 +335,7 @@ void __handle_sigusr1()
  *****************************************************************************
  *
  ****************************************************************************/
-#ifndef __CYGWIN__
+#ifdef HAVE_VISIBILITY_ATTRIB
 __attribute__((visibility("hidden")))
 #endif
 void __handle_sighup()

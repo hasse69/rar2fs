@@ -628,6 +628,27 @@ AC_TRY_COMPILE([#include<stdio.h>],[
 ac_c_werror_flag=
 AC_LANG_POP
 
+AC_LANG_PUSH(C)
+ac_c_werror_flag=yes
+save_CFLAGS=$CFLAGS
+CFLAGS="$CFLAGS -Werror"
+AC_MSG_CHECKING([if compiler supports visibility attribute])
+AC_TRY_COMPILE([__attribute__((visibility("hidden")))],[],
+    [AC_MSG_RESULT([yes])
+         has_hidden_attrib=yes
+    ],
+    [AC_MSG_RESULT([no])
+         has_hidden_attrib=no
+    ]
+)
+CFLAGS="$save_CFLAGS"
+ac_c_werror_flag=
+AC_LANG_POP
+if test x"$has_hidden_attrib" = x"yes"; then
+    AC_DEFINE(HAVE_VISIBILITY_ATTRIB, 1, [Define if compiler supports __attribute__((visibility("hidden")))])
+fi
+
+
 # Check how linker handles -rdynamic
 # Note that AC_LANG_WERROR is not used here since it is more or less useless
 # until its effect can be undone. Instead $ac_c_werror_flag is manipulated
@@ -651,7 +672,7 @@ AC_LANG_POP
 AC_LANG_PUSH(C)
 ac_c_werror_flag=yes
 AC_MSG_CHECKING([for __sync_synchronize])
-AC_TRY_COMPILE([],[int main (int argc, char** argv) {__sync_synchronize();}],
+AC_TRY_COMPILE([], [__sync_synchronize();],
     [AC_MSG_RESULT([yes])
          has_synchronize=yes
     ],
@@ -661,7 +682,6 @@ AC_TRY_COMPILE([],[int main (int argc, char** argv) {__sync_synchronize();}],
 )
 ac_c_werror_flag=
 AC_LANG_POP
-
 if test x"$has_synchronize" = x"yes"; then
     AC_DEFINE(HAVE_SYNC_SYNCHRONIZE, 1, [Define if __sync_synchronize() is available])
 fi
