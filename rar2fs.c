@@ -4652,7 +4652,7 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
                 char **src_path_out, char **dst_path_out, int verbose)
 {
         char *a1 = realpath(src_path_in, NULL);
-#ifdef CYGFUSE
+#ifdef __CYGWIN__
         char *a2 = dst_path_in;
 #else
         char *a2 = realpath(dst_path_in, NULL);
@@ -4671,7 +4671,7 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
         if (mount_type == MOUNT_ARCHIVE && S_ISBLK(st.st_mode))
                 blkdev_size = get_blkdev_size(&st);
 
-#ifndef CYGFUSE
+#ifndef __CYGWIN__
         /* Check path type(s), destination path *must* be a folder */
         (void)stat(a2, &st);
         if (!S_ISDIR(st.st_mode)) {
@@ -4697,14 +4697,14 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
         }
 
         /* Do not try to use 'a1' after this call since dirname() will destroy it! */
-#ifndef CYGFUSE
+#ifndef __CYGWIN__
         char *tmp = a2;
 #endif
         *src_path_out = mount_type == MOUNT_FOLDER
                 ? strdup(a1) : strdup(dirname(a1));
         *dst_path_out = strdup(a2);
         free(a1);
-#ifndef CYGFUSE
+#ifndef __CYGWIN__
         free(tmp);
 #endif
 
