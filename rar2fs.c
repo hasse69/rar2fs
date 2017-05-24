@@ -5117,6 +5117,10 @@ static struct fuse_opt rar2fs_opts[] = {
         FUSE_OPT_KEY("--version",       OPT_KEY_VERSION),
         FUSE_OPT_KEY("-h",              OPT_KEY_HELP),
         FUSE_OPT_KEY("--help",          OPT_KEY_HELP),
+/* Allow --VolumePrefix=UNC option to be passed to WinFSP */
+#ifdef FSP_FUSE_API
+        FUSE_OPT_KEY("--VolumePrefix=", FUSE_OPT_KEY_KEEP),
+#endif
         FUSE_OPT_END
 };
 
