@@ -4916,10 +4916,6 @@ static void release_stdio()
         }
 }
 
-#ifdef CYGFUSE
-#define fuse_exited(x) (0)
-#endif
-
 /*!
  *****************************************************************************
  *
