@@ -179,6 +179,7 @@ static mode_t umask_ = 0022;
 static int extract_rar(char *arch, const char *file, void *arg);
 static int get_vformat(const char *s, int t, int *l, int *p);
 static int CALLBACK list_callback_noswitch(UINT, LPARAM UserData, LPARAM, LPARAM);
+static int CALLBACK list_callback(UINT, LPARAM UserData, LPARAM, LPARAM);
 
 struct eof_cb_arg {
         off_t toff;
@@ -209,7 +210,7 @@ static const char *file_cmd[] = {
                 : (l)->HostOS == HOST_UNIX || (l)->HostOS == HOST_BEOS)
 #define IS_RAR_DIR(l) \
         ((l)->UnpVer >= 20 \
-                ? (((l)->Flags&LHD_DIRECTORY)==LHD_DIRECTORY) \
+                ? ((l)->Flags&RHDF_DIRECTORY) \
                 : (IS_UNIX_MODE_(l) \
                         ? (l)->FileAttr & S_IFDIR \
                         : (l)->FileAttr & 0x10))
@@ -420,7 +421,7 @@ static inline int is_nnn_vol(const char *name)
 #define IS_NNN(s) (is_nnn_vol(s))
 
 #define VTYPE(flags) \
-        ((flags & MHD_NEWNUMBERING) ? 1 : 0)
+        ((flags & ROADF_NEWNUMBERING) ? 1 : 0)
 
 /*!
  *****************************************************************************
@@ -956,24 +957,69 @@ static int get_vformat(const char *s, int t, int *l, int *p)
  *****************************************************************************
  *
  ****************************************************************************/
-static int RARVolNameToFirstName_BUGGED(char *s, int vtype)
+static int __check_vol_header(const char *arch)
 {
-        int len;
-        int pos;
+        HANDLE h;
+        RAROpenArchiveDataEx d;
+        struct RARHeaderDataEx header;
 
+        memset(&d, 0, sizeof(RAROpenArchiveDataEx));
+        d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
+        d.OpenMode = RAR_OM_LIST_INCSPLIT;
+        d.Callback = list_callback_noswitch;
+        d.UserData = (LPARAM)arch;
+        h = RAROpenArchiveEx(&d);
+
+        /* Check for fault */
+        if (d.OpenResult) {
+                if (h)
+                        RARCloseArchive(h);
+                return -1;
+        }
+        if (d.Flags & ROADF_ENCHEADERS) {
+                RARCloseArchive(h);
+                d.Callback = list_callback;
+                h = RAROpenArchiveEx(&d);
+        }
+        if (d.Flags & ROADF_VOLUME) {
+                if (!(d.Flags & ROADF_FIRSTVOLUME)) {
+                        RARCloseArchive(h);
+                        return -1;
+                }
+        }
+        if (RARReadHeaderEx(h, &header))  {
+                RARCloseArchive(h);
+                return -1;
+        }
+        RARCloseArchive(h);
+        return 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int __RARVolNameToFirstName(char *s, int vtype)
+{
         char *s_copy = strdup(s);
         RARVolNameToFirstName(s, vtype);
         if (!IS_RAR(s) && !IS_NNN(s)) {
                 free(s_copy);
                 return -1;
         }
-        if (get_vformat(s, !vtype, &len, &pos) == 1) {
-                while (--len >= 0 && s_copy[pos + len] == '0');
-                if (len < 0)
-                        s = strcpy(s, s_copy);
+        /* RARVolNameToFirstName() might provide the wrong answer for .NNN
+         * archives. Lets try to fix that! */
+        if (IS_NNN(s)) {
+                int len;
+                int pos;
+                if (get_vformat(s, !vtype, &len, &pos) == 1) {
+                        while (--len >= 0 && s_copy[pos + len] == '0');
+                        if (len < 0 || access(s, F_OK))
+                                s = strcpy(s, s_copy);
+                }
         }
         free(s_copy);
-        return 0;
+        return __check_vol_header(s);
 }
 
 #if _POSIX_TIMERS < 1
@@ -1729,16 +1775,18 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
                 goto out;
         }
 
-        if (d.Flags & MHD_VOLUME) {
+        if (d.Flags & ROADF_VOLUME) {
                 char *arch_ = strdup(arch);
-                int format = (d.Flags & MHD_NEWNUMBERING) ? 0 : 1;
-                RARVolNameToFirstName_BUGGED(arch_, format);
-                while (1) {
-                        if (access(arch_, F_OK))
-                               break;
-                        list = dir_entry_add(list, arch_, NULL, DIR_E_NRM);
-                        ++files;
-                        RARNextVolumeName(arch_, format);
+                int format = (d.Flags & ROADF_NEWNUMBERING) ? 0 : 1;
+                if (!__RARVolNameToFirstName(arch_, format)) {
+                        while (1) {
+                                if (access(arch_, F_OK))
+                                       break;
+                                list = dir_entry_add(list, arch_, NULL,
+                                                        DIR_E_NRM);
+                                ++files;
+                                RARNextVolumeName(arch_, format);
+                        }
                 }
                 free(arch_);
         } else {
@@ -2228,7 +2276,7 @@ static void __listrar_incache(struct filecache_entry *entry_p,
 {
         if (!entry_p->flags.vsize_resolved) {
               entry_p->vsize_next = GET_RAR_PACK_SZ(&next->hdr);
-              if (((next->hdr.Flags & LHD_SPLIT_AFTER) && entry_p->vsize_next) ||
+              if (((next->hdr.Flags & RHDF_SPLITAFTER) && entry_p->vsize_next) ||
                               /* Handle files located in only two volumes */
                               (entry_p->vsize_first + entry_p->vsize_next) ==
                                       entry_p->stat.st_size)
@@ -2275,9 +2323,9 @@ static struct filecache_entry *__listrar_tocache(char *file,
         int raw_mode;
 
         if (next->hdr.Method == FHD_STORING &&
-                        !(next->hdr.Flags & LHD_PASSWORD) &&
+                        !(next->hdr.Flags & RHDF_ENCRYPTED) &&
                         !IS_RAR_DIR(&next->hdr)) {
-                if (next->hdr.Flags & LHD_SPLIT_BEFORE)
+                if (next->hdr.Flags & RHDF_SPLITBEFORE)
                         return NULL;
                 raw_mode = 1;
         } else {
@@ -2295,7 +2343,7 @@ static struct filecache_entry *__listrar_tocache(char *file,
 
         if (raw_mode) {
                 entry_p->flags.raw = 1;
-                if ((d->Flags & MHD_VOLUME)) {   /* volume ? */
+                if ((d->Flags & ROADF_VOLUME)) {   /* volume ? */
                         int len, pos;
 
                         entry_p->flags.multipart = 1;
@@ -2317,7 +2365,7 @@ static struct filecache_entry *__listrar_tocache(char *file,
                                          * later if needed.
                                          */
                                         entry_p->vsize_next = entry_p->vsize_first;
-                                        if (next->hdr.Flags & (LHD_SPLIT_BEFORE | LHD_SPLIT_AFTER))
+                                        if (next->hdr.Flags & (RHDF_SPLITBEFORE | RHDF_SPLITAFTER))
                                                 entry_p->flags.vsize_resolved = 0;
                                 }
                         } else {
@@ -2332,7 +2380,7 @@ static struct filecache_entry *__listrar_tocache(char *file,
         } else {        /* Folder or Compressed and/or Encrypted */
                 entry_p->flags.raw = 0;
                 /* Check if part of a volume */
-                if (d->Flags & MHD_VOLUME) {
+                if (d->Flags & ROADF_VOLUME) {
                         entry_p->flags.multipart = 1;
                         entry_p->vtype = VTYPE(d->Flags);
                 } else {
@@ -2340,7 +2388,7 @@ static struct filecache_entry *__listrar_tocache(char *file,
                 }
                 if (!IS_RAR_DIR(&next->hdr)) {
                         entry_p->flags.save_eof = get_save_eof(entry_p->rar_p);
-                        if (next->hdr.Flags & LHD_PASSWORD)
+                        if (next->hdr.Flags & RHDF_ENCRYPTED)
                                 entry_p->flags.encrypted = 1;
                 }
         }
@@ -2366,7 +2414,7 @@ static void __listrar_tocache_forcedir(struct filecache_entry *entry_p,
         set_rarstats(entry_p, next, 1);
 
         /* Check if part of a volume */
-        if (d->Flags & MHD_VOLUME) {
+        if (d->Flags & ROADF_VOLUME) {
                 entry_p->flags.multipart = 1;
                 entry_p->vtype = VTYPE(d->Flags);
         } else {
@@ -2400,7 +2448,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 return d.OpenResult;
         }
 
-        if (d.Flags & MHD_PASSWORD) {
+        if (d.Flags & ROADF_ENCHEADERS) {
                 RARCloseArchive(hdl);
                 d.Callback = list_callback;
                 hdl = RAROpenArchiveEx(&d);
@@ -2434,7 +2482,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 /* Make sure parent folders are always searched from the first
                  * volume file since sub-folders might actually be placed
                  * elsewhere. Also the alias function depends on this. */
-                if ((d.Flags & MHD_VOLUME) && RARVolNameToFirstName_BUGGED(
+                if ((d.Flags & ROADF_VOLUME) && __RARVolNameToFirstName(
                                          *first_arch, !VTYPE(d.Flags))) {
                         free(*first_arch);
                         *first_arch = NULL;
@@ -2619,13 +2667,14 @@ static int syncdir_scan(const char *dir, const char *root,
         struct dirent **namelist;
         unsigned int f;
         int (*filter[]) (SCANDIR_ARG3) = {f1, f2}; /* f0 not needed */
-        int error_count = 0;
+        int error_tot = 0;
         int seek_len = 0;
         char *first_arch = NULL;
         int reset = 1;
 
         ENTER_("%s", dir);
         for (f = 0; f < (sizeof(filter) / sizeof(filter[0])); f++) {
+                int error_cnt = 0;
                 int final = 0;
                 int vno = 0;
                 int vcnt = 0;
@@ -2642,18 +2691,18 @@ static int syncdir_scan(const char *dir, const char *root,
 
                         vno = get_vformat(namelist[i]->d_name, vtype,
                                                 NULL, &pos);
-                        if (vno <= oldvno)
+                        if (i && strncmp(namelist[i]->d_name,
+                                        namelist[i - 1]->d_name,
+                                        pos))
                                 reset = 1;
-                        else if (vno == (oldvno + 1))
-                                if (i && strncmp(namelist[i]->d_name,
-                                                namelist[i - 1]->d_name,
-                                                pos))
-                                        reset = 1;
+                        else if (vno <= oldvno)
+                                reset = 1;
 
                         char *arch;
                         ABS_MP(arch, root, namelist[i]->d_name);
 
                         if (reset) {
+                                error_cnt = 0;
                                 final = 0;
                                 reset = 0;
                                 seek_len = get_seek_length(arch);
@@ -2667,12 +2716,21 @@ static int syncdir_scan(const char *dir, const char *root,
                                 if (!final) {
                                         if (listrar(dir, next, arch, &first_arch,
                                                                 &final)) {
+                                                ++error_tot;
+                                                ++error_cnt;
                                                 *next = dir_entry_add(*next,
                                                                namelist[i]->d_name,
                                                                NULL, DIR_E_NRM);
-                                                ++error_count;
                                         }
+                                } else if (error_cnt) {
+                                        *next = dir_entry_add(*next,
+                                                      namelist[i]->d_name,
+                                                      NULL, DIR_E_NRM);
                                 }
+                        } else if (error_cnt) {
+                                *next = dir_entry_add(*next,
+                                              namelist[i]->d_name,
+                                              NULL, DIR_E_NRM);
                         }
                         free(namelist[i]);
                         ++i;
@@ -2682,7 +2740,7 @@ static int syncdir_scan(const char *dir, const char *root,
 
         free(first_arch);
 
-        return error_count ? -ENOENT : 0;
+        return error_tot ? -ENOENT : 0;
 }
 
 /*!
@@ -2720,7 +2778,7 @@ static int readdir_scan(const char *dir, const char *root,
         unsigned int f;
         unsigned int f_end;
         int (*filter[]) (SCANDIR_ARG3) = {f0, f1, f2};
-        int error_count = 0;
+        int error_tot = 0;
         int seek_len = 0;
         char *first_arch = NULL;
         int reset = 1;
@@ -2740,6 +2798,7 @@ static int readdir_scan(const char *dir, const char *root,
         }
 
         for (f = 0; f < f_end; f++) {
+                int error_cnt = 0;
                 int final = 0;
                 int vno = 0;
                 int vcnt = 0;
@@ -2777,18 +2836,18 @@ static int readdir_scan(const char *dir, const char *root,
                         int oldvno = vno;
                         vno = get_vformat(namelist[i]->d_name, vtype,
                                                 NULL, &pos);
-                        if (vno <= oldvno)
+                        if (i && strncmp(namelist[i]->d_name,
+                                        namelist[i - 1]->d_name,
+                                        pos))
                                 reset = 1;
-                        else if (vno == (oldvno + 1))
-                                if (i && strncmp(namelist[i]->d_name,
-                                                namelist[i - 1]->d_name,
-                                                pos))
-                                        reset = 1;
+                        else if (vno <= oldvno)
+                                reset = 1;
 
                         char *arch;
                         ABS_MP(arch, root, namelist[i]->d_name);
 
                         if (reset) {
+                                error_cnt = 0;
                                 final = 0;
                                 reset = 0;
                                 seek_len = get_seek_length(arch);
@@ -2801,12 +2860,21 @@ static int readdir_scan(const char *dir, const char *root,
                         if (!seek_len || ++vcnt <= seek_len) {
                                 if (!final) {
                                         if (listrar(dir, next2, arch, &first_arch, &final)) {
-                                                ++error_count;
+                                                ++error_tot;
+                                                ++error_cnt;
                                                 *next2 = dir_entry_add(*next2,
                                                                namelist[i]->d_name,
                                                                NULL, DIR_E_NRM);
                                         }
+                                } else if (error_cnt) {
+                                        *next2 = dir_entry_add(*next2,
+                                                      namelist[i]->d_name,
+                                                      NULL, DIR_E_NRM);
                                 }
+                        } else if (error_cnt) {
+                                *next2 = dir_entry_add(*next2,
+                                               namelist[i]->d_name,
+                                               NULL, DIR_E_NRM);
                         }
 
 next_entry:
@@ -2819,7 +2887,7 @@ next_entry:
 
         free(first_arch);
 
-        return error_count;
+        return error_tot;
 }
 
 /*!

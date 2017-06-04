@@ -46,50 +46,28 @@
 #define  LINK_T_FILECOPY    0x00000002U
 
 #ifndef __cplusplus
-/* These are defined here since headers.hpp can not be included from non C++ code */
 
-#define  MHD_VOLUME         0x0001U
-#define  MHD_COMMENT        0x0002U
-#define  MHD_LOCK           0x0004U
-#define  MHD_SOLID          0x0008U
-#define  MHD_PACK_COMMENT   0x0010U
-#define  MHD_NEWNUMBERING   0x0010U
-#define  MHD_AV             0x0020U
-#define  MHD_PROTECT        0x0040U
-#define  MHD_PASSWORD       0x0080U
-#define  MHD_FIRSTVOLUME    0x0100U
-#define  MHD_ENCRYPTVER     0x0200U
-
-#define  LHD_SPLIT_BEFORE   0x0001U
-#define  LHD_SPLIT_AFTER    0x0002U
-#define  LHD_PASSWORD       0x0004U
-#define  LHD_COMMENT        0x0008U
-#define  LHD_SOLID          0x0010U
-
-#define  LHD_WINDOWMASK     0x00e0U
-#define  LHD_WINDOW64       0x0000U
-#define  LHD_WINDOW128      0x0020U
-#define  LHD_WINDOW256      0x0040U
-#define  LHD_WINDOW512      0x0060U
-#define  LHD_WINDOW1024     0x0080U
-#define  LHD_WINDOW2048     0x00a0U
-#define  LHD_WINDOW4096     0x00c0U
-#define  LHD_DIRECTORY      0x00e0U
-
-#define  LHD_LARGE          0x0100U
-#define  LHD_UNICODE        0x0200U
-#define  LHD_SALT           0x0400U
-#define  LHD_VERSION        0x0800U
-#define  LHD_EXTTIME        0x1000U
-#define  LHD_EXTFLAGS       0x2000U
-
-#define  SKIP_IF_UNKNOWN    0x4000U
-#define  LONG_BLOCK         0x8000U
-
-#define  EARC_NEXT_VOLUME   0x0001U /* not last volume */
-#define  EARC_DATACRC       0x0002U /* store CRC32 of RAR archive (now used only in volumes) */
-#define  EARC_REVSPACE      0x0004U /* reserve space for end of REV file 7 byte record */
-#define  EARC_VOLNUMBER     0x0008U /* store a number of current volume */
+/* Later versions of UnRAR source/dll should define these.
+ * Assume that if one of these are not defined, they all need to
+ * be defined here instead for backwards compatibility. */
+#ifndef ROADF_VOLUME
+#define ROADF_VOLUME       0x0001
+#define ROADF_COMMENT      0x0002
+#define ROADF_LOCK         0x0004
+#define ROADF_SOLID        0x0008
+#define ROADF_NEWNUMBERING 0x0010
+#define ROADF_SIGNED       0x0020
+#define ROADF_RECOVERY     0x0040
+#define ROADF_ENCHEADERS   0x0080
+#define ROADF_FIRSTVOLUME  0x0100
+#endif
+#ifndef RHDF_SPLITBEFORE
+#define RHDF_SPLITBEFORE 0x01
+#define RHDF_SPLITAFTER  0x02
+#define RHDF_ENCRYPTED   0x04
+#define RHDF_SOLID       0x10
+#define RHDF_DIRECTORY   0x20
+#endif
 
 /* Internal implementation, depends on archive format version. */
 enum HOST_SYSTEM {
@@ -100,8 +78,6 @@ enum HOST_SYSTEM {
   HOST_MSDOS=0,HOST_OS2=1,HOST_WIN32=2,HOST_UNIX=3,HOST_MACOS=4,
   HOST_BEOS=5,HOST_MAX
 };
-
-#define MAXPASSWORD 128
 
 /* These are missing from unrar headers!? */
 #define FHD_STORING         0x30U
