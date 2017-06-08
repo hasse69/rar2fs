@@ -169,13 +169,6 @@ static mode_t umask_ = 0022;
 
 #define P_ALIGN_(a) (((a)+page_size_)&~(page_size_-1))
 
-#ifdef __linux
-#define IS_BLKDEV() (blkdev_size >= 0)
-#else
-#define IS_BLKDEV() (0)
-#endif
-#define BLKDEV_SIZE() (blkdev_size > 0 ? blkdev_size : 0)
-
 static int extract_rar(char *arch, const char *file, void *arg);
 static int get_vformat(const char *s, int t, int *l, int *p);
 static int CALLBACK list_callback_noswitch(UINT, LPARAM UserData, LPARAM, LPARAM);
