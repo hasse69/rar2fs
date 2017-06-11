@@ -92,7 +92,7 @@ struct volume_handle {
 struct io_context {
         FILE* fp;
         off_t pos;
-        struct io_buf *buf;
+        struct iob *buf;
         pid_t pid;
         unsigned int seq;
         short vno;
@@ -188,7 +188,7 @@ struct extract_cb_arg {
 };
 
 static int extract_index(const char *, const struct filecache_entry *, off_t);
-static int preload_index(struct io_buf *, const char *);
+static int preload_index(struct iob *, const char *);
 
 #if RARVER_MAJOR > 4
 static const char *file_cmd[] = {
@@ -1464,7 +1464,7 @@ check_idx:
                                 size_t chunk = (off_t)(offset + size) > op->pos
                                         ? (size_t)(op->pos - offset)
                                         : size;
-                                size_t tmp = copyFrom(buf, op->buf, chunk, pos);
+                                size_t tmp = iob_copy(buf, op->buf, chunk, pos);
                                 size -= tmp;
                                 buf += tmp;
                                 offset += tmp;
@@ -1583,8 +1583,7 @@ check_idx:
                         op->pos += op->buf->used;
                         op->buf->ri = op->buf->wi;
                         op->buf->used = 0;
-                        (void)readTo(op->buf, op->fp,
-                                        IOB_SAVE_HIST);
+                        (void)iob_write(op->buf, op->fp, IOB_SAVE_HIST);
                         sched_yield();
                 }
 
@@ -1595,14 +1594,14 @@ check_idx:
 
                         /* Pull in rest of data if needed */
                         if ((size_t)(op->buf->offset - offset) < size)
-                                (void)readTo(op->buf, op->fp,
+                                (void)iob_write(op->buf, op->fp,
                                                 IOB_SAVE_HIST);
                 }
         }
 
         if (size) {
                 int off = offset - op->pos;
-                n += readFrom(buf, op->buf, size, off);
+                n += iob_read(buf, op->buf, size, off);
                 op->pos += (off + size);
                 if (__wake_thread(op, RD_READ_ASYNC))
                         return -EIO;
@@ -3482,7 +3481,7 @@ restart:
 
                 printd(4, "Reader thread wakeup (fp:%p)\n", op->fp);
                 if (req > RD_SYNC_NOREAD && !feof(op->fp))
-                        (void)readTo(op->buf, op->fp, IOB_SAVE_HIST);
+                        (void)iob_write(op->buf, op->fp, IOB_SAVE_HIST);
 
                 pthread_mutex_lock(&op->rd_req_mutex);
                 op->rd_req = RD_IDLE;
@@ -3499,7 +3498,7 @@ out:
  *****************************************************************************
  *
  ****************************************************************************/
-static int preload_index(struct io_buf *buf, const char *path)
+static int preload_index(struct iob *buf, const char *path)
 {
         ENTER_("%s", path);
 
@@ -3772,7 +3771,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
         }
 
         FILE *fp = NULL;
-        struct io_buf *buf = NULL;
+        struct iob *buf = NULL;
         struct io_context *op = NULL;
         struct io_handle* io = NULL;
         pid_t pid = 0;
@@ -3870,7 +3869,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                         goto open_error;
                 }
 
-                buf = malloc(P_ALIGN_(sizeof(struct io_buf) + IOB_SZ));
+                buf = malloc(P_ALIGN_(sizeof(struct iob) + IOB_SZ));
                 if (!buf)
                         goto open_error;
                 IOB_RST(buf);
@@ -4040,7 +4039,7 @@ static void *rar2_init(struct fuse_conn_info *conn)
                                OPT_STR(OPT_KEY_CONFIG, 0));
         filecache_init();
         dircache_init();
-        iobuffer_init();
+        iob_init();
         sighandler_init();
 
         return NULL;
@@ -4057,7 +4056,7 @@ static void rar2_destroy(void *data)
         (void)data;             /* touch */
 
         rarconfig_destroy();
-        iobuffer_destroy();
+        iob_destroy();
         dircache_destroy();
         filecache_destroy();
         sighandler_destroy();

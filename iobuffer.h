@@ -44,7 +44,7 @@
 #define IOB_NO_HIST 0
 #define IOB_SAVE_HIST 1
 
-#define IOB_RST(b)  (memset((b), 0, sizeof(struct io_buf) + IOB_SZ))
+#define IOB_RST(b)  (memset((b), 0, sizeof(struct iob) + IOB_SZ))
 
 struct idx_info {
         int fd;
@@ -52,7 +52,7 @@ struct idx_info {
         struct idx_data *data_p;
 };
 
-struct io_buf {
+struct iob {
         struct idx_info idx;
         off_t offset;
         volatile size_t ri;
@@ -62,22 +62,22 @@ struct io_buf {
 };
 
 size_t
-readTo(struct io_buf *dest, FILE *fp, int hist);
+iob_write(struct iob *dest, FILE *fp, int hist);
 
 size_t
-readFrom(char *dest, struct io_buf *src, size_t size, size_t off);
+iob_read(char *dest, struct iob *src, size_t size, size_t off);
 
 size_t
-copyFrom(char *dest, struct io_buf *src, size_t size, size_t pos);
+iob_copy(char *dest, struct iob *src, size_t size, size_t pos);
 
 extern size_t iob_hist_sz;
 extern size_t iob_sz;
 
 void
-iobuffer_init();
+iob_init();
 
 void
-iobuffer_destroy();
+iob_destroy();
 
 #endif
 
