@@ -1,112 +1,189 @@
 rar2fs ChangeLog file.
 
+2017-06-10  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.25.0
+
+        * Rename IO buffer API
+
+        * Remove block device macros
+
+        * Use proper definitions from libunrar headers
+
+        Many definitions are hidden and supposed to be used only internally
+        within the library itself, some of those having the same value(s)
+        as the public exported interface. Later version of the library will
+        properly export all public definitions instead of using magic constants.
+        This patch will prepare for those definitions by using them in the way
+        they were intended to be used. For backwards compatibility the
+        definitions are also added to the library extension if not already
+        defined. This patch also improves the presentation of volumes that are
+        missing or having corrupt key parts.
+
+        * Relax read restrictions in raw mode
+
+        In raw mode any type of read error can be made more relaxed
+        returning bogus data in the buffer (0) instead of error.
+        This patch should address the enhancement request reported
+        in issue #52 for RAR archives in store mode.
+
+        * Remove workaround for fuse_exited() on CYGFUSE
+
+        The latest version of CYGFUSE now supports fuse_exited()
+        so a workaround is no longer needed.
+
+        * Allow --VolumePrefix=UNC to be passed to WinFSP
+
+        * Add build support for Dokany+dokanfuse
+
+        * Update detection for visibility attribute support
+
+        * Fix issue with SIGTERM not always working when daemonized
+
+        The function fuse_set_signal_handlers() is called before calling
+        fuse_daemonize(). This has some effect on signal processing that
+        on CYGWIN causes the SIGTERM signal to not be delivered when
+        issuing e.g. the 'kill' command on a daemonized rar2fs process.
+        This patch changes the order in which these two functions are
+        called.
+
+        * Remove target folder check for cygwin
+
+        * Add support for WinFSP/cygfuse layer
+
+        This patch provides the necessary build support for the
+        WinFSP/cygfuse layer to allow rar2fs to be run under Windows
+        as requested in issue #75.
+
+        * Add error checks before calling creat(2)
+
+        Error checks were made after creat(2) was called resulting
+        in files possibly being created (by e.g. touch) erroneously.
+        This patch makes sure any internal error checks are performed
+        before creat(2) or open(2) is called.
+
+        This patch also includes some minor cleanup in the raw read
+        service function(s) and removal of unused bit fields.
+
+        * Change 'RARVolNameToFirstName' fix for .NNN files
+
+        * Simplify volume check logic
+
+        This patch simplifies the volume check logic and also corrects
+        a couple of rare corner cases.
+
+        * Add per archive configuration
+
+        This patch implements both part 1 and 2 of the feature request
+        reported in issue #60.
+
 2017-04-29  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-	* Release v1.24.1
+        * Release v1.24.1
 
-	* [rar2fs #74]
+        * [rar2fs #74]
 
-	Update for UnRAR source 5.5.3
+        Update for UnRAR source 5.5.3
 
-	* Fix an issue with volume consistency check
+        * Fix an issue with volume consistency check
 
-	* Fix usage of VTYPE macro
+        * Fix usage of VTYPE macro
 
-	* Fix a volume detection bug
+        * Fix a volume detection bug
 
 2017-03-31  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
-	* Release v1.24.0
+        * Release v1.24.0
 
-	* Remove internal support for RAR in RAR
+        * Remove internal support for RAR in RAR
 
-	* [rar2fs #69]
+        * [rar2fs #69]
 
-	Split file and directory cache
+        Split file and directory cache
 
-	* Fix performance issue for encrypted archives
+        * Fix performance issue for encrypted archives
 
-	* [rar2fs #66]
+        * [rar2fs #66]
 
-	Check consistency of new volumes
+        Check consistency of new volumes
 
-	* [rar2fs #72]
+        * [rar2fs #72]
 
-	Fix incorrect path split
+        Fix incorrect path split
 
-	* Do not enforce use of 'default_permissions' option
+        * Do not enforce use of 'default_permissions' option
 
-	* Add specific mount error at password check failure
+        * Add specific mount error at password check failure
 
-	* [rar2fs #70]
+        * [rar2fs #70]
 
-	Fix an issue in get_password()
+        Fix an issue in get_password()
 
-	* Fix wrong cache invalidation path
+        * Fix wrong cache invalidation path
 
-	* [rar2fs #68]
+        * [rar2fs #68]
 
-	Fix a problem with absolute paths
+        Fix a problem with absolute paths
 
-	* [rar2fs #64]
+        * [rar2fs #64]
 
-	Replace pipes with conditional variable
+        Replace pipes with conditional variable
 
-	* Add SA_NODEFER to sa_flags for SIGSEGV
+        * Add SA_NODEFER to sa_flags for SIGSEGV
 
-	* Enable multi-threaded FUSE operation by default
+        * Enable multi-threaded FUSE operation by default
 
-	* Update I/O handling for compressed archives
+        * Update I/O handling for compressed archives
 
-	* Add check for reader thread creation failure
+        * Add check for reader thread creation failure
 
-	* Fix crash in option parser in debug level above 4
+        * Fix crash in option parser in debug level above 4
 
-	* [rar2fs #67]
+        * [rar2fs #67]
 
-	Fix duplicate directory entries for archive mounts
+        Fix duplicate directory entries for archive mounts
 
-	* Call default signal handler after catching SIGSEGV
+        * Call default signal handler after catching SIGSEGV
 
-	* Check need of RAR_SMP also for static libunrar
+        * Check need of RAR_SMP also for static libunrar
 
-	* Fix some corner cases in the directory cache logic
+        * Fix some corner cases in the directory cache logic
 
-	* [rar2fs #65]
+        * [rar2fs #65]
 
-	Fix file collection at archive mount
+        Fix file collection at archive mount
 
-	* Remove a superfluous printf() in dump_stack
+        * Remove a superfluous printf() in dump_stack
 
-	* [rar2fs #62]
+        * [rar2fs #62]
 
-	Add static linking of UnRAR library
+        Add static linking of UnRAR library
 
-	* Remove unwanted linker flags for mkr2i
+        * Remove unwanted linker flags for mkr2i
 
-	* Fix wrong path lookup for archive mounts
+        * Fix wrong path lookup for archive mounts
 
-	* Improve getattr folder cache logic
+        * Improve getattr folder cache logic
 
-	* Add folder cache for folder style mounts
+        * Add folder cache for folder style mounts
 
-	* Add folder cache for archive style mounts
+        * Add folder cache for archive style mounts
 
-	* [rar2fs #49]
+        * [rar2fs #49]
 
-	Fix mounting of encrypted archives
+        Fix mounting of encrypted archives
 
-	* Fix memory leak in readdir() function
+        * Fix memory leak in readdir() function
 
-	* [rar2fs #61]
+        * [rar2fs #61]
 
-	Fix seek length issue for archive mounts
+        Fix seek length issue for archive mounts
 
-	* Fix size printed in function dump_buf()
+        * Fix size printed in function dump_buf()
 
-	* Only fprintf if we have a valid fp pointer in dump_buf.
+        * Only fprintf if we have a valid fp pointer in dump_buf.
 
-	* Actually use duplicated string in lookup_filecopy.
+        * Actually use duplicated string in lookup_filecopy.
 
 2016-09-05  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
