@@ -45,8 +45,6 @@
 #define  LINK_T_UNICODE     0x00000001U
 #define  LINK_T_FILECOPY    0x00000002U
 
-#ifndef __cplusplus
-
 /* Later versions of UnRAR source/dll should define these.
  * Assume that if one of these are not defined, they all need to
  * be defined here instead for backwards compatibility. */
@@ -68,6 +66,8 @@
 #define RHDF_SOLID       0x10
 #define RHDF_DIRECTORY   0x20
 #endif
+
+#ifndef __cplusplus
 
 /* Internal implementation, depends on archive format version. */
 enum HOST_SYSTEM {

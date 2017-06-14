@@ -101,7 +101,6 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, int *ResultCod
       N->HeadSize = Arc.FileHead.HeadSize;
       N->Offset = Arc.CurBlockPos;
       N->FileDataEnd = Arc.NextBlockPos;
-      N->hdr.Flags = Arc.FileHead.Flags;
 
       /* For supporting high-precision timestamp.
        * If not available, this value is set to 0 (1601/01/01 00:00:00.000000000).
@@ -126,21 +125,29 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, int *ResultCod
 #endif
 #endif
 
-#if RARVER_MAJOR > 4
-      // Map some RAR5 properties to old-style flags if applicable
-      if (Arc.Format >= RARFMT50)
-      {
-        unsigned int mask = LHD_SPLIT_BEFORE|LHD_SPLIT_AFTER|LHD_PASSWORD|LHD_DIRECTORY;
-        N->hdr.Flags &= ~mask;
-        if (Arc.FileHead.SplitBefore)
-        N->hdr.Flags |= LHD_SPLIT_BEFORE;
-        if (Arc.FileHead.SplitAfter)
-          N->hdr.Flags |= LHD_SPLIT_AFTER;
-        if (Arc.FileHead.Encrypted)
-          N->hdr.Flags |= LHD_PASSWORD;
-        if (Arc.FileHead.Dir)
-          N->hdr.Flags |= LHD_DIRECTORY;
-      }
+      N->hdr.Flags = 0;
+#if RARVER_MAJOR < 5
+      if ((Arc.FileHead.Flags & LHD_WINDOWMASK) == LHD_DIRECTORY)
+        N->hdr.Flags |= RHDF_DIRECTORY;
+      if (Arc.FileHead.Flags & LHD_SPLIT_BEFORE)
+        N->hdr.Flags |= RHDF_SPLITBEFORE;
+      if (Arc.FileHead.Flags & LHD_SPLIT_AFTER)
+        N->hdr.Flags |= RHDF_SPLITAFTER;
+      if (Arc.FileHead.Flags & LHD_PASSWORD)
+        N->hdr.Flags |= RHDF_ENCRYPTED;
+      if (Arc.FileHead.Flags & LHD_SOLID)
+        N->hdr.Flags |= RHDF_SOLID;
+#else
+      if (Arc.FileHead.SplitBefore)
+        N->hdr.Flags |= RHDF_SPLITBEFORE;
+      if (Arc.FileHead.SplitAfter)
+        N->hdr.Flags |= RHDF_SPLITAFTER;
+      if (Arc.FileHead.Encrypted)
+        N->hdr.Flags |= RHDF_ENCRYPTED;
+      if (Arc.FileHead.Dir)
+        N->hdr.Flags |= RHDF_DIRECTORY;
+      if (Arc.FileHead.Solid)
+        N->hdr.Flags |= RHDF_SOLID;
 #endif
 
       N->LinkTargetFlags = 0;
