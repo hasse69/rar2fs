@@ -1,5 +1,19 @@
 rar2fs ChangeLog file.
 
+2017-06-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.25.1
+
+        * Fix parse problem for file header flags
+
+        When moving over to definitions from unrarsrc rather than using
+        internal hard-coded values, files started to show up as directories
+        instead of regular files as reported in issue #76. By accident this
+        worked before this change but the implementation was actually broken
+        even before that.
+        This patch fixes the incorrect header parser in a backwards compatible
+        way to work seamlessly also for earlier versions of unrarsrc.
+
 2017-06-10  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.25.0
