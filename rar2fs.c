@@ -2700,11 +2700,15 @@ static int syncdir_scan(const char *dir, const char *root,
                                 seek_len = get_seek_length(arch);
                                 free(first_arch);
                                 first_arch = NULL;
-                                vcnt = 0;
+                                if (!vtype)
+                                        vcnt = 1;
+                                else
+                                        vcnt = 0;
                         }
 
                         /* We always need to scan at least two volume files */
-                        if (!seek_len || ++vcnt <= seek_len) {
+                        if (!seek_len || vcnt <= seek_len) {
+                                ++vcnt;
                                 if (!final) {
                                         if (listrar(dir, next, arch, &first_arch,
                                                                 &final)) {
@@ -2845,11 +2849,15 @@ static int readdir_scan(const char *dir, const char *root,
                                 seek_len = get_seek_length(arch);
                                 free(first_arch);
                                 first_arch = NULL;
-                                vcnt = 0;
+                                if (!vtype)
+                                        vcnt = 1;
+                                else
+                                        vcnt = 0;
                         }
 
                         /* We always need to scan at least two volume files */
-                        if (!seek_len || ++vcnt <= seek_len) {
+                        if (!seek_len || vcnt <= seek_len) {
+                                ++vcnt;
                                 if (!final) {
                                         if (listrar(dir, next2, arch, &first_arch, &final)) {
                                                 ++error_tot;

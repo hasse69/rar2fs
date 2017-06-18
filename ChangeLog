@@ -1,5 +1,15 @@
 rar2fs ChangeLog file.
 
+2017-06-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.25.2
+
+        * Fix wrong volume count logic
+
+        The volume count logic is broken for new style volumes resulting in
+        input/output errors at access. This patch will fix that and solve
+        the problem reported in issue #77.
+
 2017-06-14  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.25.1
