@@ -107,15 +107,17 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, int *ResultCod
        * For reference, see http://support.microsoft.com/kb/167296/en
        */
       memset(&N->RawTime, 0, sizeof(struct RARArchiveListEx::RawTime_));
-#if RARVER_MAJOR > 4 
+#if RARVER_MAJOR > 4
 #if RARVER_MAJOR > 5 || (RARVER_MAJOR == 5 && RARVER_MINOR >= 50)
+      /* High-precision(1 ns) UNIX timestamp from 1970-01-01 */
       if (Arc.FileHead.mtime.IsSet())
-        N->RawTime.mtime = Arc.FileHead.mtime.GetUnixNS() - 116444736000000000ULL;
+        N->RawTime.mtime = Arc.FileHead.mtime.GetUnixNS();
       if (Arc.FileHead.ctime.IsSet())
-        N->RawTime.ctime = Arc.FileHead.ctime.GetUnixNS() - 116444736000000000ULL;
+        N->RawTime.ctime = Arc.FileHead.ctime.GetUnixNS();
       if (Arc.FileHead.atime.IsSet())
-        N->RawTime.atime = Arc.FileHead.atime.GetUnixNS() - 116444736000000000ULL;
+        N->RawTime.atime = Arc.FileHead.atime.GetUnixNS();
 #else
+      /* High-precision(100 ns) Windows timestamp from 1601-01-01 */
       if (Arc.FileHead.mtime.IsSet())
         N->RawTime.mtime = Arc.FileHead.mtime.GetRaw() - 116444736000000000ULL;
       if (Arc.FileHead.ctime.IsSet())

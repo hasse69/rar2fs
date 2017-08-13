@@ -2002,6 +2002,26 @@ extract_error:
 
 /*!
  *****************************************************************************
+ * For setting high-precision timestamp, used by set_rarstats()
+ ****************************************************************************/
+#if defined(HAVE_STRUCT_STAT_ST_MTIM) || defined(HAVE_STRUCT_STAT_ST_CTIM) || defined(HAVE_STRUCT_STAT_ST_ATIM)
+void set_high_precision_ts(struct timespec *spec, uint64_t stamp)
+{
+/* libunrar 5.5.x and later provides 1 ns resolution UNIX timestamp */
+#if RARVER_MAJOR > 5 || (RARVER_MAJOR == 5 && RARVER_MINOR >= 50)
+        spec->tv_sec  = (stamp / 1000000000);
+        spec->tv_nsec = (stamp % 1000000000);
+/* Earlier versions provide function GetRaw(), 100 ns resolution
+ * Windows timestamp. */
+#else
+        spec->tv_sec  = (stamp / 10000000);
+        spec->tv_nsec = (stamp % 10000000) * 100;
+#endif
+}
+#endif
+
+/*!
+ *****************************************************************************
  *
  ****************************************************************************/
 static void set_rarstats(struct filecache_entry *entry_p,
@@ -2103,30 +2123,21 @@ static void set_rarstats(struct filecache_entry *entry_p,
         entry_p->stat.st_mtime = entry_p->stat.st_atime;
         entry_p->stat.st_ctime = entry_p->stat.st_atime;
 
-        /* Using internally stored 100 ns precision time when available. */
+        /* Set internally stored high precision timestamp if available. */
 #ifdef HAVE_STRUCT_STAT_ST_MTIM
-        if (alist_p->RawTime.mtime) {
-                entry_p->stat.st_mtim.tv_sec  =
-                        (alist_p->RawTime.mtime / 10000000);
-                entry_p->stat.st_mtim.tv_nsec =
-                        (alist_p->RawTime.mtime % 10000000) * 100;
-        }
+        if (alist_p->RawTime.mtime)
+                set_high_precision_ts(&(entry_p->stat.st_mtim),
+                                        alist_p->RawTime.mtime);
 #endif
 #ifdef HAVE_STRUCT_STAT_ST_CTIM
-        if (alist_p->RawTime.ctime) {
-                entry_p->stat.st_ctim.tv_sec  =
-                        (alist_p->RawTime.ctime / 10000000);
-                entry_p->stat.st_ctim.tv_nsec =
-                        (alist_p->RawTime.ctime % 10000000) * 100;
-        }
+        if (alist_p->RawTime.ctime)
+                set_high_precision_ts(&(entry_p->stat.st_ctim),
+                                        alist_p->RawTime.ctime);
 #endif
 #ifdef HAVE_STRUCT_STAT_ST_ATIM
-        if (alist_p->RawTime.atime) {
-                entry_p->stat.st_atim.tv_sec  =
-                        (alist_p->RawTime.atime / 10000000);
-                entry_p->stat.st_atim.tv_nsec =
-                        (alist_p->RawTime.atime % 10000000) * 100;
-        }
+        if (alist_p->RawTime.atime)
+                set_high_precision_ts(&(entry_p->stat.st_atim),
+                                        alist_p->RawTime.atime);
 #endif
 }
 
