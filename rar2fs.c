@@ -1349,6 +1349,17 @@ static int lread_rar_idx(char *buf, size_t size, off_t offset,
         res = pread(op->buf->idx.fd, buf, size, off + sizeof(struct idx_head));
         if (res == -1)
                 return -errno;
+/* This is a workaround for a misbehaving pread(2) on Cygwin (!?).
+ * At EOF pread(2) should return 0 but on Cygwin that is not the case and
+ * instead some very high number is observed like 1628127168.
+ * Let's assume that if what is returned from pread(2) is greater than
+ * the requested read size, EOF has been reached.
+ * Without this workaround at least dokan-fuse gets very confused and is
+ * caught in an endless loop! */
+#ifdef __CYGWIN__
+        if (res > (int)size)
+                return 0;
+#endif
         return res;
 }
 
@@ -1668,6 +1679,17 @@ static int lread(char *buffer, size_t size, off_t offset,
         res = pread(FH_TOFD(fi->fh), buffer, size, offset);
         if (res == -1)
                 return -errno;
+/* This is a workaround for a misbehaving pread(2) on Cygwin (!?).
+ * At EOF pread(2) should return 0 but on Cygwin that is not the case and
+ * instead some very high number is observed like 1628127168.
+ * Let's assume that if what is returned from pread(2) is greater than
+ * the requested read size, EOF has been reached.
+ * Without this workaround at least dokan-fuse gets very confused and is
+ * caught in an endless loop! */
+#ifdef __CYGWIN__
+        if (res > (int)size)
+                return 0;
+#endif
         return res;
 }
 
