@@ -304,7 +304,7 @@ LIBS="$PTHREAD_LIBS $LIBS"
 AC_CHECK_LIB(fuse4x,fuse_new, [FUSE_LIBS="-lfuse4x"],
     [ AC_CHECK_LIB(fuse_ino64,fuse_new, [FUSE_LIBS="-lfuse_ino64"],
         [ AC_CHECK_LIB(fuse,fuse_new, [FUSE_LIBS="-lfuse"],
-            [ AC_CHECK_LIB(cygdokanfuse1,fuse_new, [FUSE_LIBS="-lcygdokanfuse1"],
+            [ AC_CHECK_LIB(dokanfuse1.dll,fuse_new, [FUSE_LIBS="-ldokanfuse1.dll"],
                 [ AC_CHECK_LIB(osxfuse,fuse_new, [FUSE_LIBS="-losxfuse"],
                     [AC_MSG_ERROR([
                         Cannot find fuse library - add alternative library search path using
