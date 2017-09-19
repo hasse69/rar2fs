@@ -1016,6 +1016,11 @@ static int __RARVolNameToFirstName(char *s, int vtype)
 }
 
 #if _POSIX_TIMERS < 1
+/* Some platforms, like OSX Sierra, does not seem to follow POSIX.1-2001
+ * properly and fails to define _POSIX_TIMERS to a value greater than 0.
+ * Double check if CLOCK_REALTIME is already defined and in that case
+ * assume the POSIX timer functions are available. */
+#ifndef CLOCK_REALTIME
 #define CLOCK_REALTIME 0
 
 /*!
@@ -1034,6 +1039,7 @@ static int clock_gettime(int clk_id, struct timespec *ts)
         return 0;
 }
 
+#endif
 #endif
 
 /*!

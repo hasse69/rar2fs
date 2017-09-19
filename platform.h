@@ -121,13 +121,12 @@ typedef bool _Bool;
 # define __bool_true_false_are_defined 1
 #endif
 
-#ifdef HAVE_FDATASYNC
 #ifdef __APPLE__
-# include <sys/syscall.h>
-# define fdatasync(fd) syscall(SYS_fdatasync, (fd))
+#include <fcntl.h>
+#define fsync(fd) fcntl(fd, F_FULLFSYNC)
 #endif
-#else
-# define fdatasync(fd) fsync(fd)
+#if !defined ( HAVE_FDATASYNC ) || defined( __APPLE__ )
+#define fdatasync(fd) fsync(fd)
 #endif
 
 /* Not very likely, but just to be safe... */
