@@ -647,9 +647,11 @@ static struct filecache_entry *path_lookup_miss(const char *path, struct stat *s
         ABS_ROOT(root, path);
 
         /* Check if the missing file can be found on the local fs */
-        if (!lstat(root, stbuf ? stbuf : &st)) {
-                printd(3, "STAT retrieved for %s\n", root);
-                return LOCAL_FS_ENTRY;
+        if (mount_type != MOUNT_ARCHIVE || !strcmp(path, "/")) {
+                if (!lstat(root, stbuf ? stbuf : &st)) {
+                        printd(3, "STAT retrieved for %s\n", root);
+                        return LOCAL_FS_ENTRY;
+                }
         }
 
         /* Check if the missing file is a fake .iso */
@@ -707,8 +709,6 @@ static struct filecache_entry *path_lookup(const char *path, struct stat *stbuf)
                         memcpy(stbuf, &e_p->stat, sizeof(struct stat));
                 return e_p;
         }
-        if (!e_p && mount_type == MOUNT_ARCHIVE && strcmp(path, "/"))
-                return NULL;
         /* Do not remember fake .ISO entries between eg. getattr() calls */
         if (e_p && e_p->flags.fake_iso)
                 filecache_invalidate(path);
@@ -3213,6 +3213,24 @@ static void dump_dir_list(const char *path, void *buffer, fuse_fill_dir_t filler
  *****************************************************************************
  *
  ****************************************************************************/
+static int rar2_opendir2(const char *path, struct fuse_file_info *fi)
+{
+        ENTER_("%s", path);
+
+        FH_SETIO(fi->fh, malloc(sizeof(struct io_handle)));
+        if (!FH_ISSET(fi->fh))
+                return -ENOMEM;
+        FH_SETTYPE(fi->fh, IO_TYPE_DIR);
+        FH_SETENTRY(fi->fh, NULL);
+        FH_SETPATH(fi->fh, strdup(path));
+
+        return 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 static int rar2_opendir(const char *path, struct fuse_file_info *fi)
 {
         ENTER_("%s", path);
@@ -3238,7 +3256,6 @@ static int rar2_opendir(const char *path, struct fuse_file_info *fi)
                 return -errno;
 
 opendir_ok:
-
         FH_SETIO(fi->fh, malloc(sizeof(struct io_handle)));
         if (!FH_ISSET(fi->fh)) {
                 if (dp)
@@ -3463,6 +3480,25 @@ static int rar2_readdir2(const char *path, void *buffer,
                 free(dir_list);
         }
 
+        return 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int rar2_releasedir2(const char *path, struct fuse_file_info *fi)
+{
+        ENTER_("%s", (path ? path : ""));
+
+        (void)path;
+
+        struct io_handle *io = FH_TOIO(fi->fh);
+        if (io == NULL)
+                return -EIO;
+        free(FH_TOPATH(fi->fh));
+        free(FH_TOIO(fi->fh));
+        FH_ZERO(fi->fh);
         return 0;
 }
 
@@ -4910,8 +4946,6 @@ static struct fuse_operations rar2_operations = {
         .destroy = rar2_destroy,
         .open = rar2_open,
         .release = rar2_release,
-        .opendir = rar2_opendir,
-        .releasedir = rar2_releasedir,
         .read = rar2_read,
         .flush = rar2_flush,
         .readlink = rar2_readlink,
@@ -5049,7 +5083,9 @@ static int work(struct fuse_args *args)
         /* The below callbacks depend on mount type */
         if (mount_type == MOUNT_FOLDER) {
                 rar2_operations.getattr         = rar2_getattr;
+                rar2_operations.opendir         = rar2_opendir;
                 rar2_operations.readdir         = rar2_readdir;
+                rar2_operations.releasedir      = rar2_releasedir;
                 rar2_operations.create          = rar2_create;
                 rar2_operations.rename          = rar2_rename;
                 rar2_operations.mknod           = rar2_mknod;
@@ -5063,7 +5099,9 @@ static int work(struct fuse_args *args)
                 rar2_operations.symlink         = rar2_symlink;
         } else {
                 rar2_operations.getattr         = rar2_getattr2;
+                rar2_operations.opendir         = rar2_opendir2;
                 rar2_operations.readdir         = rar2_readdir2;
+                rar2_operations.releasedir      = rar2_releasedir2;
                 rar2_operations.create          = (void *)rar2_eperm;
                 rar2_operations.rename          = (void *)rar2_eperm;
                 rar2_operations.mknod           = (void *)rar2_eperm;
