@@ -1,5 +1,53 @@
 rar2fs ChangeLog file.
 
+2017-10-24  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.26.0
+
+        * Fix some compilation problems on OSX Sierra
+
+        This patch should resolve some compilation errors/warnings on
+        Sierra 10.2 platforms as reported in issue #83.
+
+        * Fix an issue with file mounts and root folder lookup
+
+        This patch should resolve issue #80.
+
+        * Fix check for dokan-fuse library
+
+        The name of the dokan-fuse library is libdokanfuse1.dll.a and the
+        configuration is searching for libcygdokanfuse1.a.
+        Use the name from the latest Dokany v1.0.3 release.
+        This problem was discovered while investigating issue #82.
+
+        * Workaround for misbehaving pread(2) on Cygwin
+
+        At EOF pread(2) should return 0 but on Cygwin that is not the case
+        and instead some very high number is observed like 1628127168.
+
+        From the pread(2) man page:
+          "On success, the number of bytes read or written is returned
+          (zero indicates that nothing was written, in the case of pwrite(),
+          or end of file, in the case of pread()), or -1 on error, in which
+          case errno is set to indicate the error."
+
+        Let's assume that if what is returned from pread(2) is greater than
+        the requested read size, EOF has been reached.
+        Without this workaround at least dokan-fuse gets very confused and
+        is caught in an infinite loop!
+
+        * Fix Incorrect high-precision timestamp
+
+        From libunrar v5.5.x high-precision timestamp API is changed,
+        from GetRaw() to GetUnixNS(). GetRaw() provides Windows FILETIME
+        value that is a 100 ns unit timestamp from 1601-01-01. GetUnixNS()
+        provides a Unix high-precision timestamp, which has 1 ns unit
+        counting from 1970-01-01. Current rar2fs behavior with libunrar
+        v5.5.x is wrong, treating 1 ns unit timestamp as 100 ns as reported
+        in issue #79.
+
+        Thanks to jyhpsycho for the original patch.
+
 2017-06-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.25.2
