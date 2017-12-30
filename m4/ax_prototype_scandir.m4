@@ -7,8 +7,8 @@ AX_PROTOTYPE(scandir,
   #include <dirent.h>
  ],
  [
-  const char * dir = 0;
-  struct dirent ***namelist = 0;
+  const char * dir = (void *)1;
+  struct dirent ***namelist = (void *)1;
   int(*select)(ARG3) = 0;
   scandir(dir, namelist, select, alphasort);
  ],
