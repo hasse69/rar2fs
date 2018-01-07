@@ -218,6 +218,16 @@ that should be placed directly under the source folder.
 Refer to
 .I rarconfig.example
 for an explanation of syntax and details on how this feature can be used.
+.TP
+.B --date-rar
+use file date/timestamp from main archive file
+
+By default the dates/timestamps are collected from the meta data in the RAR archives.
+Use this option to instead force all initial dates/timestamps to be set according to the main RAR archive file. For volumes this means the first file in the set. If the 
+.I --relatime
+and/or
+.I  --relatime-rar
+options are used it might affect the result of this option after mount time.
 .br
 .SH "SEE ALSO"
 .br

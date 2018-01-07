@@ -2108,65 +2108,83 @@ static void set_rarstats(struct filecache_entry *entry_p,
         entry_p->stat.st_blocks =
             (((entry_p->stat.st_size + (8 * 512)) & ~((8 * 512) - 1)) / 512);
 #endif
-        struct tm t;
-        memset(&t, 0, sizeof(struct tm));
+        if (!OPT_SET(OPT_KEY_DATE_RAR)) {
+                struct tm t;
+                memset(&t, 0, sizeof(struct tm));
 
-        union dos_time_t {
-                __extension__ struct {
+                union dos_time_t {
+                        __extension__ struct {
 #ifndef WORDS_BIGENDIAN
-                        unsigned int second:5;
-                        unsigned int minute:6;
-                        unsigned int hour:5;
-                        unsigned int day:5;
-                        unsigned int month:4;
-                        unsigned int year:7;
+                                unsigned int second:5;
+                                unsigned int minute:6;
+                                unsigned int hour:5;
+                                unsigned int day:5;
+                                unsigned int month:4;
+                                unsigned int year:7;
 #else
-                        unsigned int year:7;
-                        unsigned int month:4;
-                        unsigned int day:5;
-                        unsigned int hour:5;
-                        unsigned int minute:6;
-                        unsigned int second:5;
+                                unsigned int year:7;
+                                unsigned int month:4;
+                                unsigned int day:5;
+                                unsigned int hour:5;
+                                unsigned int minute:6;
+                                unsigned int second:5;
 #endif
+                        };
+
+                        /*
+                         * Avoid type-punned pointer warning when strict
+                         * aliasing is used with some versions of gcc.
+                         */
+                        unsigned int as_uint_;
                 };
 
-                /*
-                 * Avoid type-punned pointer warning when strict aliasing is used
-                 * with some versions of gcc.
-                 */
-                unsigned int as_uint_;
-        };
+                /* Using DOS time format by default for backward compatibility. */
+                union dos_time_t *dos_time =
+                                (union dos_time_t *)&alist_p->hdr.FileTime;
 
-        /* Using DOS time format by default for backward compatibility. */
-        union dos_time_t *dos_time = (union dos_time_t *)&alist_p->hdr.FileTime;
+                t.tm_sec = dos_time->second * 2;
+                t.tm_min = dos_time->minute;
+                t.tm_hour = dos_time->hour;
+                t.tm_mday = dos_time->day;
+                t.tm_mon = dos_time->month - 1;
+                t.tm_year = (1980 + dos_time->year) - 1900;
+                t.tm_isdst=-1;
+                entry_p->stat.st_atime = mktime(&t);
+                entry_p->stat.st_mtime = entry_p->stat.st_atime;
+                entry_p->stat.st_ctime = entry_p->stat.st_atime;
 
-        t.tm_sec = dos_time->second * 2;
-        t.tm_min = dos_time->minute;
-        t.tm_hour = dos_time->hour;
-        t.tm_mday = dos_time->day;
-        t.tm_mon = dos_time->month - 1;
-        t.tm_year = (1980 + dos_time->year) - 1900;
-        t.tm_isdst=-1;
-        entry_p->stat.st_atime = mktime(&t);
-        entry_p->stat.st_mtime = entry_p->stat.st_atime;
-        entry_p->stat.st_ctime = entry_p->stat.st_atime;
-
-        /* Set internally stored high precision timestamp if available. */
+                /* Set internally stored high precision timestamp if available. */
 #ifdef HAVE_STRUCT_STAT_ST_MTIM
-        if (alist_p->RawTime.mtime)
-                set_high_precision_ts(&(entry_p->stat.st_mtim),
-                                        alist_p->RawTime.mtime);
+                if (alist_p->RawTime.mtime)
+                        set_high_precision_ts(&entry_p->stat.st_mtim,
+                                                alist_p->RawTime.mtime);
 #endif
 #ifdef HAVE_STRUCT_STAT_ST_CTIM
-        if (alist_p->RawTime.ctime)
-                set_high_precision_ts(&(entry_p->stat.st_ctim),
-                                        alist_p->RawTime.ctime);
+                if (alist_p->RawTime.ctime)
+                        set_high_precision_ts(&entry_p->stat.st_ctim,
+                                                alist_p->RawTime.ctime);
 #endif
 #ifdef HAVE_STRUCT_STAT_ST_ATIM
-        if (alist_p->RawTime.atime)
-                set_high_precision_ts(&(entry_p->stat.st_atim),
-                                        alist_p->RawTime.atime);
+                if (alist_p->RawTime.atime)
+                        set_high_precision_ts(&entry_p->stat.st_atim,
+                                                alist_p->RawTime.atime);
 #endif
+        } else {
+                struct stat st;
+                stat(entry_p->rar_p, &st);
+                entry_p->stat.st_atime = st.st_atime;
+                entry_p->stat.st_mtime = st.st_mtime;
+                entry_p->stat.st_ctime = st.st_ctime;
+#ifdef HAVE_STRUCT_STAT_ST_ATIM
+                entry_p->stat.st_atim.tv_nsec = st.st_atim.tv_nsec;
+#endif
+#ifdef HAVE_STRUCT_STAT_ST_MTIM
+                entry_p->stat.st_mtim.tv_nsec = st.st_mtim.tv_nsec;
+#endif
+#ifdef HAVE_STRUCT_STAT_ST_CTIM
+                entry_p->stat.st_ctim.tv_nsec = st.st_ctim.tv_nsec;
+#endif
+        }
 }
 
 /*!
@@ -5248,6 +5266,7 @@ static void print_help()
 #if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
         printf("    --relatime-rar\t    like --relatime but also update main archive file(s)\n");
 #endif
+        printf("    --date-rar\t\t    use file date from main archive file(s)\n");
         printf("    --config=file\t    config file name [source/.rarconfig]\n");
 }
 
@@ -5290,6 +5309,7 @@ static struct option longopts[] = {
 #if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
         {"relatime-rar",      no_argument, NULL, OPT_ADDR(OPT_KEY_ATIME_RAR)},
 #endif
+        {"date-rar",          no_argument, NULL, OPT_ADDR(OPT_KEY_DATE_RAR)},
         {"config",      required_argument, NULL, OPT_ADDR(OPT_KEY_CONFIG)},
         {NULL,                          0, NULL, 0}
 };
