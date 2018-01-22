@@ -44,7 +44,7 @@ using namespace std;
 
 // Override the St() function/macro since it is a no-op in RARDLL mode
 #undef St
-#define St(x) L""x""
+#define St(x) L"" x ""
 
 struct DataSet
 {
@@ -320,10 +320,6 @@ void PrintfPrepareFmt(const wchar *Org,wchar *Cvt,size_t MaxSize)
   }
   Cvt[Dest]=0;
 }
-
-
-#undef St
-#define St(StringId) L"" StringId ""
 
 static int msprintf(wchar *wcs, const wchar *fmt,...)
 {
