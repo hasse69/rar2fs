@@ -2562,11 +2562,13 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                  * later in the header the faked entry will be
                  * invalidated and replaced with the real file stats. */
                 if (is_root_path) {
-                        char *safe_path = strdup(next->hdr.FileName);
+                        char *orig_path = strdup(next->hdr.FileName);
+                        char *safe_path = orig_path;
                         while (1) {
                                 char *mp2;
 
-                                if (!CHRCMP(dirname(safe_path), '.'))
+                                safe_path = dirname(safe_path);
+                                if (!CHRCMP(safe_path, '.'))
                                         break;
                                 /* Aliasing is not support for directories */
                                 ABS_MP(mp2, path, safe_path);
@@ -2579,7 +2581,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                                         safe_path, *first_arch, &d);
                                 }
                         }
-                        free(safe_path);
+                        free(orig_path);
                 }
 
                 /* Aliasing is not support for directories */
