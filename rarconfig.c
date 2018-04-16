@@ -382,8 +382,19 @@ static void __entry_set_password(struct config_entry *e,
 {
         size_t len;
         wchar_t *wcs;
+        char *s;
+        char *tmp;
 
-        e->password = strdup(cnode->value);
+        s = strchr(cnode->value, '"');
+        if (!s)
+                return;
+        tmp = strrchr(++s, '"');
+        if (!tmp)
+                return;
+        *tmp = 0;
+
+        e->password = strdup(s);
+
         len = mbstowcs(NULL, e->password, 0);
         if (len != (size_t)-1) {
                 wcs = calloc(len + 1, sizeof(wchar_t));

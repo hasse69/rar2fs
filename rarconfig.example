@@ -22,7 +22,7 @@
 #
 # [<archive>|</some/dir/archive>]
 # 	seek-length = <n>
-# 	password = <password>
+# 	password = "<password>"
 # 	save-eof = [true|false]
 #       alias = <"filename","alias">
 #
@@ -48,4 +48,4 @@
 # Example archive #2 (default seek length, password)
 #[example2.rar]
 #	# Set password
-#	password = secret
+#	password = "secret"
