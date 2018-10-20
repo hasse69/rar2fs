@@ -2787,9 +2787,10 @@ static int syncdir_scan(const char *dir, const char *root,
                                               namelist[i]->d_name,
                                               NULL, DIR_E_NRM);
                         }
-                        free(namelist[i]);
                         ++i;
                 }
+                for (i = 0; i < n; i++)
+                        free(namelist[i]);
                 free(namelist);
         }
 
@@ -2937,10 +2938,10 @@ static int readdir_scan(const char *dir, const char *root,
                         }
 
 next_entry:
-
-                        free(namelist[i]);
                         ++i;
                 }
+                for (i = 0; i < n; i++)
+                        free(namelist[i]);
                 free(namelist);
         }
 
