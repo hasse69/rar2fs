@@ -3061,14 +3061,16 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
 
         pthread_mutex_lock(&file_access_mutex);
         entry_p = path_lookup(path, stbuf);
-        pthread_mutex_unlock(&file_access_mutex);
         if (entry_p) {
                 if (entry_p != LOOP_FS_ENTRY) {
+                        pthread_mutex_unlock(&file_access_mutex);
                         dump_stat(stbuf);
                         return 0;
                 }
+                pthread_mutex_unlock(&file_access_mutex);
                 return -ENOENT;
         }
+        pthread_mutex_unlock(&file_access_mutex);
 
         /*
          * There was a cache miss and the file could not be found locally!
@@ -4193,13 +4195,18 @@ static int rar2_readlink(const char *path, char *buf, size_t buflen)
         if (!buflen)
                 return -EINVAL;
 
+        pthread_mutex_lock(&file_access_mutex);
         entry_p = path_lookup(path, NULL);
         if (entry_p && entry_p != LOCAL_FS_ENTRY) {
-                if (entry_p->link_target_p)
+                if (entry_p->link_target_p) {
                         strncpy(buf, entry_p->link_target_p, buflen - 1);
-                else
+                        pthread_mutex_unlock(&file_access_mutex);
+                } else {
+                        pthread_mutex_unlock(&file_access_mutex);
                         return -EIO;
+                }
         } else {
+                pthread_mutex_unlock(&file_access_mutex);
                 char *tmp;
                 ABS_ROOT(tmp, path);
                 buflen = readlink(tmp, buf, buflen - 1);
