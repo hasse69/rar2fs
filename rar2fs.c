@@ -100,6 +100,7 @@ struct io_context {
         struct filecache_entry *entry_p;
         struct volume_handle *volh;
         pthread_t thread;
+        pthread_mutex_t raw_read_mutex;
         pthread_mutex_t rd_req_mutex;
         pthread_cond_t rd_req_cond;
         int rd_req;
@@ -1169,6 +1170,8 @@ static int lread_raw(char *buf, size_t size, off_t offset,
         int tot = 0;
         int force_seek = 0;
 
+        pthread_mutex_lock(&op->raw_read_mutex);
+
         op->seq++;
 
         printd(3, "PID %05d calling %s(), seq = %d, offset=%" PRIu64 "\n",
@@ -1181,16 +1184,20 @@ static int lread_raw(char *buf, size_t size, off_t offset,
          * the chunk based calculation will not detect this.
          */
         if ((off_t)(offset + size) >= op->entry_p->stat.st_size) {
-                if (offset > op->entry_p->stat.st_size)
+                if (offset > op->entry_p->stat.st_size) {
+                        pthread_mutex_unlock(&op->raw_read_mutex);
                         return 0;       /* EOF */
+                }
                 size = op->entry_p->stat.st_size - offset;
         }
 
         if (op->entry_p->flags.check_atime)
                 check_atime(FH_TOPATH(fi->fh), op->entry_p);
 
-        if (!op->entry_p->flags.vsize_resolved)
+        if (!op->entry_p->flags.vsize_resolved) {
+                pthread_mutex_unlock(&op->raw_read_mutex);
                 return -EIO;
+        }
 
         while (size) {
                 off_t src_off = 0;
@@ -1232,6 +1239,7 @@ static int lread_raw(char *buf, size_t size, off_t offset,
                                         op->fp = fp;
                                         force_seek = 1;
                                 } else {
+                                        pthread_mutex_unlock(&op->raw_read_mutex);
                                         return -EINVAL;
                                 }
                         } else {
@@ -1278,11 +1286,13 @@ seek_check:
                 if (vh)
                         vh->pos += n;
         }
+        pthread_mutex_unlock(&op->raw_read_mutex);
         return tot;
 
 read_error:
         if (fp)
                 clearerr(fp);
+        pthread_mutex_unlock(&op->raw_read_mutex);
         memset(buf, 0, size);
         return tot + size;
 }
@@ -3896,6 +3906,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                 FH_SETENTRY(fi->fh, NULL);
                                 FH_SETCONTEXT(fi->fh, op);
                                 printd(3, "(%05d) %-8s%s [%-16p]\n", getpid(), "ALLOC", path, FH_TOCONTEXT(fi->fh));
+                                pthread_mutex_init(&op->raw_read_mutex, NULL);
                                 op->fp = fp;
                                 op->pid = 0;
                                 op->seq = 0;
@@ -4282,6 +4293,7 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                                 }
                                 printd(3, "Closing file handle %p\n", op->fp);
                                 fclose(op->fp);
+                                pthread_mutex_destroy(&op->raw_read_mutex);
                         } else {
                                 if (!pthread_cancel(op->thread))
                                         pthread_join(op->thread, NULL);
