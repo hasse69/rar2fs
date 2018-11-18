@@ -1,5 +1,15 @@
 rar2fs ChangeLog file.
 
+2018-11-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.27.1
+
+        * Add mutex lock to protect reads in raw mode
+
+        * Fix a heap-use-after-free error
+
+        * Add a missing lock when resolving a link target
+
 2018-04-15  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.27.0
