@@ -30,7 +30,6 @@
 #include "version.hpp"
 #include "rar.hpp"
 #include "dllext.hpp"
-#include "fileext.hpp"
 using namespace std;
 
 // Map some old definitions to >=5.0 if applicable

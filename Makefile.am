@@ -32,7 +32,6 @@ rar2fs_SOURCES = 		dllext.cpp \
 				index.h \
 				platform.h \
 				version.h \
-				fileext.hpp \
 				dllext.hpp
 
 rar2fs_LDADD = $(PTHREAD_CFLAGS) $(LDFLAGS) $(UNRAR_LDFLAGS) $(FUSE_LDFLAGS) \

@@ -29,15 +29,13 @@
 #ifndef _UNRAR_DLLEXT_
 #define _UNRAR_DLLEXT_
 
-#include <platform.h>
-
 #ifndef _UNIX
 #if defined ( __unix ) || defined ( __unix__ ) || defined ( unix ) || defined ( __APPLE__ )
 #define _UNIX
 #endif
 #endif
-#include "dll.hpp"
-#include "version.hpp"
+#include <dll.hpp>
+#include <version.hpp>
 #if RARVER_MAJOR > 4
 #include "headers5.hpp"
 #endif
