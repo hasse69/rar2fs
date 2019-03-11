@@ -379,7 +379,7 @@ CPPFLAGS="$save_CPPFLAGS"
 AC_MSG_CHECKING([for static linking of UnRAR library])
 AC_MSG_RESULT([$static_unrar])
 if test x"$static_unrar" != x"no"; then
-    AC_CHECK_FILE($with_unrar/libunrar.a, [link_fallback=no], [link_fallback=test])
+    test -f $with_unrar/libunrar.a && link_fallback=no || link_fallback=test
     if test x"$link_fallback" = x"test"; then
         if test x"$static_unrar" = x"fallback"; then
             static_unrar=no
