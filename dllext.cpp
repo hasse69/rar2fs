@@ -202,7 +202,7 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, int *ResultCod
     return FileCount;
   }
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
-  catch (std::bad_alloc) // Catch 'new' exception.
+  catch (std::bad_alloc&) // Catch 'new' exception.
   {
     if (N->next != NULL)
       delete N->next;
