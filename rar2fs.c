@@ -957,6 +957,7 @@ static int __check_vol_header(const char *arch)
         RAROpenArchiveDataEx d;
         struct RARHeaderDataEx header;
 
+        memset(&header, 0, sizeof(header));
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
         d.OpenMode = RAR_OM_LIST_INCSPLIT;
@@ -1894,6 +1895,7 @@ static int extract_index(const char *path, const struct filecache_entry *entry_p
         d.OpenMode = RAR_OM_EXTRACT;
 
         struct RARHeaderDataEx header;
+        memset(&header, 0, sizeof(header));
         HANDLE hdl = 0;
         struct idx_head head = {R2I_MAGIC, 0, 0, 0, 0};
         char *r2i;
@@ -2012,6 +2014,7 @@ static int extract_rar(char *arch, const char *file, void *arg)
         d.Callback = extract_callback;
         d.UserData = (LPARAM)&cb_arg;
         struct RARHeaderDataEx header;
+        memset(&header, 0, sizeof(header));
         HANDLE hdl = RAROpenArchiveEx(&d);
         if (d.OpenResult)
                 goto extract_error;
