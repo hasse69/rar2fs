@@ -31,6 +31,10 @@
 #ifndef DLLWRAPPER_H_
 #define DLLWRAPPER_H_
 
+#include <stdint.h>
+#include <stdbool.h>
+#include <sys/types.h>
+
 #ifndef __cplusplus
 #include <wchar.h>
 #endif
