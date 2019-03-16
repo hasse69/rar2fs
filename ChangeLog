@@ -1,5 +1,19 @@
 rar2fs ChangeLog file.
 
+2019-03-16  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.27.2
+
+        * Fix uninialized memory in calls to RAROpenArchiveEx()
+
+        * Add some missing includes in the DLL wrapper
+
+        * Fix -Wcatch-value from GCC 8
+
+        * Replace AC_CHECK_FILE with 'test -f'
+
+        * Remove an unused/dangling file
+
 2018-11-18  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.27.1
