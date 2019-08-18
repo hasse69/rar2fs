@@ -34,6 +34,7 @@
 #define _UNIX
 #endif
 #endif
+#include <stdint.h>
 #include <dll.hpp>
 #include <version.hpp>
 #if RARVER_MAJOR > 4
