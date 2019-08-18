@@ -2069,9 +2069,11 @@ static void set_rarstats(struct filecache_entry *entry_p,
                 RARArchiveListEx *alist_p,
                 int force_dir)
 {
+	off_t st_size;
+
         if (!force_dir) {
+                st_size = GET_RAR_SZ(&alist_p->hdr);
                 mode_t mode = GET_RAR_MODE(&alist_p->hdr);
-                entry_p->stat.st_size = GET_RAR_SZ(&alist_p->hdr);
                 if (!S_ISDIR(mode) && !S_ISLNK(mode)) {
                         /* Force file to be treated as a 'regular file' */
                         mode = (mode & ~S_IFMT) | S_IFREG;
@@ -2085,7 +2087,7 @@ static void set_rarstats(struct filecache_entry *entry_p,
                                                 sizeof(alist_p->LinkTarget));
                                         if ((int)len != -1) {
                                                 entry_p->link_target_p = strdup(tmp);
-                                                entry_p->stat.st_size = len;
+                                                st_size = len;
                                         }
                                         free(tmp);
                                 }
@@ -2093,6 +2095,12 @@ static void set_rarstats(struct filecache_entry *entry_p,
                                 entry_p->link_target_p =
                                         strdup(alist_p->LinkTarget);
                         }
+                }
+                if (OPT_SET(OPT_KEY_NO_INHERIT_PERM)) {
+			if (S_ISDIR(mode))
+			    mode = (mode & S_IFMT) | (0777 & ~umask_);
+			else
+			    mode = (mode & S_IFMT) | (0666 & ~umask_);
                 }
                 entry_p->stat.st_mode = mode;
 #ifndef HAVE_SETXATTR
@@ -2105,11 +2113,12 @@ static void set_rarstats(struct filecache_entry *entry_p,
         } else {
                 entry_p->stat.st_mode = (S_IFDIR | (0777 & ~umask_));
                 entry_p->stat.st_nlink = 2;
-                entry_p->stat.st_size = 4096;
+                st_size = 4096;
         }
         entry_p->stat.st_uid = getuid();
         entry_p->stat.st_gid = getgid();
         entry_p->stat.st_ino = 0;
+        entry_p->stat.st_size = st_size;
 
 #ifdef HAVE_STRUCT_STAT_ST_BLOCKS
         /*
@@ -5293,6 +5302,7 @@ static void print_help()
 #endif
         printf("    --date-rar\t\t    use file date from main archive file(s)\n");
         printf("    --config=file\t    config file name [source/.rarconfig]\n");
+        printf("    --no-inherit-perm\t    do not inherit file permission mode from archive\n");
 }
 
 /* FUSE API specific keys continue where 'optdb' left off */
@@ -5336,6 +5346,7 @@ static struct option longopts[] = {
 #endif
         {"date-rar",          no_argument, NULL, OPT_ADDR(OPT_KEY_DATE_RAR)},
         {"config",      required_argument, NULL, OPT_ADDR(OPT_KEY_CONFIG)},
+        {"no-inherit-perm",   no_argument, NULL, OPT_ADDR(OPT_KEY_NO_INHERIT_PERM)},
         {NULL,                          0, NULL, 0}
 };
 
