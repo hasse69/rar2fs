@@ -3364,8 +3364,10 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
         if (dp != NULL) {
                 char *root;
                 if (fs_loop) {
-                        if (!strcmp(path, fs_loop_mp_root))
-                                goto fill_buff;
+                        if (!strcmp(path, fs_loop_mp_root)) {
+				dp = NULL;
+                                goto dump_buff;
+                        }
                 }
                 ABS_ROOT(root, path);
                 if (readdir_scan(path, root, &next, &next2)) {
@@ -3374,23 +3376,22 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                         pthread_mutex_unlock(&dir_access_mutex);
                         goto dump_buff_nocache;
                 }
-                goto dump_buff;
         }
 
         /* Check if cache is populated */
         if (entry_p)
-                goto fill_buff;
-
-        int vol = 0;
+                goto dump_buff;
 
         pthread_mutex_lock(&file_access_mutex);
         struct filecache_entry *entry2_p = filecache_get(path);
+again:
         if (entry2_p) {
                 char *tmp = strdup(entry2_p->rar_p);
                 int multipart = entry2_p->flags.multipart;
                 short vtype = entry2_p->vtype;
                 pthread_mutex_unlock(&file_access_mutex);
                 if (multipart) {
+                        int vol = 0;
                         int final = 0;
                         int vol_end = get_seek_length(entry2_p->rar_p);
                         vol_end = vol_end ? vol_end + 1 : vol_end;
@@ -3398,7 +3399,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                         while (!listrar(path, &next2, tmp, &tmp, &final)) {
                                 if ((++vol == vol_end) || final) {
                                         free(tmp);
-                                        goto fill_buff;
+                                        goto dump_buff;
                                 }
                                 RARNextVolumeName(tmp, !vtype);
                                 printd(3, "Search for local directory in %s\n", tmp);
@@ -3408,7 +3409,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                                 printd(3, "Search for local directory in %s\n", tmp);
                                 if (!listrar(path, &next2, tmp, &tmp, NULL)) {
                                         free(tmp);
-                                        goto fill_buff;
+                                        goto dump_buff;
                                 }
                         }
                 }
@@ -3416,23 +3417,24 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 free(tmp);
         } else {
                 pthread_mutex_unlock(&file_access_mutex);
+                char *tmp = strdup(path);
+                syncdir(dirname(tmp));
+                free(tmp);
+                pthread_mutex_lock(&file_access_mutex);
+                entry2_p = filecache_get(path);
+                if (entry2_p)
+                        goto again;
+                pthread_mutex_unlock(&file_access_mutex);
+		if (dp == NULL)
+		        goto no_entry;
         }
-
-        if (vol == 0) {
-                dir_list_free(&dir_list);
-                if (entry_p) {
-                        dir_list_free(dir_list2);
-                        free(dir_list2);
-                }
-                return -ENOENT;
-        }
-
-fill_buff:
-
-        filler(buffer, ".", NULL, 0);
-        filler(buffer, "..", NULL, 0);
 
 dump_buff:
+
+        if (dp == NULL) {
+                filler(buffer, ".", NULL, 0);
+                filler(buffer, "..", NULL, 0);
+        }
 
         (void)dir_list_append(&dir_list, dir_list2);
         dir_list_close(&dir_list);
@@ -3464,6 +3466,17 @@ dump_buff_nocache:
         free(dir_list2);
 
         return 0;
+
+no_entry:
+
+        dir_list_free(&dir_list);
+        if (entry_p) {
+                dir_list_free(dir_list2);
+                free(dir_list2);
+        }
+
+        return -ENOENT;
+
 }
 
 /*!
@@ -4170,6 +4183,8 @@ static void *rar2_init(struct fuse_conn_info *conn)
         dircache_init();
         iob_init();
         sighandler_init();
+
+        syncdir("/");
 
         return NULL;
 }
