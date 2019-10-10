@@ -4184,8 +4184,6 @@ static void *rar2_init(struct fuse_conn_info *conn)
         iob_init();
         sighandler_init();
 
-        syncdir("/");
-
         return NULL;
 }
 
