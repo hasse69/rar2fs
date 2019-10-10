@@ -3010,12 +3010,6 @@ static int syncdir(const char *path)
                         free(dir_list);
                         return res;
                 }
-
-                pthread_mutex_lock(&dir_access_mutex);
-                entry_p = dircache_alloc(path);
-                if (entry_p)
-                        entry_p->dir_entry_list = *dir_list;
-                pthread_mutex_unlock(&dir_access_mutex);
         }
 
         return 0;
@@ -3104,8 +3098,14 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         if (OPT_FILTER(path))
                 return -ENOENT;
         char *safe_path = strdup(path);
-        res = syncdir(dirname(safe_path));
-        free(safe_path);
+        char *tmp = safe_path;
+        while (1) {
+                safe_path = dirname(safe_path);
+                res = syncdir(safe_path);
+                if (res || !strcmp(safe_path, "/"))
+                        break;
+        }
+        free(tmp);
         if (res)
                 return res;
 
@@ -3417,9 +3417,20 @@ again:
 
                 free(tmp);
         } else {
+                /* It is possible but not very likely that we end up here
+                 * due to that the cache has not yet been populated.
+                 * Scan through the entire file path to force a cache update.
+                 * This is the same action as required for a cache miss in
+                 * getattr(). */
                 pthread_mutex_unlock(&file_access_mutex);
-                char *tmp = strdup(path);
-                syncdir(dirname(tmp));
+                char *safe_path = strdup(path);
+                char *tmp = safe_path;
+                while (1) {
+                        safe_path = dirname(safe_path);
+                        syncdir(safe_path);
+                        if (!strcmp(safe_path, "/"))
+                                break;
+                }
                 free(tmp);
                 pthread_mutex_lock(&file_access_mutex);
                 entry2_p = filecache_get(path);
