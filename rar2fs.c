@@ -3840,6 +3840,14 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
         struct filecache_entry *entry_p;
         char *root;
 
+        /* When using WinFSP/cygfuse the O_CREAT and O_EXCL flags sometimes
+         * seems to be added to fi->flags in the open callback function.
+         * This is not according to the legacy FUSE API implementation for
+         * which these flags bits are never set. As a workaround, make sure
+         * to clear flag bits that are not expected in calls to open. */
+#ifdef FSP_FUSE_API
+        fi->flags &= ~(O_CREAT | O_EXCL);
+#endif
         errno = 0;
         pthread_mutex_lock(&file_access_mutex);
         entry_p = path_lookup(path, NULL);
