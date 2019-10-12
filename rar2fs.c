@@ -4527,8 +4527,8 @@ static int rar2_mknod(const char *path, mode_t mode, dev_t dev)
                 char *root;
                 ABS_ROOT(root, path);
                 if (!mknod(root, mode, dev)) {
-                        return 0;
                         __dircache_invalidate_for_file(path);
+                        return 0;
                 }
                 return -errno;
         }
