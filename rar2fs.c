@@ -2411,7 +2411,10 @@ static struct filecache_entry *__listrar_tocache(char *file,
         entry_p->rar_p = strdup(first_arch);
         entry_p->file_p = strdup(next->hdr.FileName);
         entry_p->flags.vsize_resolved = 1; /* Assume sizes will be resolved */
-        entry_p->flags.unresolved = 1;
+        if (IS_RAR_DIR(&next->hdr))
+                entry_p->flags.unresolved = 0;
+        else
+                entry_p->flags.unresolved = 1;
 
         if (raw_mode) {
                 entry_p->flags.raw = 1;
@@ -2481,7 +2484,7 @@ static void __listrar_tocache_forcedir(struct filecache_entry *entry_p,
         entry_p->rar_p = strdup(first_arch);
         entry_p->file_p = strdup(file);
         entry_p->flags.force_dir = 1;
-        entry_p->flags.unresolved = 1;
+        entry_p->flags.unresolved = 0;
 
         set_rarstats(entry_p, next, 1);
 
@@ -4167,11 +4170,11 @@ static inline int access_chk(const char *path, int new_file)
          * will tell if operation should be permitted or not.
          * Simply, if the file/folder is in the cache and cannot be
          * found/accessed natively, forget it!
-         *   This works fine in most cases but it does not work for some
-         * specific programs like 'touch'. A 'touch' may result in a
-         * getattr() callback even if -EPERM is returned by open() which
-         * will eventually render a "No such file or directory" type of
-         * error/message.
+         *   This works fine in most cases but it does not always work for
+         * some specific programs like 'touch'. A 'touch' may result in a
+         * getattr() callback even if -EPERM is returned by open(), mknod()
+         ' etc. This will eventually render a "No such file or directory"
+         * type of error/message.
          */
         char *real;
         if (new_file) {
@@ -4522,7 +4525,6 @@ static int rar2_rename(const char *oldpath, const char *newpath)
 static int rar2_mknod(const char *path, mode_t mode, dev_t dev)
 {
         ENTER_("%s", path);
-
         if (!access_chk(path, 1)) {
                 char *root;
                 ABS_ROOT(root, path);
