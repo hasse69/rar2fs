@@ -4488,41 +4488,6 @@ static int rar2_chown(const char *path, uid_t uid, gid_t gid)
  *****************************************************************************
  *
  ****************************************************************************/
-static int rar2_create(const char *path, mode_t mode, struct fuse_file_info *fi)
-{
-        ENTER_("%s", path);
-        /* Only allow creation of "regular" files this way */
-        if (S_ISREG(mode)) {
-                if (!access_chk(path, 1)) {
-                        char *root;
-                        struct io_handle *io = NULL;
-                        ABS_ROOT(root, path);
-                        if (!FH_ISSET(fi->fh)) {
-                                io = malloc(sizeof(struct io_handle));
-                                if (!io)
-                                        return -ENOMEM;
-                                FH_SETIO(fi->fh, io);
-                                FH_SETTYPE(fi->fh, IO_TYPE_NRM);
-                                FH_SETENTRY(fi->fh, NULL);
-                        }
-                        int fd = creat(root, mode);
-                        if (fd == -1) {
-                                free(io);
-                                return -errno;
-                        }
-                        if (io)
-                                FH_SETFD(fi->fh, fd);
-                        __dircache_invalidate_for_file(path);
-                        return 0;
-                }
-        }
-        return -EPERM;
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
 static int rar2_eperm()
 {
         return -EPERM;
@@ -4557,11 +4522,14 @@ static int rar2_rename(const char *oldpath, const char *newpath)
 static int rar2_mknod(const char *path, mode_t mode, dev_t dev)
 {
         ENTER_("%s", path);
+
         if (!access_chk(path, 1)) {
                 char *root;
                 ABS_ROOT(root, path);
-                if (!mknod(root, mode, dev))
+                if (!mknod(root, mode, dev)) {
                         return 0;
+                        __dircache_invalidate_for_file(path);
+                }
                 return -errno;
         }
         return -EPERM;
@@ -5177,7 +5145,6 @@ static int work(struct fuse_args *args)
                 rar2_operations.opendir         = rar2_opendir;
                 rar2_operations.readdir         = rar2_readdir;
                 rar2_operations.releasedir      = rar2_releasedir;
-                rar2_operations.create          = rar2_create;
                 rar2_operations.rename          = rar2_rename;
                 rar2_operations.mknod           = rar2_mknod;
                 rar2_operations.unlink          = rar2_unlink;
