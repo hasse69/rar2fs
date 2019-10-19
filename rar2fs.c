@@ -951,11 +951,12 @@ static int get_vformat(const char *s, int t, int *l, int *p)
  *****************************************************************************
  *
  ****************************************************************************/
-static int __check_vol_header(const char *arch)
+static int __check_vol_header(const char *arch, int vtype)
 {
         HANDLE h;
         RAROpenArchiveDataEx d;
         struct RARHeaderDataEx header;
+        (void)vtype;
 
         memset(&header, 0, sizeof(header));
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
@@ -976,7 +977,14 @@ static int __check_vol_header(const char *arch)
                 d.Callback = list_callback;
                 h = RAROpenArchiveEx(&d);
         }
+
         if (d.Flags & ROADF_VOLUME) {
+/* All pre 5.x.x versions seems to suffer from the same bug which means
+ * the first volume file flag is not set properly for .rNN volumes. */
+#if RARVER_MAJOR < 5
+                if (IS_RAR(arch) && vtype)
+                        d.Flags |= ROADF_FIRSTVOLUME;
+#endif
                 if (!(d.Flags & ROADF_FIRSTVOLUME)) {
                         RARCloseArchive(h);
                         return -1;
@@ -1014,7 +1022,7 @@ static int __RARVolNameToFirstName(char *s, int vtype)
                 }
         }
         free(s_copy);
-        return __check_vol_header(s);
+        return __check_vol_header(s, vtype);
 }
 
 #if _POSIX_TIMERS < 1
