@@ -2762,8 +2762,7 @@ static int syncdir_scan(const char *dir, const char *root,
                 int error_cnt = 0;
                 int final = 0;
                 int vno = 0;
-                int vcnt = 0;
-                int vtype = f == 0 ? 1 : 0;
+                int vcnt = f == 0 ? 0 : 1;
                 int i = 0;
                 int n = scandir(root, &namelist, filter[f], alphasort);
                 if (n < 0) {
@@ -2774,8 +2773,7 @@ static int syncdir_scan(const char *dir, const char *root,
                         int pos;
                         int oldvno = vno;
 
-                        vno = get_vformat(namelist[i]->d_name, vtype,
-                                                NULL, &pos);
+                        vno = get_vformat(namelist[i]->d_name, !f, NULL, &pos);
                         if (i && strncmp(namelist[i]->d_name,
                                         namelist[i - 1]->d_name,
                                         pos))
@@ -2791,16 +2789,14 @@ static int syncdir_scan(const char *dir, const char *root,
                                 final = 0;
                                 reset = 0;
                                 seek_len = get_seek_length(arch);
+                                /* We always need to scan at least two volume files */
+                                seek_len = seek_len == 1 ? 2 : seek_len;
                                 free(first_arch);
                                 first_arch = NULL;
-                                if (!vtype)
-                                        vcnt = 1;
-                                else
-                                        vcnt = 0;
+                                vcnt = !!f;
                         }
 
-                        /* We always need to scan at least two volume files */
-                        if (!seek_len || vcnt <= seek_len) {
+                        if (!seek_len || vcnt < seek_len) {
                                 ++vcnt;
                                 if (!final) {
                                         if (listrar(dir, next, arch, &first_arch,
@@ -2891,8 +2887,7 @@ static int readdir_scan(const char *dir, const char *root,
                 int error_cnt = 0;
                 int final = 0;
                 int vno = 0;
-                int vcnt = 0;
-                int vtype = f == 1 ? 1 : 0;
+                int vcnt = f == 0 ? 0 : 1;
                 int i = 0;
                 int n = scandir(root, &namelist, filter[f], alphasort);
                 if (n < 0) {
@@ -2924,8 +2919,7 @@ static int readdir_scan(const char *dir, const char *root,
 
                         int pos;
                         int oldvno = vno;
-                        vno = get_vformat(namelist[i]->d_name, vtype,
-                                                NULL, &pos);
+                        vno = get_vformat(namelist[i]->d_name, !!f, NULL, &pos);
                         if (i && strncmp(namelist[i]->d_name,
                                         namelist[i - 1]->d_name,
                                         pos))
@@ -2941,16 +2935,14 @@ static int readdir_scan(const char *dir, const char *root,
                                 final = 0;
                                 reset = 0;
                                 seek_len = get_seek_length(arch);
+                                /* We always need to scan at least two volume files */
+                                seek_len = seek_len == 1 ? 2 : seek_len;
                                 free(first_arch);
                                 first_arch = NULL;
-                                if (!vtype)
-                                        vcnt = 1;
-                                else
-                                        vcnt = 0;
+                                vcnt = !f;
                         }
 
-                        /* We always need to scan at least two volume files */
-                        if (!seek_len || vcnt <= seek_len) {
+                        if (!seek_len || vcnt < seek_len) {
                                 ++vcnt;
                                 if (!final) {
                                         if (listrar(dir, next2, arch, &first_arch, &final)) {
@@ -3055,7 +3047,7 @@ static int syncrar(const char *path)
         int final = 0;
         /* We always need to scan at least two volume files */
         int c_end = get_seek_length(NULL);
-        c_end = c_end ? c_end + 1 : c_end;
+        c_end = c_end ? c_end == 1 ? 2 : c_end : c_end;
         struct dir_entry_list *arch_next = arch_list_root.next;
 
         dir_list_open(dir_list);
@@ -3531,7 +3523,7 @@ static int rar2_readdir2(const char *path, void *buffer,
 
                 /* We always need to scan at least two volume files */
                 int c_end = get_seek_length(NULL);
-                c_end = c_end ? c_end + 1 : c_end;
+                c_end = c_end ? c_end == 1 ? 2 : c_end : c_end;
                 struct dir_entry_list *arch_next = arch_list_root.next;
 
                 dir_list_open(next);
