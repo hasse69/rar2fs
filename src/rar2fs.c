@@ -4698,9 +4698,9 @@ static int parse_fuse_fd(const char *mountpoint)
         int fd = -1;
         unsigned int len = 0;
 
-        if (sscanf(mountpoint, "/dev/fd/%u%n", &fd, &len) == 1 && len == strlen(mountpoint)) {
+        if (sscanf(mountpoint, "/dev/fd/%u%n", &fd, &len) == 1 &&
+            len == strlen(mountpoint))
                 return fd;
-        }
 
         return -1;
 }
@@ -4731,15 +4731,14 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
         /* Check if destination path is a pre-mounted FUSE descriptor. */
         const int fuse_fd = parse_fuse_fd(dst_path_in);
         if (fuse_fd >= 0) {
-                if (verbose)
-                        printf("%s: using pre-mounted FUSE descriptor %u\n", prog, fuse_fd);
                 a2 = strdup(dst_path_in);
         } else {
                 a2 = realpath(dst_path_in, NULL);
 
                 if (!a2) {
                         if (verbose)
-                                printf("%s: invalid mount point: %s\n", prog, dst_path_in);
+                                printf("%s: invalid mount point: %s\n", prog,
+                                       dst_path_in);
                         return -1;
                 }
 
@@ -4747,7 +4746,9 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
                 (void)stat(a2, &st);
                 if (!S_ISDIR(st.st_mode)) {
                         if (verbose)
-                                printf("%s: mount point '%s' is not a directory\n", prog, a2);
+                                printf(
+                                    "%s: mount point '%s' is not a directory\n",
+                                    prog, a2);
                         return -1;
                 }
         }
@@ -4755,7 +4756,8 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
 
         if (!strcmp(a1, a2)) {
                 if (verbose)
-                        printf("%s: source and mount point are the same: %s\n", prog, a1);
+                        printf("%s: source and mount point are the same: %s\n",
+                               prog, a1);
                 return -1;
         }
 
