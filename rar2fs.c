@@ -1362,8 +1362,8 @@ static int lread_rar_idx(char *buf, size_t size, off_t offset,
                 struct io_context *op)
 {
         int res;
-        off_t o = op->buf->idx.data_p->head.offset;
-        size_t s = op->buf->idx.data_p->head.size;
+        uint64_t o = ntoh64(op->buf->idx.data_p->head.offset);
+        uint64_t s = ntoh64(op->buf->idx.data_p->head.size);
         off_t off = (offset - o);
 
         if (off >= (off_t)s)
@@ -1490,7 +1490,7 @@ static int lread_rar(char *buf, size_t size, off_t offset,
         if (offset != op->pos) {
 check_idx:
                 if (op->buf->idx.data_p != MAP_FAILED &&
-                                offset >= op->buf->idx.data_p->head.offset) {
+                    offset >= (off_t)ntoh64(op->buf->idx.data_p->head.offset)) {
                         n = lread_rar_idx(buf, size, offset, op);
                         goto out;
                 }
@@ -3685,10 +3685,16 @@ static int preload_index(struct iob *buf, const char *path)
                 close(fd);
                 return -1;
         }
+        if (ntohs(h->version) == 0) {
+                syslog(LOG_INFO, "preloaded index header version 0 not supported");
+                munmap((void *)h, sizeof(struct idx_head));
+                close(fd);
+                return -1;
+        }
 
         /* Map the file into address space (2nd pass) */
-        buf->idx.data_p = (void *)mmap(NULL, P_ALIGN_(h->size), PROT_READ,
-                                                 MAP_SHARED, fd, 0);
+        buf->idx.data_p = (void *)mmap(NULL, P_ALIGN_(ntoh64(h->size)),
+                                               PROT_READ, MAP_SHARED, fd, 0);
         munmap((void *)h, sizeof(struct idx_head));
         if (buf->idx.data_p == MAP_FAILED) {
                 close(fd);
@@ -3698,10 +3704,16 @@ static int preload_index(struct iob *buf, const char *path)
 #else
         buf->idx.data_p = malloc(sizeof(struct idx_data));
         if (!buf->idx.data_p) {
+                close(fd);
                 buf->idx.data_p = MAP_FAILED;
                 return -1;
         }
         NO_UNUSED_RESULT read(fd, buf->idx.data_p, sizeof(struct idx_head));
+        if (ntohs(buf->idx.data_p->head.version) == 0) {
+                syslog(LOG_INFO, "preloaded index header version 0 not supported");
+                close(fd);
+                return -1;
+        }
         buf->idx.mmap = 0;
 #endif
         buf->idx.fd = fd;
@@ -4370,7 +4382,7 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                         if (op->buf->idx.data_p != MAP_FAILED &&
                                         op->buf->idx.mmap)
                                 munmap((void *)op->buf->idx.data_p,
-                                        P_ALIGN_(op->buf->idx.data_p->head.size));
+                                       P_ALIGN_(ntoh64(op->buf->idx.data_p->head.size)));
 #endif
                         if (op->buf->idx.data_p != MAP_FAILED &&
                                         !op->buf->idx.mmap)
@@ -5213,7 +5225,7 @@ static int work(struct fuse_args *args)
                       } else {
                               fuse_daemonize(fg);
                               fuse_set_signal_handlers(fuse_get_session(f));
-                              syslog(LOG_DEBUG, "mounted %s\n", mp);
+                              syslog(LOG_DEBUG, "mounted %s", mp);
                       }
               }
         }
@@ -5247,7 +5259,7 @@ static int work(struct fuse_args *args)
         fuse_remove_signal_handlers(fuse_get_session(f));
         fuse_unmount(mp, ch);
         fuse_destroy(f);
-        syslog(LOG_DEBUG, "unmounted %s\n", mp);
+        syslog(LOG_DEBUG, "unmounted %s", mp);
         free(mp);
 
 #if defined ( HAVE_SCHED_SETAFFINITY ) && defined ( HAVE_CPU_SET_T )

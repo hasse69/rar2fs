@@ -60,7 +60,7 @@ static inline int count_c(char c, char *s)
  *****************************************************************************
  *
  ****************************************************************************/
-static void parse_riff(struct idx_head *h, FILE *fp, off_t sz)
+static void parse_riff(struct idx_head *h, FILE *fp, uint64_t sz)
 {
         char s[256];
         char *needle = NULL;
@@ -95,8 +95,9 @@ static void parse_riff(struct idx_head *h, FILE *fp, off_t sz)
                                 ++needle;
                         }
                         *tmp = 0;
-                        h->offset = atoll(tmp2)&~4095; /* align offset */
-                        h->size = sz - h->offset;
+                        h->offset = atoll(tmp2) & ~4095; /* align offset */
+                        h->size = hton64(sz - h->offset);
+                        h->offset = hton64(h->offset);
                         return;
                 }
         }
@@ -106,7 +107,7 @@ static void parse_riff(struct idx_head *h, FILE *fp, off_t sz)
  *****************************************************************************
  *
  ****************************************************************************/
-static void parse_ebml(struct idx_head *h, FILE *fp, off_t sz)
+static void parse_ebml(struct idx_head *h, FILE *fp, uint64_t sz)
 {
         char s[256];
         char *needle = NULL;
@@ -149,7 +150,8 @@ static void parse_ebml(struct idx_head *h, FILE *fp, off_t sz)
                                         (i3 * 1000000) +
                                         (i2 * 1000) + i1;
                         h->offset = h->offset & ~4095; /* align offset */
-                        h->size = sz - h->offset;
+                        h->size = hton64(sz - h->offset);
+                        h->offset = hton64(h->offset);
                 }
         }
 }
@@ -230,7 +232,7 @@ int main(int argn, char *argv[])
         struct idx_head head;
         head.size = 0;
         head.magic = R2I_MAGIC;
-        head.version = 0;
+        head.version = htons(1);
         head.spare = 0;
 
         switch (mode) {
@@ -246,15 +248,17 @@ int main(int argn, char *argv[])
 
         if (head.size) {
                 char *dest;
+                uint64_t offset = ntoh64(head.offset);
+                uint64_t size = ntoh64(head.size);
                 STR_DUP(dest, src_file);
                 strcpy(&dest[strlen(dest)-4], ".r2i");
-                fseeko(fd_src, head.offset, SEEK_SET);
+                fseeko(fd_src, offset, SEEK_SET);
 
                 int fd = open(dest, O_RDWR|O_CREAT, S_IREAD|S_IWRITE);
                 if (fd == -1)
                         return 1;
 
-                size_t map_size = (head.size + sizeof(struct idx_head) + 4096) & ~4095;
+                size_t map_size = (size + sizeof(struct idx_head) + 4096) & ~4095;
 
                 char *addr = map_file(fd, map_size);
                 if (!addr) {
@@ -265,7 +269,7 @@ int main(int argn, char *argv[])
                 char *tmp = addr;
                 memcpy(tmp, &head, sizeof(struct idx_head));
                 tmp += sizeof(struct idx_head);
-                if ((fread(tmp, 1, head.size, fd_src) != head.size) && ferror(fd_src))
+                if ((fread(tmp, 1, size, fd_src) != size) && ferror(fd_src))
                         return 1;
 
                 /* flush to medium */

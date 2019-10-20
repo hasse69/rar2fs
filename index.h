@@ -29,16 +29,33 @@
 #ifndef INDEX_H_
 #define INDEX_H_
 
+#include <stdint.h>
 #include <arpa/inet.h>
 
 #define R2I_MAGIC     (htonl(0x72326900))   /* 'r2i ' */
 
-struct idx_head {
+/* This is the old broken header which was used for version 0.
+ * It is obsolete and no longer supported due to the lack of
+ * interoperability between 32- and 64-bit platforms, also with
+ * respect to different byte order (endian).
+ * This version of the header is kept here for reference only and
+ ' also in the rather unlikely case some safe conversion can be
+ ' made to version 1 or later. */
+struct idx_head_broken {
         uint32_t magic;
         uint16_t version;
         uint16_t spare;
         off_t offset;
         size_t size;
+};
+
+/* Header fields are in network byte order from version 1 and later */
+struct idx_head {
+        uint32_t magic;
+        uint16_t version;
+        uint16_t spare;
+        uint64_t offset;
+        uint64_t size;
 };
 
 struct idx_data {

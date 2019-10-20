@@ -139,6 +139,19 @@ typedef bool _Bool;
 # define __attribute__(x)
 #endif
 
+#ifndef WORDS_BIGENDIAN
+#define hton64(w) \
+        (((uint64_t)htonl((w) & 0xffffffff) << 32) | \
+        (((uint64_t)htonl((w) >> 32))))
+
+#define ntoh64(w) \
+        (((uint64_t)ntohl((w) & 0xffffffff) << 32) | \
+        (((uint64_t)ntohl((w) >> 32))))
+#else
+#define hton64(w) (w)
+#define ntoh64(w) (w)
+#endif
+
 #endif
 
 
