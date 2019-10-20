@@ -1709,12 +1709,16 @@ static void dump_stat(struct stat *stbuf)
 
 /*!
  *****************************************************************************
+ * Checks if archive file |arch| is part of a multipart archive.
+ * Identifies all the files that are part of the same multipart archive and
+ * located in the same directory as |arch| and stores their paths in |*list|.
  *
+ * Returns the number of files making the multipart archive.
+ * Returns 1 if |arch| is not part of a multipart archive.
+ * Returns a negative ERAR error code in case of error.
  ****************************************************************************/
 static int collect_files(const char *arch, struct dir_entry_list *list)
 {
-        int files = 0;
-        HANDLE h;
         RAROpenArchiveDataEx d;
 
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
@@ -1722,17 +1726,19 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
         d.OpenMode = RAR_OM_LIST_INCSPLIT;
         d.Callback = list_callback_noswitch;
         d.UserData = (LPARAM)arch;
-        h = RAROpenArchiveEx(&d);
+
+        HANDLE h = RAROpenArchiveEx(&d);
 
         /* Check for fault */
-        if (d.OpenResult) {
+        const int err = d.OpenResult;
+        if (err != ERAR_SUCCESS) {
                 if (h)
                         RARCloseArchive(h);
-                if (d.OpenResult == ERAR_MISSING_PASSWORD)
-			files = -EPERM;
-                goto out;
+
+                return -err;
         }
 
+        int files = 0;
         if (d.Flags & ROADF_VOLUME) {
                 char *arch_ = strdup(arch);
                 int format = (d.Flags & ROADF_NEWNUMBERING) ? 0 : 1;
@@ -1752,7 +1758,6 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
                 files = 1;
         }
 
-out:
         return files;
 }
 
@@ -1962,7 +1967,7 @@ static int extract_rar(char *arch, const char *file, void *arg)
 
 extract_error:
 
-        if (hdl) 
+        if (hdl)
                 RARCloseArchive(hdl);
 
         return ret;
@@ -4871,6 +4876,39 @@ static int parse_fuse_fd(const char *mountpoint)
 
 /*!
  *****************************************************************************
+ * Converts the given ERAR error code into a matching string.
+ * The returned string is statically allocated and does not need to be freed.
+ ****************************************************************************/
+static const char *error_to_string(int err)
+{
+        switch (err) {
+#define ERROR_TO_STRING_ENTRY(s) \
+        case s:                  \
+                return #s;
+                ERROR_TO_STRING_ENTRY(ERAR_SUCCESS);
+                ERROR_TO_STRING_ENTRY(ERAR_END_ARCHIVE);
+                ERROR_TO_STRING_ENTRY(ERAR_NO_MEMORY);
+                ERROR_TO_STRING_ENTRY(ERAR_BAD_DATA);
+                ERROR_TO_STRING_ENTRY(ERAR_BAD_ARCHIVE);
+                ERROR_TO_STRING_ENTRY(ERAR_UNKNOWN_FORMAT);
+                ERROR_TO_STRING_ENTRY(ERAR_EOPEN);
+                ERROR_TO_STRING_ENTRY(ERAR_ECREATE);
+                ERROR_TO_STRING_ENTRY(ERAR_ECLOSE);
+                ERROR_TO_STRING_ENTRY(ERAR_EREAD);
+                ERROR_TO_STRING_ENTRY(ERAR_EWRITE);
+                ERROR_TO_STRING_ENTRY(ERAR_SMALL_BUF);
+                ERROR_TO_STRING_ENTRY(ERAR_UNKNOWN);
+                ERROR_TO_STRING_ENTRY(ERAR_MISSING_PASSWORD);
+                ERROR_TO_STRING_ENTRY(ERAR_EREFERENCE);
+                ERROR_TO_STRING_ENTRY(ERAR_BAD_PASSWORD);
+#undef ERROR_TO_STRING_ENTRY
+        }
+
+        return "Unexpected ERAR code";
+}
+
+/*!
+ *****************************************************************************
  *
  ****************************************************************************/
 static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
@@ -4934,16 +4972,20 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
 
         /* Check file collection at archive mount */
         if (mount_type == MOUNT_ARCHIVE) {
-                int ret = collect_files(a1, arch_list);
-                if (ret == -EPERM) {
+                const int ret = collect_files(a1, arch_list);
+                if (ret < 0) {
+                        const int err = -ret;
                         if (verbose)
-                                printf("%s: bad or missing password\n", prog);
-                        return -1;
-                } else if (ret <= 0) {
+                                printf("%s: cannot open '%s': %s\n", prog, a1,
+                                       error_to_string(err));
+                        return err;
+                }
+                if (ret == 0) {
                         if (verbose)
-                                printf("%s: invalid source and/or mount point\n",
-                                                prog);
-                        return -1;
+                                printf(
+                                    "%s: cannot find primary file for multipart archive '%s'\n",
+                                    prog, a1);
+                        return 1;
                 }
         }
 
@@ -5510,11 +5552,11 @@ int main(int argc, char *argv[])
         if (OPT_SET(OPT_KEY_SRC) && OPT_SET(OPT_KEY_DST)) {
                 char *dst_path = NULL;
                 char *src_path = NULL;
-                if (check_paths(argv[0],
-                                OPT_STR(OPT_KEY_SRC, 0),
-                                OPT_STR(OPT_KEY_DST, 0),
-                                &src_path, &dst_path, 1))
-                        return -1;
+                const int err = check_paths(argv[0], OPT_STR(OPT_KEY_SRC, 0),
+                                            OPT_STR(OPT_KEY_DST, 0), &src_path,
+                                            &dst_path, 1);
+                if (err)
+                        return err;
 
                 optdb_save(OPT_KEY_SRC, src_path);
                 optdb_save(OPT_KEY_DST, dst_path);
