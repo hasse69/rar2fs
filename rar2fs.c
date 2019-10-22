@@ -312,6 +312,17 @@ static void __dircache_invalidate_for_file(const char *path)
  *****************************************************************************
  *
  ****************************************************************************/
+static void __dircache_invalidate(const char *path)
+{
+        pthread_mutex_lock(&dir_access_mutex);
+        dircache_invalidate(path);
+        pthread_mutex_unlock(&dir_access_mutex);
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 #ifdef HAVE_VISIBILITY_ATTRIB
 __attribute__((visibility("hidden")))
 #endif
@@ -321,9 +332,7 @@ void __handle_sigusr1()
         pthread_mutex_lock(&file_access_mutex);
         filecache_invalidate(NULL);
         pthread_mutex_unlock(&file_access_mutex);
-        pthread_mutex_lock(&dir_access_mutex);
-        dircache_invalidate(NULL);
-        pthread_mutex_unlock(&dir_access_mutex);
+        __dircache_invalidate(NULL);
 }
 
 /*!
@@ -716,9 +725,7 @@ static struct filecache_entry *path_lookup(const char *path, struct stat *stbuf)
         e_p = path_lookup_miss(path, stbuf);
         if (!e_p) {
                 if (e2_p && e2_p->flags.unresolved) {
-                        pthread_mutex_lock(&dir_access_mutex);
-                        dircache_invalidate(path);
-                        pthread_mutex_unlock(&dir_access_mutex);
+                        __dircache_invalidate(path);
                         e2_p->flags.unresolved = 0;
                         if (stbuf)
                                 memcpy(stbuf, &e2_p->stat, sizeof(struct stat));
@@ -3375,9 +3382,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 }
                 ABS_ROOT(root, path);
                 if (readdir_scan(path, root, &next, &next2)) {
-                        pthread_mutex_lock(&dir_access_mutex);
-                        dircache_invalidate(path);
-                        pthread_mutex_unlock(&dir_access_mutex);
+                        __dircache_invalidate(path);
                         goto dump_buff_nocache;
                 }
         }
@@ -4503,6 +4508,7 @@ static int rar2_eperm()
 static int rar2_rename(const char *oldpath, const char *newpath)
 {
         ENTER_("%s", oldpath);
+
         /* We can not move things out of- or from RAR archives */
         if (!access_chk(newpath, 0) && !access_chk(oldpath, 0)) {
                 char *oldroot;
@@ -4510,6 +4516,7 @@ static int rar2_rename(const char *oldpath, const char *newpath)
                 ABS_ROOT(oldroot, oldpath);
                 ABS_ROOT(newroot, newpath);
                 if (!rename(oldroot, newroot)) {
+                        __dircache_invalidate(oldpath);
                         __dircache_invalidate_for_file(oldpath);
                         return 0;
                 }
@@ -4584,7 +4591,7 @@ static int rar2_rmdir(const char *path)
                 char *root;
                 ABS_ROOT(root, path);
                 if (!rmdir(root)) {
-                        dircache_invalidate(path);
+                        __dircache_invalidate(path);
                         return 0;
                 }
                 return -errno;
@@ -4609,6 +4616,8 @@ static int rar2_utimens(const char *path, const struct timespec ts[2])
                 res = utimensat(0, root, ts, AT_SYMLINK_NOFOLLOW);
                 if (res == -1)
                         return -errno;
+                __dircache_invalidate(path);
+                __dircache_invalidate_for_file(path);
                 return 0;
         }
         return -EPERM;
