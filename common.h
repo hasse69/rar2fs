@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2009 Hans Beckerus (hans.beckerus@gmail.com)
+    Copyright (C) 2009 Hans Beckerus (hans.beckerus#AT#gmail.com)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -26,30 +26,26 @@
     to develop a RAR (WinRAR) compatible archiver.
 */
 
-#ifndef DIRCACHE_H_
-#define DIRCACHE_H_
+#ifndef COMMON_H_
+#define COMMON_H_
 
 #include <platform.h>
-#include <time.h>
-#include "dirlist.h"
 
-extern pthread_mutex_t dir_access_mutex;
+#define ABS_ROOT(s, path) \
+        do { \
+                (s) = alloca(strlen(path) + strlen(OPT_STR2(OPT_KEY_SRC,0)) + 1); \
+                strcpy((s), OPT_STR2(OPT_KEY_SRC,0)); \
+                strcat((s), path); \
+        } while (0)
 
-struct dircache_entry {
-        struct dir_entry_list dir_entry_list;
-        struct timespec mtim;
-        int ts_valid;
-};
-
-struct dircache_cb {
-        int (*stale)(const char *path, struct dir_entry_list *);
-};
-
-struct dircache_entry *dircache_alloc(const char *path);
-struct dircache_entry *dircache_get(const char *path);
-void dircache_invalidate(const char *path);
-void dircache_init(struct dircache_cb *cb);
-void dircache_destroy();
+#define ABS_MP(s, path, file) \
+        do { \
+                int l = strlen(path); \
+                (s) = alloca(l + strlen(file) + 3); \
+                strcpy((s), path); \
+                if (l && path[l - 1] != '/') \
+                        strcat((s), "/"); \
+                strcat((s), file); \
+        } while(0)
 
 #endif
-

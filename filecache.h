@@ -89,23 +89,6 @@ struct filecache_entry {
 #define LOCAL_FS_ENTRY ((void*)-1)
 #define LOOP_FS_ENTRY ((void*)-2)
 
-#define ABS_ROOT(s, path) \
-        do { \
-                (s) = alloca(strlen(path) + strlen(OPT_STR2(OPT_KEY_SRC,0)) + 1); \
-                strcpy((s), OPT_STR2(OPT_KEY_SRC,0)); \
-                strcat((s), path); \
-        } while (0)
-
-#define ABS_MP(s, path, file) \
-        do { \
-                int l = strlen(path); \
-                (s) = alloca(l + strlen(file) + 3); \
-                strcpy((s), path); \
-                if (l && path[l - 1] != '/') \
-                        strcat((s), "/"); \
-                strcat((s), file); \
-        } while(0)
-
 extern pthread_mutex_t file_access_mutex;
 
 struct filecache_entry *

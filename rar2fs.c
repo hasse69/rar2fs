@@ -74,6 +74,7 @@
 #include "sighandler.h"
 #include "dirlist.h"
 #include "rarconfig.h"
+#include "common.h"
 
 #define MOUNT_FOLDER  0
 #define MOUNT_ARCHIVE 1
@@ -2081,6 +2082,7 @@ static void set_rarstats(struct filecache_entry *entry_p,
         entry_p->stat.st_blocks =
             (((entry_p->stat.st_size + (8 * 512)) & ~((8 * 512) - 1)) / 512);
 #endif
+
         if (!OPT_SET(OPT_KEY_DATE_RAR)) {
                 struct tm t;
                 memset(&t, 0, sizeof(struct tm));
@@ -2724,8 +2726,8 @@ static int syncdir_scan(const char *dir, const char *root,
                         if (!seek_len || vcnt < seek_len) {
                                 ++vcnt;
                                 if (!final) {
-                                        if (listrar(dir, next, arch, &first_arch,
-                                                                &final)) {
+                                        if (listrar(dir, next, arch,
+                                                    &first_arch, &final)) {
                                                 ++error_tot;
                                                 ++error_cnt;
                                                 *next = dir_entry_add(*next,
@@ -2831,7 +2833,8 @@ static int readdir_scan(const char *dir, const char *root,
                         if (!seek_len || vcnt < seek_len) {
                                 ++vcnt;
                                 if (!final) {
-                                        if (listrar(dir, next2, arch, &first_arch, &final)) {
+                                        if (listrar(dir, next2, arch,
+                                                    &first_arch, &final)) {
                                                 ++error_tot;
                                                 ++error_cnt;
                                                 *next2 = dir_entry_add(*next2,
@@ -4019,6 +4022,29 @@ static inline int access_chk(const char *path, int new_file)
  *****************************************************************************
  *
  ****************************************************************************/
+static int __dircache_stale(const char *path, struct dir_entry_list *dir)
+{
+        char *mp;
+
+        struct dir_entry_list *next = dir->next;
+        pthread_mutex_lock(&file_access_mutex);
+        while (next) {
+                ABS_MP(mp, path,  next->entry.name);
+                filecache_invalidate(mp);
+                next = next->next;
+        }
+        pthread_mutex_unlock(&file_access_mutex);
+        return 0;
+}
+
+static struct dircache_cb dircache_cb = {
+        .stale = __dircache_stale,
+};
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 static void *rar2_init(struct fuse_conn_info *conn)
 {
         ENTER_();
@@ -4029,7 +4055,7 @@ static void *rar2_init(struct fuse_conn_info *conn)
                 rarconfig_init(OPT_STR(OPT_KEY_SRC, 0),
                                OPT_STR(OPT_KEY_CONFIG, 0));
         filecache_init();
-        dircache_init();
+        dircache_init(&dircache_cb);
         iob_init();
         sighandler_init();
 
