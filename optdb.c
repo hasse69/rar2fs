@@ -39,10 +39,6 @@ static struct opt_entry opt_entry_[] = {
         {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 1, 0},
-        {{NULL,}, 0, 0, 0, 0, 0},
-        {{NULL,}, 0, 0, 0, 0, 0},
-        {{NULL,}, 0, 0, 0, 0, 0},
-        {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 1},
         {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 0},
@@ -196,23 +192,11 @@ int optdb_save(int opt, const char *s)
  *****************************************************************************
  *
  ****************************************************************************/
-static void reset_opt(int opt, int init)
+static void reset_opt(int opt)
 {
         if (opt < 0 || opt > OPT_KEY_LAST)
                 return;
-
         CLR_OPT_(opt);
-        if (init) {
-                switch (opt) {
-                case OPT_KEY_IMG_TYPE:
-                        ADD_OPT_(OPT_KEY_IMG_TYPE, ".iso", OPT_STR_);
-                        ADD_OPT_(OPT_KEY_IMG_TYPE, ".img", OPT_STR_);
-                        ADD_OPT_(OPT_KEY_IMG_TYPE, ".nrg", OPT_STR_);
-                        break;
-                default:
-                        break;
-                }
-        }
 }
 
 /*!
@@ -223,7 +207,7 @@ void optdb_init()
 {
         int i = OPT_KEY_END;
         while (i--)
-                reset_opt(i, 1);
+                reset_opt(i);
 }
 
 /*!
@@ -234,7 +218,7 @@ void optdb_destroy()
 {
         int i = OPT_KEY_END;
         while (i--)
-                reset_opt(i, 0);
+                reset_opt(i);
 }
 
 #undef ADD_OPT_
@@ -270,16 +254,6 @@ int optdb_find(int opt, char *path)
                                 return 1;
                         }
                         free(safe_path);
-                        ++i;
-                }
-        } else if (opt == OPT_KEY_FAKE_ISO || opt == OPT_KEY_IMG_TYPE) {
-                int l = get_ext_len(path);
-                if (l <= 1)
-                        return 0;
-                while (i != OPT_CNT(opt)) {
-                        char *tmp =  OPT_STR(opt, i);
-                        if (!strcmp((path) + (strlen(path) - l), tmp ? tmp : ""))
-                                return l - 1;
                         ++i;
                 }
         }

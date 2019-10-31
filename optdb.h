@@ -29,10 +29,6 @@
 #ifndef OPTDB_H_
 #define OPTDB_H_
 
-#define IS_IMG(s) \
-        ((OPT_CNT(OPT_KEY_IMG_TYPE) && optdb_find(OPT_KEY_IMG_TYPE, s)) || \
-        (OPT_CNT(OPT_KEY_FAKE_ISO) && optdb_find(OPT_KEY_FAKE_ISO, s)))
-
 #define OPT_FILTER(path) \
         (OPT_CNT(OPT_KEY_EXCLUDE) && optdb_find(OPT_KEY_EXCLUDE, (char*)(path)))
 
@@ -44,10 +40,6 @@ enum {
         OPT_KEY_SRC = 0,
         OPT_KEY_DST,
         OPT_KEY_EXCLUDE,
-        OPT_KEY_FAKE_ISO,
-        OPT_KEY_IMG_TYPE,
-        OPT_KEY_PREOPEN_IMG,
-        OPT_KEY_SHOW_COMP_IMG,
         OPT_KEY_SEEK_LENGTH,
         OPT_KEY_NO_SMP,
         OPT_KEY_NO_LIB_CHECK,

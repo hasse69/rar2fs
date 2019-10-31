@@ -41,61 +41,6 @@ Besides the standard FUSE options
 .B rar2fs
 accepts the following options that can be passed to the program.
 .TP
-.B \-\-img-type=".<ext>[;.<ext>;...]"
-additional image file type extensions
-.PP
-.RS
-The default image file types recognized by
-.B rar2fs
-is .img, .nrg and .iso. This option will allow more file extensions to be added. It affects the behavior of the
-.B \-\-show-comp-img
-,
-.B \-\-preopen-img
-and
-.B \-\-fake-iso
-options.
-.RE
-.TP
-.B \-\-show-comp-img
-show image file types also for compressed/encrypted archives
-.PP
-.RS
-Image media files in compressed/encrypted archives usually does not playback very well, if at all. This is because imaged media, such as DVD images, is implementing a file access
-pattern that can not be fully supported by a partly buffered decoded data stream with limited history. For that reason the default is to
-.I not
-show such files.
-.RE
-.TP
-.B \-\-preopen-img
-prefetch volume file descriptors for image file types
-.PP
-.RS
-This option will force all volume files to be opened before playback is started. Specifying this option might help in some
-rare situations to overcome transient playback disturbances at switch of volume files when mounted across a lossy/slow network. Note that this option only affects playback of image file media read in raw mode (not compressed/encrypted).
-.RE
-.TP
-.B \-\-fake-iso=".<ext>[;.<ext>;...]"
-.TP
-.B \-\-fake-iso
-fake .iso extension for specified image file types
-.PP
-.RS
-Some media players does not support display of image files other than those with a .iso extension. However, .img files are usually 100% compatible with .iso and so is .nrg files, even though the .nrg format specification says otherwise. For that reason playback of .nrg might fail. Specifying this option will remove the need for renaming certain file types to .iso just to make them display properly. If playback works or not is all about the player software from here.
-.PP
-Each file extension/type in the list should be separated by a semi-colon
-.B ';'
-character. It is also possible not to provide any image file type extensions for which the default
-.I .img
-and
-.I .nrg
-will be displayed as
-.I .iso
-together with what was specified in \fB\-\-img-type\fR. Note though that image files are treated somewhat differently depending on where they are located. If the image file is not part of a RAR archive, then there will be a
-virtual clone made of the original file but with a
-.I .iso
-extension, provided that the file/link does not already exist. This to keep the consistency of the back-end file system, especially when links are involved.
-.RE
-.TP
 .B \-\-seek-length=n
 set number of volume files that are traversed in search for headers [0=All]
 .PP

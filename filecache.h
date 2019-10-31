@@ -55,13 +55,11 @@ struct filecache_entry {
 #ifndef WORDS_BIGENDIAN
                         unsigned int raw:1;
                         unsigned int multipart:1;
-                        unsigned int image:1;
-                        unsigned int fake_iso:1;
                         unsigned int force_dir:1;
                         unsigned int vsize_fixup_needed:1;
                         unsigned int encrypted:1;
                         unsigned int vsize_resolved:1;
-                        unsigned int :19;
+                        unsigned int :21;
                         unsigned int unresolved:1;
                         unsigned int :1;
                         unsigned int check_atime:1;
@@ -75,13 +73,11 @@ struct filecache_entry {
                         unsigned int check_atime:1;
                         unsigned int :1;
                         unsigned int unresolved:1;
-                        unsigned int :19;
+                        unsigned int :21;
                         unsigned int vsize_resolved:1;
                         unsigned int encrypted:1;
                         unsigned int vsize_fixup_needed:1;
                         unsigned int force_dir:1;
-                        unsigned int fake_iso:1;
-                        unsigned int image:1;
                         unsigned int multipart:1;
                         unsigned int raw:1;
 #endif
@@ -103,8 +99,7 @@ struct filecache_entry {
 #define ABS_MP(s, path, file) \
         do { \
                 int l = strlen(path); \
-                /* add +2 in case of fake .iso */ \
-                (s) = alloca(l + strlen(file) + 3 + 2); \
+                (s) = alloca(l + strlen(file) + 3); \
                 strcpy((s), path); \
                 if (l && path[l - 1] != '/') \
                         strcat((s), "/"); \
