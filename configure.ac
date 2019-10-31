@@ -1,20 +1,22 @@
 #                                               -*- Autoconf -*-
 # Process this file with autoconf to produce a configure script.
 AC_INIT([rar2fs],
-        [m4_esyscmd(./get-version.sh version.h)],
+        [m4_esyscmd(./get-version.sh src/version.h)],
         [https://hasse69.github.io/rar2fs])
 AC_PREREQ([2.61])
 AC_CONFIG_AUX_DIR(config)
 AC_CANONICAL_TARGET
 AM_INIT_AUTOMAKE
 AC_CONFIG_MACRO_DIR(m4)
-AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_HEADERS([src/config.h])
 
 AM_CONDITIONAL([LINUX],
                [case $host_os in *linux*) true;; *) false;; esac])
 
 # Save CFLAGS (if defined by user; othwerwise NONE)
 USER_CFLAGS=${CFLAGS-NONE} 
+
+BUILDDIR=`cd $srcdir;pwd`
 
 # Checks for programs.
 AC_PROG_CC_STDC
@@ -223,12 +225,13 @@ AC_ARG_WITH([unrar],
 if test x"$withval" != x; then
     if test x"$withval" != x"no"; then
         if test x"$withval" != x"yes"; then
-           UNRAR_CPPFLAGS="-I"$with_unrar
+           with_unrar=`cd $with_unrar;pwd`
+           UNRAR_CPPFLAGS="-I"`cd $with_unrar;pwd`
         fi
     fi
 else
-    with_unrar="./unrar"
-    UNRAR_CPPFLAGS="-I./unrar"
+    with_unrar="$BUILDDIR/unrar"
+    UNRAR_CPPFLAGS="-I$BUILDDIR/unrar"
 fi
 
 withval=
@@ -295,7 +298,7 @@ CPPFLAGS="$CPPFLAGS $FUSE_CPPFLAGS"
 AC_CHECK_HEADER(fuse.h,,
     [AC_MSG_ERROR([
         Cannot find fuse.h - add alternative include search path using
-        --with-fuse and rerun configure. ])])
+        --with-fuse and rerun configure. $UNRAR_CPPFLAGS])])
 
 save_LDFLAGS="$LDFLAGS"
 save_LIBS="$LIBS"
@@ -501,7 +504,7 @@ fi
 AM_ICONV
 
 AC_MSG_CHECKING(for commit hash in git repo)
-GITHEAD=.git/$(cat .git/HEAD 2>/dev/null | cut -d" " -f2)
+GITHEAD=$BUILDDIR/.git/$(cat $BUILDDIR/.git/HEAD 2>/dev/null | cut -d" " -f2)
 GITREV=$(cut -c1-7 $GITHEAD 2>/dev/null)
 if test x"$GITREV" != x; then
     AC_SUBST([CONFIG_STATUS_DEPENDENCIES], [$GITHEAD])
@@ -698,6 +701,7 @@ CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 CXXFLAGS="$CXXFLAGS $PTHREAD_CFLAGS"
 
 AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([src/Makefile])
 AC_OUTPUT
 
 
