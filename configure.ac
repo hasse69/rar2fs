@@ -298,7 +298,7 @@ CPPFLAGS="$CPPFLAGS $FUSE_CPPFLAGS"
 AC_CHECK_HEADER(fuse.h,,
     [AC_MSG_ERROR([
         Cannot find fuse.h - add alternative include search path using
-        --with-fuse and rerun configure. $UNRAR_CPPFLAGS])])
+        --with-fuse and rerun configure.])])
 
 save_LDFLAGS="$LDFLAGS"
 save_LIBS="$LIBS"
