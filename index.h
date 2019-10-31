@@ -33,6 +33,7 @@
 #include <arpa/inet.h>
 
 #define R2I_MAGIC     (htonl(0x72326900))   /* 'r2i ' */
+#define R2I_VERSION   (htons(1))
 
 /* This is the old broken header which was used for version 0.
  * It is obsolete and no longer supported due to the lack of

@@ -232,7 +232,7 @@ int main(int argn, char *argv[])
         struct idx_head head;
         head.size = 0;
         head.magic = R2I_MAGIC;
-        head.version = htons(1);
+        head.version = R2I_VERSION;
         head.spare = 0;
 
         switch (mode) {

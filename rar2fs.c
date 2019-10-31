@@ -1912,7 +1912,7 @@ static int extract_index(const char *path, const struct filecache_entry *entry_p
         struct RARHeaderDataEx header;
         memset(&header, 0, sizeof(header));
         HANDLE hdl = 0;
-        struct idx_head head = {R2I_MAGIC, 0, 0, 0, 0};
+        struct idx_head head = {R2I_MAGIC, R2I_VERSION, 0, 0, 0};
         char *r2i;
 
         struct eof_cb_arg eofd;
