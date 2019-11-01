@@ -14,7 +14,6 @@ rar2fs_SOURCES = 		dllext.cpp \
 				rarconfig.c \
 				rar2fs.c \
 				common.h \
-				compat.h \
 				optdb.h \
 				dirlist.h \
 				hash.h \

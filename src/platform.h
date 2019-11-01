@@ -31,8 +31,6 @@
 
 #ifdef HAVE_CONFIG_H
 # include <config.h>
-#else
-# include <compat.h>
 #endif
 
 #ifdef STDC_HEADERS
