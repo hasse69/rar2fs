@@ -693,6 +693,7 @@ fi
 
 AC_PROG_LN_S
 AC_PROG_MKDIR_P
+AC_PROG_GZIP
 
 # Do some final preparations before we finish
 #
@@ -702,6 +703,7 @@ CXXFLAGS="$CXXFLAGS $PTHREAD_CFLAGS"
 
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([src/Makefile])
+AC_CONFIG_FILES([man/Makefile])
 AC_OUTPUT
 
 
