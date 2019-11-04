@@ -2555,10 +2555,10 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
 
                 /* Aliasing is not support for directories */
                 if (!IS_RAR_DIR(&next->hdr))
-                        ABS_MP(mp, (*rar_root ? rar_root : "/"),
+                        ABS_MP2(mp, (*rar_root ? rar_root : "/"),
                                         get_alias(*first_arch, next->hdr.FileName));
                 else
-                        ABS_MP(mp, (*rar_root ? rar_root : "/"),
+                        ABS_MP2(mp, (*rar_root ? rar_root : "/"),
                                         next->hdr.FileName);
 
                 printd(3, "Looking up %s in cache\n", mp);
@@ -2585,12 +2585,14 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 if (entry_p == NULL) {
                         --n_files;
                         next = next->next;
+                        free(mp);
                         continue;
                 }
 
 cache_hit:
                 __add_filler(path, buffer, mp);
                 next = next->next;
+                free(mp);
         }
 
 out:
@@ -2709,7 +2711,7 @@ static int syncdir_scan(const char *dir, const char *root,
                                 reset = 1;
 
                         char *arch;
-                        ABS_MP(arch, root, namelist[i]->d_name);
+                        ABS_MP2(arch, root, namelist[i]->d_name);
 
                         if (reset) {
                                 error_cnt = 0;
@@ -2744,6 +2746,7 @@ static int syncdir_scan(const char *dir, const char *root,
                                               namelist[i]->d_name,
                                               NULL, DIR_E_NRM);
                         }
+                        free(arch);
                         ++i;
                 }
                 for (i = 0; i < n; i++)
@@ -2816,7 +2819,7 @@ static int readdir_scan(const char *dir, const char *root,
                                 reset = 1;
 
                         char *arch;
-                        ABS_MP(arch, root, namelist[i]->d_name);
+                        ABS_MP2(arch, root, namelist[i]->d_name);
 
                         if (reset) {
                                 error_cnt = 0;
@@ -2851,6 +2854,8 @@ static int readdir_scan(const char *dir, const char *root,
                                                namelist[i]->d_name,
                                                NULL, DIR_E_NRM);
                         }
+
+                        free(arch);
 
 next_entry:
                         ++i;
@@ -3144,8 +3149,9 @@ static void dump_dir_list(const char *path, void *buffer, fuse_fill_dir_t filler
                         if (do_inval_cache ||
                             next->entry.type == DIR_E_NRM) { /* Oops! */
                                 char *tmp;
-                                ABS_MP(tmp, path, next->entry.name);
+                                ABS_MP2(tmp, path, next->entry.name);
                                 filecache_invalidate(tmp);
+                                free(tmp);
                         }
 #endif
                 }
@@ -4012,14 +4018,14 @@ static inline int access_chk(const char *path, int new_file)
  ****************************************************************************/
 static int __dircache_stale(const char *path, struct dir_entry_list *dir)
 {
-        char *mp;
-
         struct dir_entry_list *next = dir->next;
         pthread_mutex_lock(&file_access_mutex);
         while (next) {
-                ABS_MP(mp, path,  next->entry.name);
+                char *mp;
+                ABS_MP2(mp, path,  next->entry.name);
                 filecache_invalidate(mp);
                 next = next->next;
+                free(mp);
         }
         pthread_mutex_unlock(&file_access_mutex);
         return 0;
