@@ -38,14 +38,17 @@
                 strcat((s), path); \
         } while (0)
 
-#define ABS_MP(s, path, file) \
+#define ABS_MP_(s, path, file, __alloc) \
         do { \
                 int l = strlen(path); \
-                (s) = alloca(l + strlen(file) + 3); \
+                (s) = __alloc(l + strlen(file) + 2); \
                 strcpy((s), path); \
                 if (l && path[l - 1] != '/') \
                         strcat((s), "/"); \
                 strcat((s), file); \
         } while(0)
+
+#define ABS_MP(s, path, file) ABS_MP_(s, path, file, alloca)
+#define ABS_MP2(s, path, file) ABS_MP_(s, path, file, malloc)
 
 #endif

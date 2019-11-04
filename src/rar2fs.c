@@ -2539,9 +2539,8 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                 safe_path = dirname(safe_path);
                                 if (!CHRCMP(safe_path, '.'))
                                         break;
-                                /* Aliasing is not support for directories */
-                                ABS_MP(mp2, path, safe_path);
 
+                                ABS_MP2(mp2, path, safe_path);
                                 struct filecache_entry *entry_p = filecache_get(mp2);
                                 if (entry_p == NULL) {
                                         printd(3, "Adding %s to cache\n", mp2);
@@ -2549,6 +2548,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                         __listrar_tocache_forcedir(entry_p, next,
                                                         safe_path, *first_arch, &d);
                                 }
+                                free(mp2);
                         }
                         free(orig_path);
                 }
