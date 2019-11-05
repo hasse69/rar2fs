@@ -3,32 +3,34 @@ AM_CXXFLAGS = $(UNRAR_CXXFLAGS) -Wall -Wno-reorder
 AM_CPPFLAGS = $(UNRAR_CPPFLAGS) $(FUSE_CPPFLAGS)
 bin_PROGRAMS = rar2fs mkr2i
 
-rar2fs_SOURCES = 		dllext.cpp \
-				optdb.c \
-				filecache.c \
-				iobuffer.c \
-				sighandler.c \
-				hashtable.c \
-				dircache.c \
-				dirlist.c \
-				rarconfig.c \
-				rar2fs.c \
-				common.h \
-				optdb.h \
-				dirlist.h \
-				hash.h \
-				filecache.h \
-				iobuffer.h \
-				sighandler.h \
-                                hashtable.h \
-                                dircache.h \
-                                rarconfig.h \
-				debug.h \
-				dllwrapper.h \
-				index.h \
-				platform.h \
-				version.h \
-				dllext.hpp
+rar2fs_SOURCES = 	dllext.cpp \
+			optdb.c \
+			filecache.c \
+			iobuffer.c \
+			sighandler.c \
+			hashtable.c \
+			dircache.c \
+			dirlist.c \
+			rarconfig.c \
+			dirname.c \
+			rar2fs.c \
+			common.h \
+			optdb.h \
+			dirlist.h \
+			hash.h \
+			filecache.h \
+			iobuffer.h \
+			sighandler.h \
+			hashtable.h \
+			dircache.h \
+			rarconfig.h \
+			dirname.h \
+			debug.h \
+			dllwrapper.h \
+			index.h \
+			platform.h \
+			version.h \
+			dllext.hpp
 
 rar2fs_LDADD = $(PTHREAD_CFLAGS) $(LDFLAGS) $(UNRAR_LDFLAGS) $(FUSE_LDFLAGS) \
 		$(PTHREAD_LIBS) $(FUSE_LIBS) $(UNRAR_LIBS) $(LIBICONV) -lstdc++

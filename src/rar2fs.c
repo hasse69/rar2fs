@@ -75,6 +75,7 @@
 #include "dirlist.h"
 #include "rarconfig.h"
 #include "common.h"
+#include "dirname.h"
 
 #define MOUNT_FOLDER  0
 #define MOUNT_ARCHIVE 1
@@ -301,7 +302,7 @@ static void __dircache_invalidate_for_file(const char *path)
 {
         char *safe_path = strdup(path);
         pthread_mutex_lock(&dir_access_mutex);
-        dircache_invalidate(dirname(safe_path));
+        dircache_invalidate(__gnu_dirname(safe_path));
         pthread_mutex_unlock(&dir_access_mutex);
         free(safe_path);
 }
@@ -500,7 +501,7 @@ static char *get_password(const char *file, char *buf, size_t len)
                                 char *tmp1 = strdup(F);
                                 char *tmp2 = strdup(F);
                                 F = malloc(strlen(file) + 8);
-                                sprintf(F, "%s%s%s", dirname(tmp1),
+                                sprintf(F, "%s%s%s", __gnu_dirname(tmp1),
                                                 "/.", basename(tmp2));
                                 free(tmp1);
                                 free(tmp2);
@@ -1034,7 +1035,7 @@ static void update_atime(const char* path, struct filecache_entry *entry_p,
         entry_p->stat.st_atim.tv_nsec = tp[0].tv_nsec;
 #endif
         char* tmp1 = strdup(path);
-        e_p = filecache_get(dirname(tmp1));
+        e_p = filecache_get(__gnu_dirname(tmp1));
         free(tmp1);
         if (e_p && S_ISDIR(e_p->stat.st_mode)) {
                 dir_updated = 1;
@@ -1049,10 +1050,12 @@ static void update_atime(const char* path, struct filecache_entry *entry_p,
                 tp[1].tv_nsec = UTIME_OMIT;
                 tmp1 = strdup(entry_p->rar_p);
                 char *tmp2 = strdup(tmp1);
-                int res = utimensat(0, dirname(tmp2), tp, AT_SYMLINK_NOFOLLOW);
+                int res = utimensat(0, __gnu_dirname(tmp2), tp,
+                                    AT_SYMLINK_NOFOLLOW);
                 if (!res && OPT_SET(OPT_KEY_ATIME_RAR)) {
                         for (;;) {
-                                res = utimensat(0, tmp1, tp, AT_SYMLINK_NOFOLLOW);
+                                res = utimensat(0, tmp1, tp,
+                                                AT_SYMLINK_NOFOLLOW);
                                 if (res == -1 && errno == ENOENT)
                                         break;
                                 RARNextVolumeName(tmp1, !entry_p->vtype);
@@ -2496,7 +2499,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         }
 
         char *tmp1 = strdup(arch);
-        char *rar_root = strdup(dirname(tmp1));
+        char *rar_root = strdup(__gnu_dirname(tmp1));
         free(tmp1);
         tmp1 = rar_root;
         rar_root += strlen(OPT_STR2(OPT_KEY_SRC, 0));
@@ -2531,12 +2534,12 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                  * later in the header the faked entry will be
                  * invalidated and replaced with the real file stats. */
                 if (is_root_path) {
-                        char *orig_path = strdup(next->hdr.FileName);
-                        char *safe_path = orig_path;
+                        char *safe_path = strdup(next->hdr.FileName);
+                        char *tmp = safe_path;
                         while (1) {
                                 char *mp2;
 
-                                safe_path = dirname(safe_path);
+                                safe_path = __gnu_dirname(safe_path);
                                 if (!CHRCMP(safe_path, '.'))
                                         break;
 
@@ -2550,7 +2553,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                 }
                                 free(mp2);
                         }
-                        free(orig_path);
+                        free(tmp);
                 }
 
                 /* Aliasing is not support for directories */
@@ -2997,7 +3000,7 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         char *safe_path = strdup(path);
         char *tmp = safe_path;
         while (1) {
-                safe_path = dirname(safe_path);
+                safe_path = __gnu_dirname(safe_path);
                 res = syncdir(safe_path);
                 if (res || !strcmp(safe_path, "/"))
                         break;
@@ -3320,7 +3323,7 @@ again:
                 char *safe_path = strdup(path);
                 char *tmp = safe_path;
                 while (1) {
-                        safe_path = dirname(safe_path);
+                        safe_path = __gnu_dirname(safe_path);
                         syncdir(safe_path);
                         if (!strcmp(safe_path, "/"))
                                 break;
@@ -4002,7 +4005,7 @@ static inline int access_chk(const char *path, int new_file)
         char *real;
         if (new_file) {
                 char *p = strdup(path); /* In case p is destroyed by dirname() */
-                e = filecache_get(dirname(p));
+                e = filecache_get(__gnu_dirname(p));
                 ABS_ROOT(real, p);
                 free(p);
         } else {
@@ -4743,7 +4746,7 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
         char *tmp = a2;
 #endif
         *src_path_out = mount_type == MOUNT_FOLDER
-                ? strdup(a1) : strdup(dirname(a1));
+                ? strdup(a1) : strdup(__gnu_dirname(a1));
         *dst_path_out = strdup(a2);
         free(a1);
 #ifndef __CYGWIN__

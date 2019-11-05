@@ -36,6 +36,7 @@
 #include "hashtable.h"
 #include "version.hpp"
 #include "rarconfig.h"
+#include "dirname.h"
 
 #define RARCONFIG_SZ 1024
 
@@ -446,7 +447,7 @@ static int __dirlevels(const char *path)
 
         while (strcmp(tmp, "/")) {
                 ++count;
-                tmp = dirname(tmp);
+                tmp = __gnu_dirname(tmp);
         }
         free(tmp2);
 
@@ -473,7 +474,7 @@ static int __check_paths(const char *a, const char *b)
          * of directories are added. */
         a_safe = strdup(a);
         b_safe = strdup(b);
-        if (strcmp(dirname(a_safe), dirname(b_safe))) {
+        if (strcmp(__gnu_dirname(a_safe), __gnu_dirname(b_safe))) {
                 free(a_safe);
                 free(b_safe);
                 return 1;
