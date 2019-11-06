@@ -1,5 +1,71 @@
 rar2fs ChangeLog file.
 
+2019-11-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.28.0
+
+        * Fix extended attribute support
+
+        * Clean some AC_DEFINEs in configure.ac
+
+        * Check for availability of GNU style dirname(3)
+
+        * Fix all uses of dirname(3)
+
+        * Install compressed man-page when possible
+
+        * Fix more potential stack allocation overflows
+
+        * Change FUSE library search order
+
+        * Remove a few unused functions
+
+        * Fix a potential stack allocation overflow
+
+        * Remove obsolete header file
+
+        * Remove left over debug printout
+
+        * Remove obsolete stubs directory and config.mk
+
+        * Restructure top build directory
+
+        * Bump man-page date
+
+        * Detect source tree updates
+
+        * Remove irrelevant options for rar2fs mounts
+
+        * Fix wrong header version written by '--save-eof'
+
+        * Introduce preloaded index header version 1
+
+        * Add a few missing directory cache invalidations
+
+        * Rework seek length detection
+
+        * Fix compatibility issue for early UnRAR source versions
+
+        * Relax unresolved flag for directories in RAR files
+
+        * Fix misplaced function call in mknod callback
+
+        * Remove create callback
+
+        * Clear unexpected flags in open for WinFSP/cygfuse
+
+        * Fix lookup issue for merged local- and RAR-files
+
+        * Fix path split problem
+
+        * Remove a superfluous call to syncdir()
+
+        * Show both local- and RAR-files in shared directory
+
+        * Add missing include of stdint.h
+
+        * Add new mount option --no-inherit-perm
+
 2019-03-16  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.27.2

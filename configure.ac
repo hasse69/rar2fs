@@ -706,8 +706,7 @@ if test x"$cross_compiling" = x"no"; then
     [[
         char *path = strdup("/a/b/c");
         char *tmp = path;
-        path = dirname(path);
-        if (path == tmp)
+        if (dirname(path) == tmp)
             return 0;
         return -1;
     ]])],
