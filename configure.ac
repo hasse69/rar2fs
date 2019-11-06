@@ -144,7 +144,7 @@ if test x"$ac_cv_func_getxattr" = x"yes" ; then
                 [attr_cv_xattr_add_opt=no;LIBS=$old_LIBS])
         ])
         if test x"$attr_cv_xattr_add_opt" = x"yes"; then
-                AC_DEFINE(XATTR_ADD_OPT, 1, [Define if xattr functions have additional options])
+                AC_DEFINE(XATTR_ADD_OPT, [1], [Define to 1 if xattr functions takes additional options])
         fi
 fi
 
@@ -460,7 +460,7 @@ if test x"$static_unrar" = x"no"; then
     ########################################################
 else
     UNRAR_LIBS="$with_unrar/libunrar.a"
-    AC_DEFINE(HAVE_STATIC_UNRAR,1,[Define if UnRAR library is linked statically])
+    AC_DEFINE(HAVE_STATIC_UNRAR, [1], [Define to 1 if UnRAR library is linked statically])
 fi
 
 AC_SUBST(UNRAR_LIBS)
@@ -523,7 +523,7 @@ if test "$ac_cv_func_sched_setaffinity" = "yes" ; then
     AC_TRY_COMPILE( [
 #include <sched.h>],[ cpu_set_t t; ],pac_cv_have_cpu_set_t=yes,pac_cv_have_cpu_set_t=no)])
     if test "$pac_cv_have_cpu_set_t" = yes ; then
-        AC_DEFINE(HAVE_CPU_SET_T,1,[Define if cpu_set_t is defined in sched.h])
+        AC_DEFINE(HAVE_CPU_SET_T,1,[Define to 1 if cpu_set_t is defined in sched.h])
 
         AC_CACHE_CHECK([whether the CPU_SET and CPU_ZERO macros are defined],
         pac_cv_cpu_set_defined,[
@@ -531,7 +531,7 @@ if test "$ac_cv_func_sched_setaffinity" = "yes" ; then
 #include <sched.h>],[ cpu_set_t t; CPU_ZERO(&t); CPU_SET(1,&t); ],
         pac_cv_cpu_set_defined=yes,pac_cv_cpu_set_defined=no)])
         if test "$pac_cv_cpu_set_defined" = "yes" ; then
-            AC_DEFINE(HAVE_CPU_SET_MACROS,1,[Define if CPU_SET and CPU_ZERO defined])
+            AC_DEFINE(HAVE_CPU_SET_MACROS,1,[Define to 1 if CPU_SET and CPU_ZERO macros are defined])
         fi
         # FIXME: Some versions of sched_setaffinity return ENOSYS (!),
         # so we should test for the unfriendly and useless behavior
@@ -650,7 +650,7 @@ CFLAGS="$save_CFLAGS"
 ac_c_werror_flag=
 AC_LANG_POP
 if test x"$has_hidden_attrib" = x"yes"; then
-    AC_DEFINE(HAVE_VISIBILITY_ATTRIB, 1, [Define if compiler supports __attribute__((visibility("hidden")))])
+    AC_DEFINE(HAVE_VISIBILITY_ATTRIB, [1], [Define to 1 if compiler supports __attribute__((visibility("hidden")))])
 fi
 
 
@@ -688,7 +688,7 @@ AC_TRY_COMPILE([], [__sync_synchronize();],
 ac_c_werror_flag=
 AC_LANG_POP
 if test x"$has_synchronize" = x"yes"; then
-    AC_DEFINE(HAVE_SYNC_SYNCHRONIZE, 1, [Define if __sync_synchronize() is available])
+    AC_DEFINE(HAVE_SYNC_SYNCHRONIZE, [1], [Define to 1 if __sync_synchronize() is available])
 fi
 
 # Check for GNU style dirname (modifies input argument, thread safe).
@@ -712,7 +712,7 @@ if test x"$cross_compiling" = x"no"; then
         return -1;
     ]])],
         [AC_MSG_RESULT([yes])
-         AC_DEFINE(HAVE_GNU_DIRNAME, 1, [Define to 1 if you have GNU style dirname])
+         AC_DEFINE(HAVE_GNU_DIRNAME, [1], [Define to 1 if you have GNU style dirname])
         ],
         [AC_MSG_RESULT([no])
         ]
