@@ -144,7 +144,7 @@ if test x"$ac_cv_func_getxattr" = x"yes" ; then
                 [attr_cv_xattr_add_opt=no;LIBS=$old_LIBS])
         ])
         if test x"$attr_cv_xattr_add_opt" = x"yes"; then
-                AC_DEFINE(XATTR_ADD_OPT, 1, [xattr functions have additional options])
+                AC_DEFINE(XATTR_ADD_OPT, 1, [Define if xattr functions have additional options])
         fi
 fi
 
@@ -690,6 +690,37 @@ AC_LANG_POP
 if test x"$has_synchronize" = x"yes"; then
     AC_DEFINE(HAVE_SYNC_SYNCHRONIZE, 1, [Define if __sync_synchronize() is available])
 fi
+
+# Check for GNU style dirname (modifies input argument, thread safe).
+# If we are cross-compiling we cannot determine this so use the fallback.
+# The latter should not perform much worse than the actual GNU C Library
+# version of dirname(3). The fallback will be used on platforms such as
+# Mac OS X, which lacks a thread safe GNU style dirname(3) implementation.
+AC_LANG_PUSH(C)
+AC_MSG_CHECKING([for GNU style dirname])
+if test x"$cross_compiling" = x"no"; then
+    AC_RUN_IFELSE([
+        AC_LANG_PROGRAM([[
+             #include <libgen.h>
+             #include <string.h>]],
+    [[
+        char *path = strdup("/a/b/c");
+        char *tmp = path;
+        path = dirname(path);
+        if (path == tmp)
+            return 0;
+        return -1;
+    ]])],
+        [AC_MSG_RESULT([yes])
+         AC_DEFINE(HAVE_GNU_DIRNAME, 1, [Define to 1 if you have GNU style dirname])
+        ],
+        [AC_MSG_RESULT([no])
+        ]
+    )
+else
+    AC_MSG_RESULT([skipped])
+fi
+AC_LANG_POP
 
 AC_PROG_LN_S
 AC_PROG_MKDIR_P

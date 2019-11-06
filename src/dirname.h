@@ -29,6 +29,11 @@
 #ifndef DIRNAME_H_
 #define DIRNAME_H_
 
+#ifdef HAVE_GNU_DIRNAME
+#include <libgen.h>
+#define __gnu_dirname dirname
+#else
 char *__gnu_dirname(char *path);
+#endif
 
 #endif

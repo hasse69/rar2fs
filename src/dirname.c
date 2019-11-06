@@ -50,6 +50,7 @@ static inline void *memrchr(const void *s, int c_in, size_t n)
 }
 #endif
 
+#ifndef HAVE_GNU_DIRNAME
 /*!
  *****************************************************************************
  * dirname - return directory part of PATH.
@@ -127,3 +128,4 @@ char *__gnu_dirname(char *path)
 
         return path;
 }
+#endif
