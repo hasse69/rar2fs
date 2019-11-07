@@ -3010,9 +3010,8 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
                 return res;
 
         pthread_mutex_lock(&file_access_mutex);
-        entry_p = filecache_get(path);
+        entry_p = path_lookup(path, stbuf);
         if (entry_p) {
-                memcpy(stbuf, &entry_p->stat, sizeof(struct stat));
                 pthread_mutex_unlock(&file_access_mutex);
                 dump_stat(stbuf);
                 return 0;
@@ -3078,9 +3077,8 @@ static int rar2_getattr2(const char *path, struct stat *stbuf)
                 return res;
 
         pthread_mutex_lock(&file_access_mutex);
-        struct filecache_entry *entry_p = filecache_get(path);
+        struct filecache_entry *entry_p = path_lookup(path, stbuf);
         if (entry_p) {
-                memcpy(stbuf, &entry_p->stat, sizeof(struct stat));
                 pthread_mutex_unlock(&file_access_mutex);
                 dump_stat(stbuf);
                 return 0;
@@ -4002,15 +4000,12 @@ static inline int access_chk(const char *path, int new_file)
          ' etc. This will eventually render a "No such file or directory"
          * type of error/message.
          */
-        char *real;
         if (new_file) {
                 char *p = strdup(path); /* In case p is destroyed by dirname() */
                 e = filecache_get(__gnu_dirname(p));
-                ABS_ROOT(real, p);
                 free(p);
         } else {
                 e = filecache_get(path);
-                ABS_ROOT(real, path);
         }
         return e && !e->flags.unresolved ? 1 : 0;
 }
@@ -4463,7 +4458,6 @@ static int rar2_utimens(const char *path, const struct timespec ts[2])
 static const char *xattr[4] = {
         "user.rar2fs.cache_method",
         "user.rar2fs.cache_flags",
-        "user.rar2fs.cache_dir_hash",
         NULL
 };
 #define XATTR_CACHE_METHOD 0
@@ -4503,7 +4497,7 @@ static int rar2_getxattr(const char *path, const char *name, char *value,
 
         e_p = filecache_get(path);
         if (e_p == NULL)
-                return -ENOTSUP;
+                return -ENOENT;
 
         if (!strcmp(name, xattr[XATTR_CACHE_METHOD]) &&
                         !S_ISDIR(e_p->stat.st_mode)) {
@@ -4517,9 +4511,13 @@ static int rar2_getxattr(const char *path, const char *name, char *value,
                  * According to Linux man page, ENOATTR is defined to be a
                  * synonym for ENODATA in <attr/xattr.h>. But <attr/xattr.h>
                  * does not seem to exist on that many systems, so return
-                 * -ENODATA here instead.
+                 * -ENODATA if ENOATTR is not defined.
                  */
+#ifdef HAVE_ENOATTR
+                return -ENOATTR;
+#else
                 return -ENODATA;
+#endif
         }
 
         if (size) {
@@ -4564,7 +4562,7 @@ static int rar2_listxattr(const char *path, char *list, size_t size)
 
         e_p = filecache_get(path);
         if (e_p == NULL)
-                return -ENOTSUP;
+                return -ENOENT;
 
         i = 0;
         len = 0;
@@ -4626,10 +4624,11 @@ static int rar2_setxattr(const char *path, const char *name, const char *value,
 ****************************************************************************/
 static int rar2_removexattr(const char *path, const char *name)
 {
+        int res;
+
         ENTER_("%s", path);
 
         if (!access_chk(path, 0)) {
-                int res;
                 char *tmp;
                 ABS_ROOT(tmp, path);
 #ifdef XATTR_ADD_OPT

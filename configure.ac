@@ -722,6 +722,20 @@ else
 fi
 AC_LANG_POP
 
+# Check if we have errno ENOATTR, typically not on Linux
+AC_LANG_PUSH(C)
+ac_c_werror_flag=yes
+AC_MSG_CHECKING([for errno ENOATTR])
+AC_TRY_COMPILE([#include <errno.h>], [return ENOATTR;],
+    [AC_MSG_RESULT([yes])
+        AC_DEFINE(HAVE_ENOATTR, [1], [Define to 1 if errno ENOATTR is available])
+    ],
+    [AC_MSG_RESULT([no])
+    ]
+)
+ac_c_werror_flag=
+AC_LANG_POP
+
 AC_PROG_LN_S
 AC_PROG_MKDIR_P
 AC_PROG_GZIP
