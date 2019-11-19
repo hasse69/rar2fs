@@ -4688,6 +4688,24 @@ static int64_t get_blkdev_size(struct stat *st)
 #endif
 }
 
+#ifndef __CYGWIN__
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int parse_fuse_fd(const char *mountpoint)
+{
+        int fd = -1;
+        unsigned int len = 0;
+
+        if (sscanf(mountpoint, "/dev/fd/%u%n", &fd, &len) == 1 &&
+            len == strlen(mountpoint))
+                return fd;
+
+        return -1;
+}
+#endif
+
 /*!
  *****************************************************************************
  *
@@ -4695,35 +4713,61 @@ static int64_t get_blkdev_size(struct stat *st)
 static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
                 char **src_path_out, char **dst_path_out, int verbose)
 {
+        struct stat st;
+
         char *a1 = realpath(src_path_in, NULL);
+
+        if (!a1) {
+                if (verbose)
+                        printf("%s: invalid source: %s\n", prog, src_path_in);
+                return -1;
+        }
+
 #ifdef __CYGWIN__
         char *a2 = dst_path_in;
 #else
-        char *a2 = realpath(dst_path_in, NULL);
+        char *a2;
+
+        /* Check if destination path is a pre-mounted FUSE descriptor. */
+        const int fuse_fd = parse_fuse_fd(dst_path_in);
+        if (fuse_fd >= 0) {
+                a2 = strdup(dst_path_in);
+        } else {
+                a2 = realpath(dst_path_in, NULL);
+
+                if (!a2) {
+                        if (verbose)
+                                printf("%s: invalid mount point: %s\n", prog,
+                                       dst_path_in);
+                        return -1;
+                }
+
+                /* Check if destination path is a directory. */
+                (void)stat(a2, &st);
+                if (!S_ISDIR(st.st_mode)) {
+                        if (verbose)
+                                printf(
+                                    "%s: mount point '%s' is not a directory\n",
+                                    prog, a2);
+                        return -1;
+                }
+        }
 #endif
-        if (!a1 || !a2 || !strcmp(a1, a2)) {
+
+        if (!strcmp(a1, a2)) {
                 if (verbose)
-                        printf("%s: invalid source and/or mount point\n", prog);
+                        printf("%s: source and mount point are the same: %s\n",
+                               prog, a1);
                 return -1;
         }
+
         dir_list_open(arch_list);
-        struct stat st;
         (void)stat(a1, &st);
         mount_type = S_ISDIR(st.st_mode) ? MOUNT_FOLDER : MOUNT_ARCHIVE;
 
         /* Check for block special file */
         if (mount_type == MOUNT_ARCHIVE && S_ISBLK(st.st_mode))
                 blkdev_size = get_blkdev_size(&st);
-
-#ifndef __CYGWIN__
-        /* Check path type(s), destination path *must* be a folder */
-        (void)stat(a2, &st);
-        if (!S_ISDIR(st.st_mode)) {
-                if (verbose)
-                        printf("%s: invalid source and/or mount point\n", prog);
-                return -1;
-        }
-#endif
 
         /* Check file collection at archive mount */
         if (mount_type == MOUNT_ARCHIVE) {
