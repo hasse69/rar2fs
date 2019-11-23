@@ -94,14 +94,13 @@ enum HOST_SYSTEM {
 extern "C" {
 #endif
 
-typedef struct RARArchiveList RARArchiveList;
-typedef struct RARArchiveListEx RARArchiveListEx;
+typedef struct RARArchiveDataEx RARArchiveDataEx;
 
 #ifdef __cplusplus
 }
 #endif
 
-struct RARArchiveListEx
+struct RARArchiveDataEx
 {
   struct RARHeaderDataEx hdr;
   __extension__
@@ -120,7 +119,6 @@ struct RARArchiveListEx
   unsigned int HeadSize;
   off_t        Offset;
   off_t        FileDataEnd;
-  RARArchiveListEx* next;
 };
 
 struct RARWcb
@@ -133,10 +131,10 @@ struct RARWcb
 extern "C" {
 #endif
 
-int          PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* fList, int *ResultCode);
-void         PASCAL RARFreeListEx(RARArchiveListEx* fList);
-void         PASCAL RARNextVolumeName(char*, bool);
-void         PASCAL RARVolNameToFirstName(char*, bool);
+int          PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveDataEx **);
+void         PASCAL RARFreeArchiveDataEx(RARArchiveDataEx **);
+void         PASCAL RARNextVolumeName(char *, bool);
+void         PASCAL RARVolNameToFirstName(char *, bool);
 void         PASCAL RARGetFileInfo(HANDLE hArcData, const char *FileName, struct RARWcb *wcb);
 
 #ifdef __cplusplus
