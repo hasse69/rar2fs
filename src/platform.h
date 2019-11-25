@@ -150,6 +150,10 @@ typedef bool _Bool;
 #define ntoh64(w) (w)
 #endif
 
+#ifndef NO_UNUSED_RESULT
+#define NO_UNUSED_RESULT
+#endif
+
 #endif
 
 

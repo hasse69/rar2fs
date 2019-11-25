@@ -635,7 +635,6 @@ static struct filecache_entry *path_lookup(const char *path, struct stat *stbuf)
         e_p = path_lookup_miss(path, stbuf);
         if (!e_p) {
                 if (e2_p && e2_p->flags.unresolved) {
-                        __dircache_invalidate(path);
                         pthread_rwlock_unlock(&file_access_mutex);
                         pthread_rwlock_wrlock(&file_access_mutex);
                         e2_p->flags.unresolved = 0;
@@ -4457,7 +4456,6 @@ static int rar2_rename(const char *oldpath, const char *newpath)
                 ABS_ROOT(oldroot, oldpath);
                 ABS_ROOT(newroot, newpath);
                 if (!rename(oldroot, newroot)) {
-                        __dircache_invalidate(oldpath);
                         __dircache_invalidate_for_file(oldpath);
                         return 0;
                 }
@@ -4549,6 +4547,8 @@ static int rar2_utimens(const char *path, const struct timespec ts[2])
 {
         ENTER_("%s", path);
 
+        struct stat st;
+
         if (!access_chk(path, 0)) {
                 int res;
                 char *root;
@@ -4557,8 +4557,12 @@ static int rar2_utimens(const char *path, const struct timespec ts[2])
                 res = utimensat(0, root, ts, AT_SYMLINK_NOFOLLOW);
                 if (res == -1)
                         return -errno;
-                __dircache_invalidate(path);
-                __dircache_invalidate_for_file(path);
+                /* A directory cache invalidation is not really necessary for
+                 * regular files, but checking if it is is possibly even less
+                 * effective than the extra invalidation itself. For now do
+                 * the check for a directory. */
+                if (!stat(root, &st) && S_ISDIR(st.st_mode))
+                        __dircache_invalidate(path);
                 return 0;
         }
         return -EPERM;

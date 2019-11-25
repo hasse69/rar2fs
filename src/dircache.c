@@ -30,6 +30,7 @@
 #include "platform.h"
 #include <memory.h>
 #include <string.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <pthread.h>
 #include <sys/types.h>
@@ -38,6 +39,7 @@
 #include "hashtable.h"
 #include "dirlist.h"
 #include "dircache.h"
+#include "dirname.h"
 #include "optdb.h"
 #include "common.h"
 
@@ -108,7 +110,14 @@ void dircache_destroy()
  ****************************************************************************/
 void dircache_invalidate(const char *path)
 {
-        hashtable_entry_delete(ht, path);
+        uint32_t hash;
+
+        char *safe_path = strdup(path);
+        char *tmp = safe_path;
+        safe_path = __gnu_dirname(safe_path);
+        hash = get_hash(safe_path, 0);
+        free(tmp);
+        hashtable_entry_delete_subkeys(ht, path, hash);
 }
 
 /*!
@@ -121,8 +130,14 @@ struct dircache_entry *dircache_alloc(const char *path)
         struct dircache_entry *e;
         char *root;
         struct stat st;
+        uint32_t hash;
 
-        hte = hashtable_entry_alloc(ht, path);
+        char *safe_path = strdup(path);
+        char *tmp = safe_path;
+        safe_path = __gnu_dirname(safe_path);
+        hash = get_hash(safe_path, 0);
+        free(tmp);
+        hte = hashtable_entry_alloc_hash(ht, path, hash);
         if (hte) {
                 e = hte->user_data;
                 ABS_ROOT(root, path);
@@ -151,9 +166,15 @@ struct dircache_entry *dircache_get(const char *path)
         struct dircache_entry *e;
         char *root;
         struct stat st;
+        uint32_t hash;
         int ret;
 
-        hte = hashtable_entry_get(ht, path);
+        char *safe_path = strdup(path);
+        char *tmp = safe_path;
+        safe_path = __gnu_dirname(safe_path);
+        hash = get_hash(safe_path, 0);
+        free(tmp);
+        hte = hashtable_entry_get_hash(ht, path, hash);
         if (hte) {
                 e = hte->user_data;
                 if (e->ts_valid) {

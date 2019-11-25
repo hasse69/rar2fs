@@ -29,9 +29,16 @@
 
 #include "platform.h"
 #include <string.h>
+#include <stdlib.h>
 #include "debug.h"
 #include "hashtable.h"
 #include "hash.h"
+
+struct hash_table {
+        struct hash_table_entry *bucket;
+        size_t size;
+        struct hash_table_ops ops;
+};
 
 /*!
  *****************************************************************************
@@ -39,8 +46,16 @@
  ****************************************************************************/
 struct hash_table_entry *hashtable_entry_alloc(void *h, const char *key)
 {
+        return hashtable_entry_alloc_hash(h, key, get_hash(key, 0));
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+struct hash_table_entry *hashtable_entry_alloc_hash(void *h, const char *key, uint32_t hash)
+{
         struct hash_table *ht = h;
-        uint32_t hash = get_hash(key, 0);
         struct hash_table_entry *p = &ht->bucket[(hash & (ht->size - 1))];
         if (p->key) {
                 if (!strcmp(key, p->key))
@@ -73,8 +88,16 @@ struct hash_table_entry *hashtable_entry_alloc(void *h, const char *key)
  ****************************************************************************/
 struct hash_table_entry *hashtable_entry_get(void *h, const char *key)
 {
+        return hashtable_entry_get_hash(h, key, get_hash(key, 0));
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+struct hash_table_entry *hashtable_entry_get_hash(void *h, const char *key, uint32_t hash)
+{
         struct hash_table *ht = h;
-        uint32_t hash = get_hash(key, 0);
         struct hash_table_entry *p = &ht->bucket[hash & (ht->size - 1)];
         if (p->key) {
                 while (p) {
@@ -96,52 +119,62 @@ struct hash_table_entry *hashtable_entry_get(void *h, const char *key)
  *****************************************************************************
  *
  ****************************************************************************/
+static void hashtable_entry_delete_hash(void *h, const char *key,
+                                        uint32_t hash)
+{
+        struct hash_table *ht = h;
+        struct hash_table_entry *b = &ht->bucket[hash & (ht->size - 1)];
+        struct hash_table_entry *p = b;
+        printd(3, "Invalidating hash key %s in %p\n", key, ht);
+
+        /* Search collision chain */
+        while (p->next) {
+                struct hash_table_entry *prev = p;
+                p = p->next;
+                if (p->key && !strcmp(key, p->key)) {
+                        if (p->user_data)
+                                ht->ops.free(p->user_data);
+                        prev->next = p->next;
+                        free(p->key);
+                        free(p);
+                        /* Entry purged. We can leave now. */
+                        return;
+                }
+        }
+
+        /*
+         * Entry not found in collision chain.
+         * Most likely it is in the bucket, but double check.
+         */
+        if (b->key && !strcmp(b->key, key)) {
+                /* Need to relink collision chain */
+                if (b->next) {
+                        struct hash_table_entry *tmp = b->next;
+                        if (b->user_data)
+                                ht->ops.free(b->user_data);
+                        free(b->key);
+                        memcpy(b, b->next,
+                                    sizeof(struct hash_table_entry));
+                        free(tmp);
+                } else {
+                        ht->ops.free(b->user_data);
+                        free(b->key);
+                        memset(b, 0, sizeof(struct hash_table_entry));
+                }
+        }
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 void hashtable_entry_delete(void *h, const char *key)
 {
         struct hash_table *ht = h;
-        uint32_t i;
+        size_t i;
 
         if (key) {
-                uint32_t hash = get_hash(key, ht->size);
-                struct hash_table_entry *b = &ht->bucket[hash];
-                struct hash_table_entry *p = b;
-                printd(3, "Invalidating hash key %s in %p\n", key, ht);
-
-                /* Search collision chain */
-                while (p->next) {
-                        struct hash_table_entry *prev = p;
-                        p = p->next;
-                        if (p->key && !strcmp(key, p->key)) {
-                                if (p->user_data)
-                                        ht->ops.free(p->user_data);
-                                prev->next = p->next;
-                                free(p->key);
-                                free(p);
-                                /* Entry purged. We can leave now. */
-                                return;
-                        }
-                }
-
-                /*
-                 * Entry not found in collision chain.
-                 * Most likely it is in the bucket, but double check.
-                 */
-                if (b->key && !strcmp(b->key, key)) {
-                        /* Need to relink collision chain */
-                        if (b->next) {
-                                struct hash_table_entry *tmp = b->next;
-                                if (b->user_data)
-                                        ht->ops.free(b->user_data);
-                                free(b->key);
-                                memcpy(b, b->next,
-                                            sizeof(struct hash_table_entry));
-                                free(tmp);
-                        } else {
-                                ht->ops.free(b->user_data);
-                                free(b->key);
-                                memset(b, 0, sizeof(struct hash_table_entry));
-                        }
-                }
+                hashtable_entry_delete_hash(h, key, get_hash(key, 0));
         } else {
                 printd(3, "Invalidating all hash keys in %p\n", ht);
                 for (i = 0; i < ht->size; i++) {
@@ -163,6 +196,58 @@ void hashtable_entry_delete(void *h, const char *key)
                         memset(b, 0, sizeof(struct hash_table_entry));
                 }
         }
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+void hashtable_entry_delete_subkeys(void *h, const char *key, uint32_t hash)
+{
+        struct hash_table *ht = h;
+        struct hash_table_entry *p;
+        struct hash_table_entry *b;
+
+/* Use a linear search algorithm, at least until we can make sure that
+ * parent and child nodes are all populated in the cache together, i.e. no
+ * broken chains. */
+#if 0
+        p = &ht->bucket[hash & (ht->size - 1)];
+        b = p;
+
+        /* Search collision chain first */
+        while (p->next) {
+                p = p->next;
+                if (p->key && (hash == p->hash) &&
+                    (strstr(p->key, key) == p->key)) {
+                        hashtable_entry_delete_subkeys(h, key,
+                                                       get_hash(p->key, 0));
+                        hashtable_entry_delete_hash(h, p->key, hash);
+                }
+        }
+        /* Finally check the bucket */
+        if (b->key && (hash == b->hash) &&
+            (strstr(b->key, key) == b->key)) {
+                        hashtable_entry_delete_subkeys(h, key,
+                                                       get_hash(b->key, 0));
+                        hashtable_entry_delete_hash(h, b->key, hash);
+        }
+#else
+        size_t i;
+        (void)hash;
+
+        for (i = 0; i < ht->size; i++) {
+                b = &ht->bucket[i];
+                p = b;
+                while (p->next) {
+                        p = p->next;
+                        if (strstr(p->key, key) == p->key)
+                                hashtable_entry_delete_hash(h, p->key, p->hash);
+                }
+                if (b->key && (strstr(b->key, key) == b->key))
+                        hashtable_entry_delete_hash(h, b->key, b->hash);
+        }
+#endif
 }
 
 /*!

@@ -30,6 +30,7 @@
 #define DIRLIST_H_
 
 #include <platform.h>
+#include <stdint.h>
 
 /* Directory entry types */
 #define DIR_E_NRM 0

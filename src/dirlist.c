@@ -28,6 +28,7 @@
 
 #include <platform.h>
 #include <string.h>
+#include <stdlib.h>
 #include "dirlist.h"
 #include "hash.h"
 

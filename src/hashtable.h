@@ -29,6 +29,7 @@
 #ifndef HASHTABLE_H_
 #define HASHTABLE_H_
 
+#include <stdint.h>
 #include "platform.h"
 #include "hash.h"
 
@@ -44,17 +45,14 @@ struct hash_table_entry {
         struct hash_table_entry *next;
 };
 
-struct hash_table {
-        struct hash_table_entry *bucket;
-        size_t size;
-        struct hash_table_ops ops;
-};
-
 void *hashtable_init(size_t size, struct hash_table_ops *ops);
 void hashtable_destroy(void *h);
 struct hash_table_entry *hashtable_entry_alloc(void *h, const char *key);
+struct hash_table_entry *hashtable_entry_alloc_hash(void *h, const char *key, uint32_t hash);
 struct hash_table_entry *hashtable_entry_get(void *h, const char *key);
+struct hash_table_entry *hashtable_entry_get_hash(void *h, const char *key, uint32_t hash);
 void hashtable_entry_delete(void *h, const char *key);
+void hashtable_entry_delete_subkeys(void *h, const char *key, uint32_t hash);
 
 #endif
 

@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <stdlib.h>
 #include <libgen.h>
 #include "debug.h"
 #include "optdb.h"
