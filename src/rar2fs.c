@@ -59,9 +59,6 @@
 #ifdef HAVE_SYS_SYSMACROS_H
 # include <sys/sysmacros.h>
 #endif
-#ifdef HAVE_ICONV
-#include <iconv.h>
-#endif
 #include <assert.h>
 #include "version.h"
 #include "debug.h"
@@ -149,9 +146,6 @@ struct io_handle {
 /* Special DIR pointer for root folder in a file system loop. */
 #define FS_LOOP_ROOT_DP        ((DIR *)~0U)
 
-#ifdef HAVE_ICONV
-static iconv_t icd;
-#endif
 static long page_size_ = 0;
 static int mount_type;
 static struct dir_entry_list arch_list_root;        /* internal list root */
@@ -576,59 +570,6 @@ size_t wide_to_utf8(const wchar_t *src, char *dst, size_t dst_size)
         }
         *dst = 0;
         return in_size - out_size;
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-static inline size_t
-wide_to_char(char *dst, const wchar_t *src, size_t size)
-{
-        dst[0] = '\0';
-
-#ifdef HAVE_ICONV
-        if (icd == (iconv_t)-1)
-                goto fallback;
-
-        size_t in_bytes = (wcslen(src) + 1) * sizeof(wchar_t);
-        size_t out_bytes = size;
-        char *in_buf = (char *)src;
-        char *out_buf = dst;
-        if (iconv(icd, (ICONV_CONST char **)&in_buf, &in_bytes,
-                                        &out_buf, &out_bytes) == (size_t)-1) {
-                if (errno == E2BIG) {
-                        /* Make sure the buffer is terminated properly but
-                         * otherwise keep the truncated result. */
-                        dst[size] = '\0';
-                        return size;
-                } else {
-                        *out_buf = '\0';
-                        perror("iconv");
-                }
-        } else {
-                return size - out_bytes;
-        }
-
-        return -1;
-
-fallback:
-#endif
-        if (*src) {
-#ifdef HAVE_WCSTOMBS
-#if 0
-                size_t n = wcstombs(NULL, src, 0);
-                if (n != (size_t)-1) {
-                        if (size >= (n + 1))
-                                return wcstombs(dst, src, size);
-                }
-#endif
-#endif
-                /* Translation failed! Use fallback to strict UTF-8. */
-                return wide_to_utf8(src, dst, size);
-        }
-
-        return -1;
 }
 
 /*!
@@ -1268,7 +1209,7 @@ static int lread_info(char *buf, size_t size, off_t offset,
         /* Only allow reading from start of file in 'cat'-like fashion */
         if (!offset) {
             struct RARWcb *wcb = FH_TOBUF(fi->fh);
-            int c = wide_to_char(buf, wcb->data, size);
+            int c = wide_to_utf8(wcb->data, buf, size);
             if (c > 0)
                     return c;
         }
@@ -2037,8 +1978,8 @@ static void set_rarstats(struct filecache_entry *entry_p,
                         if (alist_p->LinkTargetFlags & LINK_T_UNICODE) {
                                 char *tmp = malloc(sizeof(alist_p->LinkTarget));
                                 if (tmp) {
-                                        size_t len = wide_to_char(tmp,
-                                                alist_p->LinkTargetW,
+                                        size_t len = wide_to_utf8(
+                                                alist_p->LinkTargetW, tmp,
                                                 sizeof(alist_p->LinkTarget));
                                         if ((int)len != -1) {
                                                 entry_p->link_target_p = strdup(tmp);
@@ -2189,8 +2130,8 @@ static struct filecache_entry *lookup_filecopy(const char *path,
         struct filecache_entry *e_p = NULL;
         char *tmp = malloc(sizeof(next->LinkTarget));
         if (tmp) {
-                if (wide_to_char(tmp, next->LinkTargetW,
-                                        sizeof(next->LinkTarget)) != (size_t)-1) {
+                if (wide_to_utf8(next->LinkTargetW, tmp,
+                                 sizeof(next->LinkTarget)) != (size_t)-1) {
                         DOS_TO_UNIX_PATH(tmp);
                         char *mp2;
                         if (!display) {
@@ -5317,17 +5258,6 @@ int main(int argc, char *argv[])
         umask(umask_);
 #endif
 
-#ifdef HAVE_ICONV
-#if 0
-        icd = iconv_open("UTF-8", "wchar_t");
-        if (icd == (iconv_t)-1) {
-                perror("iconv_open");
-        }
-#else
-        icd = (iconv_t)-1;
-#endif
-#endif
-
         optdb_init();
 
         long ps = -1;
@@ -5407,11 +5337,6 @@ int main(int argc, char *argv[])
                 free(fs_loop_mp_root);
                 free(fs_loop_mp_base);
         }
-
-#ifdef HAVE_ICONV
-        if (icd != (iconv_t)-1 && iconv_close(icd) != 0)
-                perror("iconv_close");
-#endif
 
         closelog();
 

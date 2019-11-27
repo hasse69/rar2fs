@@ -48,22 +48,22 @@
  * Assume that if one of these are not defined, they all need to
  * be defined here instead for backwards compatibility. */
 #ifndef ROADF_VOLUME
-#define ROADF_VOLUME       0x0001
-#define ROADF_COMMENT      0x0002
-#define ROADF_LOCK         0x0004
-#define ROADF_SOLID        0x0008
-#define ROADF_NEWNUMBERING 0x0010
-#define ROADF_SIGNED       0x0020
-#define ROADF_RECOVERY     0x0040
-#define ROADF_ENCHEADERS   0x0080
-#define ROADF_FIRSTVOLUME  0x0100
+#define ROADF_VOLUME        0x0001
+#define ROADF_COMMENT       0x0002
+#define ROADF_LOCK          0x0004
+#define ROADF_SOLID         0x0008
+#define ROADF_NEWNUMBERING  0x0010
+#define ROADF_SIGNED        0x0020
+#define ROADF_RECOVERY      0x0040
+#define ROADF_ENCHEADERS    0x0080
+#define ROADF_FIRSTVOLUME   0x0100
 #endif
 #ifndef RHDF_SPLITBEFORE
-#define RHDF_SPLITBEFORE 0x01
-#define RHDF_SPLITAFTER  0x02
-#define RHDF_ENCRYPTED   0x04
-#define RHDF_SOLID       0x10
-#define RHDF_DIRECTORY   0x20
+#define RHDF_SPLITBEFORE    0x0001
+#define RHDF_SPLITAFTER     0x0002
+#define RHDF_ENCRYPTED      0x0004
+#define RHDF_SOLID          0x0010
+#define RHDF_DIRECTORY      0x0020
 #endif
 
 #ifndef __cplusplus
