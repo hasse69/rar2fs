@@ -2841,8 +2841,10 @@ static int syncdir(const char *path)
 
                 dir_list = malloc(sizeof(struct dir_entry_list));
                 next = dir_list;
-                if (!next)
+                if (!next) {
+                        closedir(dp);
                         return -ENOMEM;
+                }
                 dir_list_open(next);
                 res = syncdir_scan(path, root, &next);
                 (void)closedir(dp);
@@ -3430,7 +3432,7 @@ static int rar2_releasedir(const char *path, struct fuse_file_info *fi)
 
         DIR *dp = FH_TODP(fi->fh);
         if (dp && dp != FS_LOOP_ROOT_DP)
-                closedir(FH_TODP(fi->fh));
+                closedir(dp);
         free(FH_TOPATH(fi->fh));
         free(FH_TOIO(fi->fh));
         FH_ZERO(fi->fh);
