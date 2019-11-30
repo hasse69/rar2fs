@@ -131,6 +131,7 @@ int optdb_save(int opt, const char *s)
         {
         case OPT_KEY_SEEK_LENGTH:
         case OPT_KEY_HIST_SIZE:
+        case OPT_KEY_BUF_SIZE:
         {
                 NO_UNUSED_RESULT strtoul(s1, &endptr, 10);
                 if (*endptr)
