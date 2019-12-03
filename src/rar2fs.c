@@ -191,6 +191,15 @@ static const char *file_cmd[] = {
 };
 #endif
 
+/* Strict mount options (-o) */
+struct rar2fs_mount_opts {
+     char *locale;
+};
+
+#define RAR2FS_MOUNT_OPT(t, p, v) \
+        { t, offsetof(struct rar2fs_mount_opts, p), v }
+static struct rar2fs_mount_opts rar2fs_mount_opts;
+
 #define IS_UNIX_MODE_(l) \
         ((l)->UnpVer >= 50 \
                 ? (l)->HostOS == HOST_UNIX \
@@ -5124,6 +5133,9 @@ static void print_help()
         printf("    --date-rar\t\t    use file date from main archive file(s)\n");
         printf("    --config=file\t    config file name [source/.rarconfig]\n");
         printf("    --no-inherit-perm\t    do not inherit file permission mode from archive\n");
+#ifdef HAVE_SETLOCALE
+        printf("\n    -o locale=LOCALE        set the locale for file names (Default: according to LC_*/LC_CTYPE)\n");
+#endif
 }
 
 /* FUSE API specific keys continue where 'optdb' left off */
@@ -5133,6 +5145,10 @@ enum {
 };
 
 static struct fuse_opt rar2fs_opts[] = {
+#ifdef HAVE_SETLOCALE
+        RAR2FS_MOUNT_OPT("locale=%s", locale, 0),
+#endif
+
         FUSE_OPT_KEY("-V",              OPT_KEY_VERSION),
         FUSE_OPT_KEY("--version",       OPT_KEY_VERSION),
         FUSE_OPT_KEY("-h",              OPT_KEY_HELP),
@@ -5245,10 +5261,6 @@ int main(int argc, char *argv[])
 {
         int res = 0;
 
-#ifdef HAVE_SETLOCALE
-        setlocale(LC_CTYPE, "");
-#endif
-
 #ifdef HAVE_UMASK
         umask_ = umask(0);
         umask(umask_);
@@ -5270,7 +5282,8 @@ int main(int argc, char *argv[])
                 page_size_ = 4096;
 
         struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-        if (fuse_opt_parse(&args, NULL, rar2fs_opts, rar2fs_opt_proc))
+        if (fuse_opt_parse(&args, &rar2fs_mount_opts, rar2fs_opts,
+                           rar2fs_opt_proc))
                 return -1;
 
         /* Check src/dst path */
@@ -5316,6 +5329,22 @@ int main(int argc, char *argv[])
 #define LOG_PERROR 0
 #endif
         openlog("rar2fs", LOG_CONS | LOG_PERROR | LOG_PID, LOG_USER);
+
+        /* Set locale.
+         * Default to environment variables according to LC_* and LANG;
+         * see the Base Definitions volume of POSIX.1-2008, Chapter 7,
+         * Locale and Chapter 8, Environment Variables. */
+#ifdef HAVE_SETLOCALE
+        if (!rar2fs_mount_opts.locale) {
+                setlocale(LC_CTYPE, "");
+        } else {
+                if (!setlocale(LC_CTYPE, rar2fs_mount_opts.locale)) {
+                        printf("%s: failed to set locale: %s\n", argv[0],
+                               rar2fs_mount_opts.locale);
+                        return -1;
+                }
+        }
+#endif
 
 	/*
 	 * All static setup is ready, the rest is taken from the configuration.

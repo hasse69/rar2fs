@@ -215,7 +215,21 @@ This option can be used to instead set the permission mode bits based on file ty
 Another option is to use the FUSE \fIumask\fR mount option.
 The latter has the benefit of completely ignoring what ever the file system implementation sets but also has some caveats with respect to
 directories versus regular files.
+.br
+.SH MOUNT OPTIONS
 .RE
+.TP
+.B \-o locale=LOCALE
+set the locale to be use for RAR file name character set conversion
+.PP
+.RS
+Default is to set the current locale according to the \fILC_*/LC_CTYPE\fR environment variables.
+The need for translation of e.g. RAR encoded file names requires that a locale is explicitly set by \fBrar2fs\fR.
+Othwerwise it would default to the \fI"C"\fR locale, which is sufficient for file name stored as standard \fIASCII\fR, but would not
+translate deterministically for \fIUNICODE\fR file names.
+Since not all platforms have the possibility to manipulate environment variables directly, this mount option can be used to set a
+specific locale to be applied in such character set conversions. The possible values that may be assigned to \fBlocale\fR can
+easily be determined by the \fB`locale -a`\fR command.
 .br
 .SH "SEE ALSO"
 .br
