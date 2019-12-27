@@ -65,102 +65,95 @@ struct DataSet
 #endif
 };
 
-int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveDataEx **NN)
+int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveListEx* N, int *ResultCode)
 {
   DataSet *Data = (DataSet *)hArcData;
   Archive& Arc = Data->Arc;
   struct RARHeaderDataEx h;
-  struct RARArchiveDataEx *N;
+  RARArchiveListEx* N_ = N;
 
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
   try
 #endif
   {
-    int RHCode = 0;
-    int PFCode = 0;
-    memset(&h, 0, sizeof(h));
-    RHCode = RARReadHeaderEx(hArcData,&h);
-    if (RHCode)
+    *ResultCode = 0;
+    uint FileCount = 0;
+    while (1)
     {
-      return RHCode;
-    }
+      int RHCode = 0;
+      int PFCode = 0;
+      memset(&h, 0, sizeof(h));
+      RHCode = RARReadHeaderEx(hArcData,&h);
+      if (RHCode)
+      {
+        *ResultCode = RHCode;
+        break;
+      }
 
-    if (!*NN)
-    {
-      *NN = new RARArchiveDataEx;
-    }
-    N = *NN;
-    memcpy(&N->hdr, &h, sizeof(h));
-    N->HeadSize = Arc.FileHead.HeadSize;
-    N->Offset = Arc.CurBlockPos;
-    N->FileDataEnd = Arc.NextBlockPos;
+      if (FileCount)
+      {
+        N->next = new RARArchiveListEx;
+        N = N->next;
+      }
+      FileCount++;
+      memcpy(&N->hdr, &h, sizeof(h));
+      N->HeadSize = Arc.FileHead.HeadSize;
+      N->Offset = Arc.CurBlockPos;
+      N->FileDataEnd = Arc.NextBlockPos;
 
-    // For supporting high-precision timestamp.
-    // If not available, this value is set to 0 (1601/01/01 00:00:00.000000000).
-    // For reference, see http://support.microsoft.com/kb/167296/en
-    memset(&N->RawTime, 0, sizeof(struct RARArchiveDataEx::RawTime_));
+      /* For supporting high-precision timestamp.
+       * If not available, this value is set to 0 (1601/01/01 00:00:00.000000000).
+       * For reference, see http://support.microsoft.com/kb/167296/en
+       */
+      memset(&N->RawTime, 0, sizeof(struct RARArchiveListEx::RawTime_));
 #if RARVER_MAJOR > 4
 #if RARVER_MAJOR > 5 || (RARVER_MAJOR == 5 && RARVER_MINOR >= 50)
-    // High-precision(1 ns) UNIX timestamp from 1970-01-01
-    if (Arc.FileHead.mtime.IsSet())
-      N->RawTime.mtime = Arc.FileHead.mtime.GetUnixNS();
-    if (Arc.FileHead.ctime.IsSet())
-      N->RawTime.ctime = Arc.FileHead.ctime.GetUnixNS();
-    if (Arc.FileHead.atime.IsSet())
-      N->RawTime.atime = Arc.FileHead.atime.GetUnixNS();
+      /* High-precision(1 ns) UNIX timestamp from 1970-01-01 */
+      if (Arc.FileHead.mtime.IsSet())
+        N->RawTime.mtime = Arc.FileHead.mtime.GetUnixNS();
+      if (Arc.FileHead.ctime.IsSet())
+        N->RawTime.ctime = Arc.FileHead.ctime.GetUnixNS();
+      if (Arc.FileHead.atime.IsSet())
+        N->RawTime.atime = Arc.FileHead.atime.GetUnixNS();
 #else
-    // High-precision(100 ns) Windows timestamp from 1601-01-01
-    if (Arc.FileHead.mtime.IsSet())
-      N->RawTime.mtime = Arc.FileHead.mtime.GetRaw() - 116444736000000000ULL;
-    if (Arc.FileHead.ctime.IsSet())
-      N->RawTime.ctime = Arc.FileHead.ctime.GetRaw() - 116444736000000000ULL;
-    if (Arc.FileHead.atime.IsSet())
-      N->RawTime.atime = Arc.FileHead.atime.GetRaw() - 116444736000000000ULL;
+      /* High-precision(100 ns) Windows timestamp from 1601-01-01 */
+      if (Arc.FileHead.mtime.IsSet())
+        N->RawTime.mtime = Arc.FileHead.mtime.GetRaw() - 116444736000000000ULL;
+      if (Arc.FileHead.ctime.IsSet())
+        N->RawTime.ctime = Arc.FileHead.ctime.GetRaw() - 116444736000000000ULL;
+      if (Arc.FileHead.atime.IsSet())
+        N->RawTime.atime = Arc.FileHead.atime.GetRaw() - 116444736000000000ULL;
 #endif
 #endif
 
-    N->hdr.Flags = 0;
+      N->hdr.Flags = 0;
 #if RARVER_MAJOR < 5
-    if ((Arc.FileHead.Flags & LHD_WINDOWMASK) == LHD_DIRECTORY)
-      N->hdr.Flags |= RHDF_DIRECTORY;
-    if (Arc.FileHead.Flags & LHD_SPLIT_BEFORE)
-      N->hdr.Flags |= RHDF_SPLITBEFORE;
-    if (Arc.FileHead.Flags & LHD_SPLIT_AFTER)
-      N->hdr.Flags |= RHDF_SPLITAFTER;
-    if (Arc.FileHead.Flags & LHD_PASSWORD)
-      N->hdr.Flags |= RHDF_ENCRYPTED;
-    if (Arc.FileHead.Flags & LHD_SOLID)
-      N->hdr.Flags |= RHDF_SOLID;
+      if ((Arc.FileHead.Flags & LHD_WINDOWMASK) == LHD_DIRECTORY)
+        N->hdr.Flags |= RHDF_DIRECTORY;
+      if (Arc.FileHead.Flags & LHD_SPLIT_BEFORE)
+        N->hdr.Flags |= RHDF_SPLITBEFORE;
+      if (Arc.FileHead.Flags & LHD_SPLIT_AFTER)
+        N->hdr.Flags |= RHDF_SPLITAFTER;
+      if (Arc.FileHead.Flags & LHD_PASSWORD)
+        N->hdr.Flags |= RHDF_ENCRYPTED;
+      if (Arc.FileHead.Flags & LHD_SOLID)
+        N->hdr.Flags |= RHDF_SOLID;
 #else
-    if (Arc.FileHead.SplitBefore)
-      N->hdr.Flags |= RHDF_SPLITBEFORE;
-    if (Arc.FileHead.SplitAfter)
-      N->hdr.Flags |= RHDF_SPLITAFTER;
-    if (Arc.FileHead.Encrypted)
-      N->hdr.Flags |= RHDF_ENCRYPTED;
-    if (Arc.FileHead.Dir)
-      N->hdr.Flags |= RHDF_DIRECTORY;
-    if (Arc.FileHead.Solid)
-      N->hdr.Flags |= RHDF_SOLID;
+      if (Arc.FileHead.SplitBefore)
+        N->hdr.Flags |= RHDF_SPLITBEFORE;
+      if (Arc.FileHead.SplitAfter)
+        N->hdr.Flags |= RHDF_SPLITAFTER;
+      if (Arc.FileHead.Encrypted)
+        N->hdr.Flags |= RHDF_ENCRYPTED;
+      if (Arc.FileHead.Dir)
+        N->hdr.Flags |= RHDF_DIRECTORY;
+      if (Arc.FileHead.Solid)
+        N->hdr.Flags |= RHDF_SOLID;
 #endif
 
-    N->LinkTargetFlags = 0;
+      N->LinkTargetFlags = 0;
 #if RARVER_MAJOR < 5
-    if (N->hdr.HostOS==HOST_UNIX && (N->hdr.FileAttr & 0xF000)==0xA000)
-    {
-      if (N->hdr.UnpVer < 50)
-      {
-        int DataSize=Min(N->hdr.PackSize,sizeof(N->LinkTarget)-1);
-        Arc.Read(N->LinkTarget,DataSize);
-        N->LinkTarget[DataSize]=0;
-      }
-    }
-#else
-    if (Arc.FileHead.RedirType != FSREDIR_NONE)
-    {
-      // Sanity check only that 'RedirType' match 'FileAttr'
-      if (Arc.FileHead.RedirType == FSREDIR_UNIXSYMLINK &&
-        (N->hdr.FileAttr & 0xF000)==0xA000)
+      if (N->hdr.HostOS==HOST_UNIX && (N->hdr.FileAttr & 0xF000)==0xA000)
       {
         if (N->hdr.UnpVer < 50)
         {
@@ -168,50 +161,72 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveDataEx **NN)
           Arc.Read(N->LinkTarget,DataSize);
           N->LinkTarget[DataSize]=0;
         }
-        else
+      }
+#else
+      if (Arc.FileHead.RedirType != FSREDIR_NONE)
+      {
+        // Sanity check only that 'RedirType' match 'FileAttr'
+        if (Arc.FileHead.RedirType == FSREDIR_UNIXSYMLINK &&
+          (N->hdr.FileAttr & 0xF000)==0xA000)
         {
-          wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
-          N->LinkTargetFlags |= LINK_T_UNICODE; // Make sure UNICODE is set
+          if (N->hdr.UnpVer < 50)
+          {
+            int DataSize=Min(N->hdr.PackSize,sizeof(N->LinkTarget)-1);
+            Arc.Read(N->LinkTarget,DataSize);
+            N->LinkTarget[DataSize]=0;
+          } 
+          else
+          {
+            wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
+            N->LinkTargetFlags |= LINK_T_UNICODE; // Make sure UNICODE is set
+          }
+        }
+        else if (Arc.FileHead.RedirType == FSREDIR_FILECOPY)
+        {
+            wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
+            N->LinkTargetFlags |= LINK_T_FILECOPY;
         }
       }
-      else if (Arc.FileHead.RedirType == FSREDIR_FILECOPY)
+#endif
+      
+      // Skip to next header
+      PFCode = RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
+      if (PFCode)
       {
-          wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
-          N->LinkTargetFlags |= LINK_T_FILECOPY;
+        *ResultCode = PFCode;
+        break;
       }
     }
-#endif
-    // Skip to next header
-    PFCode = RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
-    if (PFCode)
-    {
-      return PFCode;
-    }
 
-    return 0;
+    N->next = NULL;
+    return FileCount;
   }
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
   catch (std::bad_alloc&) // Catch 'new' exception.
   {
-    if (*NN) {
-      delete *NN;
-      *NN = NULL;
-    }
+    if (N->next != NULL)
+      delete N->next;
+    N->next = NULL;
     cerr << "RARListArchiveEx() caught std:bac_alloc error" << endl;
   }
 #endif
+  RARFreeListEx(N_);
   return 0;
 }
 
-void PASCAL RARFreeArchiveDataEx(RARArchiveDataEx **NN)
+
+void PASCAL RARFreeListEx(RARArchiveListEx* L)
 {
-  if (*NN) {
-    delete *NN;
-    *NN = NULL;
+  RARArchiveListEx* N = L?L->next:NULL;
+  while (N)
+  {
+    RARArchiveListEx* tmp = N;
+    N = N->next;
+    delete tmp;
   }
 }
 
-void PASCAL RARNextVolumeName(char *arch, bool oldstylevolume)
+void PASCAL RARNextVolumeName(char* arch, bool oldstylevolume)
 {
 #if RARVER_MAJOR < 5
   NextVolumeName(arch, NULL, 0, oldstylevolume);
@@ -224,7 +239,7 @@ void PASCAL RARNextVolumeName(char *arch, bool oldstylevolume)
 }
 
 
-void PASCAL RARVolNameToFirstName(char *arch, bool oldstylevolume)
+void PASCAL RARVolNameToFirstName(char* arch, bool oldstylevolume)
 {
 #if RARVER_MAJOR < 5
   VolNameToFirstName(arch, arch, !oldstylevolume);
