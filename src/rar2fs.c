@@ -1971,24 +1971,25 @@ void set_high_precision_ts(struct timespec *spec, uint64_t stamp)
  *
  ****************************************************************************/
 static void set_rarstats(struct filecache_entry *entry_p,
-                RARArchiveDataEx *arc, int force_dir)
+                RARArchiveListEx *alist_p,
+                int force_dir)
 {
 	off_t st_size;
 
         if (!force_dir) {
-                st_size = GET_RAR_SZ(&arc->hdr);
-                mode_t mode = GET_RAR_MODE(&arc->hdr);
+                st_size = GET_RAR_SZ(&alist_p->hdr);
+                mode_t mode = GET_RAR_MODE(&alist_p->hdr);
                 if (!S_ISDIR(mode) && !S_ISLNK(mode)) {
                         /* Force file to be treated as a 'regular file' */
                         mode = (mode & ~S_IFMT) | S_IFREG;
                 }
                 if (S_ISLNK(mode)) {
-                        if (arc->LinkTargetFlags & LINK_T_UNICODE) {
-                                char *tmp = malloc(sizeof(arc->LinkTarget));
+                        if (alist_p->LinkTargetFlags & LINK_T_UNICODE) {
+                                char *tmp = malloc(sizeof(alist_p->LinkTarget));
                                 if (tmp) {
                                         size_t len = wide_to_utf8(
-                                                arc->LinkTargetW, tmp,
-                                                sizeof(arc->LinkTarget));
+                                                alist_p->LinkTargetW, tmp,
+                                                sizeof(alist_p->LinkTarget));
                                         if ((int)len != -1) {
                                                 entry_p->link_target_p = strdup(tmp);
                                                 st_size = len;
@@ -1997,7 +1998,7 @@ static void set_rarstats(struct filecache_entry *entry_p,
                                 }
                         } else {
                                 entry_p->link_target_p =
-                                        strdup(arc->LinkTarget);
+                                        strdup(alist_p->LinkTarget);
                         }
                 }
                 if (OPT_SET(OPT_KEY_NO_INHERIT_PERM)) {
@@ -2009,7 +2010,7 @@ static void set_rarstats(struct filecache_entry *entry_p,
                 entry_p->stat.st_mode = mode;
 #ifndef HAVE_SETXATTR
                 entry_p->stat.st_nlink =
-                        S_ISDIR(mode) ? 2 : arc->hdr.Method - (FHD_STORING - 1);
+                        S_ISDIR(mode) ? 2 : alist_p->hdr.Method - (FHD_STORING - 1);
 #else
                 entry_p->stat.st_nlink =
                         S_ISDIR(mode) ? 2 : 1;
@@ -2067,7 +2068,7 @@ static void set_rarstats(struct filecache_entry *entry_p,
 
                 /* Using DOS time format by default for backward compatibility. */
                 union dos_time_t *dos_time =
-                                (union dos_time_t *)&arc->hdr.FileTime;
+                                (union dos_time_t *)&alist_p->hdr.FileTime;
 
                 t.tm_sec = dos_time->second * 2;
                 t.tm_min = dos_time->minute;
@@ -2082,19 +2083,19 @@ static void set_rarstats(struct filecache_entry *entry_p,
 
                 /* Set internally stored high precision timestamp if available. */
 #ifdef HAVE_STRUCT_STAT_ST_MTIM
-                if (arc->RawTime.mtime)
+                if (alist_p->RawTime.mtime)
                         set_high_precision_ts(&entry_p->stat.st_mtim,
-                                                arc->RawTime.mtime);
+                                                alist_p->RawTime.mtime);
 #endif
 #ifdef HAVE_STRUCT_STAT_ST_CTIM
-                if (arc->RawTime.ctime)
+                if (alist_p->RawTime.ctime)
                         set_high_precision_ts(&entry_p->stat.st_ctim,
-                                                arc->RawTime.ctime);
+                                                alist_p->RawTime.ctime);
 #endif
 #ifdef HAVE_STRUCT_STAT_ST_ATIM
-                if (arc->RawTime.atime)
+                if (alist_p->RawTime.atime)
                         set_high_precision_ts(&entry_p->stat.st_atim,
-                                                arc->RawTime.atime);
+                                                alist_p->RawTime.atime);
 #endif
         } else {
                 struct stat st;
@@ -2131,15 +2132,15 @@ static void set_rarstats(struct filecache_entry *entry_p,
  *
  ****************************************************************************/
 static struct filecache_entry *lookup_filecopy(const char *path,
-                RARArchiveDataEx *arc,
+                RARArchiveListEx *next,
                 const char *rar_root, int display)
 
 {
         struct filecache_entry *e_p = NULL;
-        char *tmp = malloc(sizeof(arc->LinkTarget));
+        char *tmp = malloc(sizeof(next->LinkTarget));
         if (tmp) {
-                if (wide_to_utf8(arc->LinkTargetW, tmp,
-                                 sizeof(arc->LinkTarget)) != (size_t)-1) {
+                if (wide_to_utf8(next->LinkTargetW, tmp,
+                                 sizeof(next->LinkTarget)) != (size_t)-1) {
                         DOS_TO_UNIX_PATH(tmp);
                         char *mp2;
                         if (!display) {
@@ -2249,21 +2250,21 @@ void __add_filler(const char *path, struct dir_entry_list **buffer,
  *
  ****************************************************************************/
 static void __listrar_incache(struct filecache_entry *entry_p,
-                RARArchiveDataEx *arc)
+                RARArchiveListEx *next)
 {
         if (!entry_p->flags.vsize_resolved) {
-              entry_p->vsize_next = GET_RAR_PACK_SZ(&arc->hdr);
-              if (((arc->hdr.Flags & RHDF_SPLITAFTER) && entry_p->vsize_next) ||
+              entry_p->vsize_next = GET_RAR_PACK_SZ(&next->hdr);
+              if (((next->hdr.Flags & RHDF_SPLITAFTER) && entry_p->vsize_next) ||
                               /* Handle files located in only two volumes */
                               (entry_p->vsize_first + entry_p->vsize_next) ==
                                       entry_p->stat.st_size)
                       entry_p->flags.vsize_resolved = 1;
               else
                       goto vsize_done;
-              entry_p->vsize_real_next = arc->FileDataEnd;
+              entry_p->vsize_real_next = next->FileDataEnd;
               /* Check if we might need to compensate for the 1-byte/2-byte
                * RAR5 (and later?) volume number in next main archive header. */
-              if (arc->hdr.UnpVer >= 50) {
+              if (next->hdr.UnpVer >= 50) {
                        /* If base is last or next to last volume with one extra
                         * byte in header this and next volume size have already
                         * been resolved. */
@@ -2283,7 +2284,7 @@ vsize_done:
          * with proper stats.
          */
         if (entry_p->flags.force_dir) {
-                set_rarstats(entry_p, arc, 0);
+                set_rarstats(entry_p, next, 0);
                 entry_p->flags.force_dir = 0;
         }
 }
@@ -2293,16 +2294,16 @@ vsize_done:
  *
  ****************************************************************************/
 static struct filecache_entry *__listrar_tocache(char *file,
-                RARArchiveDataEx *arc, const char *arch, char *first_arch,
+                RARArchiveListEx *next, const char *arch, char *first_arch,
                 RAROpenArchiveDataEx *d)
 {
         struct filecache_entry *entry_p;
         int raw_mode;
 
-        if (arc->hdr.Method == FHD_STORING &&
-                        !(arc->hdr.Flags & RHDF_ENCRYPTED) &&
-                        !IS_RAR_DIR(&arc->hdr)) {
-                if (arc->hdr.Flags & RHDF_SPLITBEFORE)
+        if (next->hdr.Method == FHD_STORING &&
+                        !(next->hdr.Flags & RHDF_ENCRYPTED) &&
+                        !IS_RAR_DIR(&next->hdr)) {
+                if (next->hdr.Flags & RHDF_SPLITBEFORE)
                         return NULL;
                 raw_mode = 1;
         } else {
@@ -2314,9 +2315,9 @@ static struct filecache_entry *__listrar_tocache(char *file,
         entry_p = filecache_alloc(file);
 
         entry_p->rar_p = strdup(first_arch);
-        entry_p->file_p = strdup(arc->hdr.FileName);
+        entry_p->file_p = strdup(next->hdr.FileName);
         entry_p->flags.vsize_resolved = 1; /* Assume sizes will be resolved */
-        if (IS_RAR_DIR(&arc->hdr))
+        if (IS_RAR_DIR(&next->hdr))
                 entry_p->flags.unresolved = 0;
         else
                 entry_p->flags.unresolved = 1;
@@ -2335,16 +2336,16 @@ static struct filecache_entry *__listrar_tocache(char *file,
                         if (len > 0) {
                                 entry_p->vlen = len;
                                 entry_p->vpos = pos;
-                                if (!IS_RAR_DIR(&arc->hdr)) {
-                                        entry_p->vsize_real_first = arc->FileDataEnd;
-                                        entry_p->vsize_first = GET_RAR_PACK_SZ(&arc->hdr);
+                                if (!IS_RAR_DIR(&next->hdr)) {
+                                        entry_p->vsize_real_first = next->FileDataEnd;
+                                        entry_p->vsize_first = GET_RAR_PACK_SZ(&next->hdr);
                                         /*
                                          * Assume next volume to hold same amount
                                          * of data as the first. It will be adjusted
                                          * later if needed.
                                          */
                                         entry_p->vsize_next = entry_p->vsize_first;
-                                        if (arc->hdr.Flags & (RHDF_SPLITBEFORE | RHDF_SPLITAFTER))
+                                        if (next->hdr.Flags & (RHDF_SPLITBEFORE | RHDF_SPLITAFTER))
                                                 entry_p->flags.vsize_resolved = 0;
                                 }
                         } else {
@@ -2354,7 +2355,7 @@ static struct filecache_entry *__listrar_tocache(char *file,
                         }
                 } else {
                         entry_p->flags.multipart = 0;
-                        entry_p->offset = (arc->Offset + arc->HeadSize);
+                        entry_p->offset = (next->Offset + next->HeadSize);
                 }
         } else {        /* Folder or Compressed and/or Encrypted */
                 entry_p->flags.raw = 0;
@@ -2365,14 +2366,14 @@ static struct filecache_entry *__listrar_tocache(char *file,
                 } else {
                         entry_p->flags.multipart = 0;
                 }
-                if (!IS_RAR_DIR(&arc->hdr)) {
+                if (!IS_RAR_DIR(&next->hdr)) {
                         entry_p->flags.save_eof = get_save_eof(entry_p->rar_p);
-                        if (arc->hdr.Flags & RHDF_ENCRYPTED)
+                        if (next->hdr.Flags & RHDF_ENCRYPTED)
                                 entry_p->flags.encrypted = 1;
                 }
         }
-        entry_p->method = arc->hdr.Method;
-        set_rarstats(entry_p, arc, 0);
+        entry_p->method = next->hdr.Method;
+        set_rarstats(entry_p, next, 0);
 
         return entry_p;
 }
@@ -2382,7 +2383,7 @@ static struct filecache_entry *__listrar_tocache(char *file,
  *
  ****************************************************************************/
 static void __listrar_tocache_forcedir(struct filecache_entry *entry_p,
-                RARArchiveDataEx *arc, const char *file, char *first_arch,
+                RARArchiveListEx *next, const char *file, char *first_arch,
                 RAROpenArchiveDataEx *d)
 {
         entry_p->rar_p = strdup(first_arch);
@@ -2390,7 +2391,7 @@ static void __listrar_tocache_forcedir(struct filecache_entry *entry_p,
         entry_p->flags.force_dir = 1;
         entry_p->flags.unresolved = 0;
 
-        set_rarstats(entry_p, arc, 1);
+        set_rarstats(entry_p, next, 1);
 
         /* Check if part of a volume */
         if (d->Flags & ROADF_VOLUME) {
@@ -2435,14 +2436,24 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         *final = 1;
         }
 
+        int n_files;
+        int dll_result;
+        RARArchiveListEx L;
+        RARArchiveListEx *next = &L;
+        if (!(n_files = RARListArchiveEx(hdl, next, &dll_result))) {
+                RARCloseArchive(hdl);
+                pthread_mutex_unlock(&file_access_mutex);
+                if (dll_result == ERAR_EOPEN || dll_result == ERAR_END_ARCHIVE)
+                        return 0;
+                return 1;
+        }
+
         char *tmp1 = strdup(arch);
         char *rar_root = strdup(__gnu_dirname(tmp1));
         free(tmp1);
         tmp1 = rar_root;
         rar_root += strlen(OPT_STR2(OPT_KEY_SRC, 0));
         int is_root_path = (!strcmp(rar_root, path) || !CHRCMP(path, '/'));
-	int ret = 0;
-        RARArchiveDataEx *arc = NULL;
 
         if (*first_arch == NULL) {
                 /* The caller is responsible for freeing this! */
@@ -2455,22 +2466,16 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                          *first_arch, !VTYPE(d.Flags))) {
                         free(*first_arch);
                         *first_arch = NULL;
+                        n_files = 0;
                         goto out;
                 }
         }
 
-        while (1) {
-                int dll_result;
-                if ((dll_result = RARListArchiveEx(hdl, &arc))) {
-                        if (dll_result != ERAR_END_ARCHIVE)
-                                ret = 1;
-                        goto out;
-                }
-
+        while (next) {
                 char *mp;
                 int display = 0;
 
-                DOS_TO_UNIX_PATH(arc->hdr.FileName);
+                DOS_TO_UNIX_PATH(next->hdr.FileName);
 
                 /* Handle the case when the parent folders do not have
                  * their own entry in the file header or is located in
@@ -2479,7 +2484,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                  * later in the header the faked entry will be
                  * invalidated and replaced with the real file stats. */
                 if (is_root_path) {
-                        char *safe_path = strdup(arc->hdr.FileName);
+                        char *safe_path = strdup(next->hdr.FileName);
                         char *tmp = safe_path;
                         while (1) {
                                 char *mp2;
@@ -2493,7 +2498,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                 if (entry_p == NULL) {
                                         printd(3, "Adding %s to cache\n", mp2);
                                         entry_p = filecache_alloc(mp2);
-                                        __listrar_tocache_forcedir(entry_p, arc,
+                                        __listrar_tocache_forcedir(entry_p, next,
                                                         safe_path, *first_arch, &d);
                                 }
                                 free(mp2);
@@ -2502,51 +2507,55 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 }
 
                 /* Aliasing is not support for directories */
-                if (!IS_RAR_DIR(&arc->hdr))
+                if (!IS_RAR_DIR(&next->hdr))
                         ABS_MP2(mp, (*rar_root ? rar_root : "/"),
-                                        get_alias(*first_arch, arc->hdr.FileName));
+                                        get_alias(*first_arch, next->hdr.FileName));
                 else
                         ABS_MP2(mp, (*rar_root ? rar_root : "/"),
-                                        arc->hdr.FileName);
+                                        next->hdr.FileName);
 
                 printd(3, "Looking up %s in cache\n", mp);
                 struct filecache_entry *entry_p = filecache_get(mp);
                 if (entry_p)  {
-                        __listrar_incache(entry_p, arc);
+                        __listrar_incache(entry_p, next);
                         goto cache_hit;
                 }
 
-                if (arc->LinkTargetFlags & LINK_T_FILECOPY) {
+                if (next->LinkTargetFlags & LINK_T_FILECOPY) {
                         struct filecache_entry *e_p;
-                        e_p = lookup_filecopy(path, arc, rar_root, display);
+                        e_p = lookup_filecopy(path, next, rar_root, display);
                         if (e_p) {
                                 printd(3, "Adding %s to cache\n", mp);
                                 entry_p = filecache_alloc(mp);
                                 filecache_copy(e_p, entry_p);
                                 /* Preserve stats of original file */
-                                set_rarstats(entry_p, arc, 0);
+                                set_rarstats(entry_p, next, 0);
                                 goto cache_hit;
                         }
                 }
 
-                entry_p = __listrar_tocache(mp, arc, arch, *first_arch, &d);
+                entry_p = __listrar_tocache(mp, next, arch, *first_arch, &d);
                 if (entry_p == NULL) {
+                        --n_files;
+                        next = next->next;
                         free(mp);
                         continue;
                 }
 
 cache_hit:
                 __add_filler(path, buffer, mp);
+                next = next->next;
                 free(mp);
         }
 
 out:
-        RARFreeArchiveDataEx(&arc);
+        RARFreeListEx(&L);
         RARCloseArchive(hdl);
         free(tmp1);
         pthread_mutex_unlock(&file_access_mutex);
 
-        return ret;
+        /* If no files could be processed, throw an error here */
+        return !(n_files > 0);
 }
 
 #undef DOS_TO_UNIX_PATH
