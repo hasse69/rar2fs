@@ -46,7 +46,7 @@
 /* Hash table handle */
 static void *ht = NULL;
 
-pthread_mutex_t dir_access_mutex;
+pthread_rwlock_t dir_access_mutex;
 static struct dircache_cb user_cb;
 
 /*!
@@ -86,7 +86,7 @@ void dircache_init(struct dircache_cb *cb)
         };
 
         ht = hashtable_init(DIRCACHE_SZ, &ops);
-        pthread_mutex_init(&dir_access_mutex, NULL);
+        pthread_rwlock_init(&dir_access_mutex, NULL);
         if (cb)
                 user_cb = *cb;
 }
@@ -97,7 +97,7 @@ void dircache_init(struct dircache_cb *cb)
  ****************************************************************************/
 void dircache_destroy()
 {
-        pthread_mutex_destroy(&dir_access_mutex);
+        pthread_rwlock_destroy(&dir_access_mutex);
         hashtable_destroy(ht);
         ht = NULL;
 }
