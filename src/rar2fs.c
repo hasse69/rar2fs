@@ -83,6 +83,8 @@
 #define RD_SYNC_READ 3
 #define RD_READ_ASYNC 4
 
+/*#define DEBUG_READ*/
+
 struct volume_handle {
         FILE *fp;
         off_t pos;
@@ -194,6 +196,7 @@ static const char *file_cmd[] = {
 /* Strict mount options (-o) */
 struct rar2fs_mount_opts {
      char *locale;
+     int warmup;
 };
 
 #define RAR2FS_MOUNT_OPT(t, p, v) \
@@ -2859,6 +2862,12 @@ static int syncdir(const char *path)
                         free(dir_list);
                         return res;
                 }
+
+                pthread_rwlock_wrlock(&dir_access_mutex);
+                entry_p = dircache_alloc(path);
+                if (entry_p)
+                        entry_p->dir_entry_list = *dir_list;
+                pthread_rwlock_unlock(&dir_access_mutex);
         }
 
         return 0;
@@ -3964,6 +3973,152 @@ static inline int access_chk(const char *path, int new_file)
         return e && !e->flags.unresolved ? 1 : 0;
 }
 
+static volatile int warmup_threads = 0;
+static pthread_mutex_t warmup_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t warmup_cond = PTHREAD_COND_INITIALIZER;
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static void *walkpath_task(void *data)
+{
+	pthread_detach(pthread_self());
+
+        syncdir(data);
+        free(data);
+
+        pthread_mutex_lock(&warmup_lock);
+        --warmup_threads;
+        pthread_cond_broadcast(&warmup_cond);
+        pthread_mutex_unlock(&warmup_lock);
+
+        return NULL;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static void walkpath(const char *dname, size_t src_len)
+{
+        pthread_t t;
+        struct dirent *dent;
+        DIR *dir = NULL;
+        char *fn = NULL;
+        struct stat st;
+        int len;
+        const char *root = &dname[src_len];
+
+        if (*root == '\0')
+              root = "/";
+        root = strdup(root);
+        if (root == NULL)
+                goto out;
+
+        pthread_mutex_lock(&warmup_lock);
+        while (warmup_threads > (rar2fs_mount_opts.warmup - 1))
+                pthread_cond_wait(&warmup_cond, &warmup_lock);
+        ++warmup_threads;
+        pthread_mutex_unlock(&warmup_lock);
+        if (pthread_create(&t, NULL, walkpath_task, (void *)root)) {
+                free((void *)root);
+                goto out;
+        }
+
+        len = strlen(dname);
+        if (len >= FILENAME_MAX - 1)
+                return;
+
+        dir = opendir(dname);
+        if (dir == NULL)
+                goto out;
+
+        /* From www.gnu.org:
+         *   Macro: int FILENAME_MAX
+         *     The value of this macro is an integer constant expression that
+         *     represents the maximum length of a file name string. It is
+         *     defined in stdio.h.
+         *
+         *     Unlike PATH_MAX, this macro is defined even if there is no actual
+         *     limit imposed. In such a case, its value is typically a very
+         *     large number. This is always the case on GNU/Hurd systems.
+         *
+         *     Usage Note: Don't use FILENAME_MAX as the size of an array in
+         *     which to store a file name! You can't possibly make an array that
+         *     big! Use dynamic allocation instead.
+         */
+        fn = malloc(FILENAME_MAX);
+        if (fn == NULL)
+                goto out;
+
+        strcpy(fn, dname);
+        fn[len++] = '/';
+
+        /* Do not use reentrant version of readdir(3) here.
+         * This needs to be revisted if other threads starts to use it. */
+        while ((dent = readdir(dir))) {
+                /* Skip '.' and '..' */
+                if (dent->d_name[0] == '.') {
+                        if (dent->d_name[1] == 0 ||
+                                        (dent->d_name[1] == '.' &&
+                                        dent->d_name[2] == 0))
+                                continue;
+                }
+
+                strncpy(fn + len, dent->d_name, FILENAME_MAX - len);
+#ifdef _DIRENT_HAVE_D_TYPE
+                if (dent->d_type != DT_UNKNOWN) {
+                        if (dent->d_type == DT_DIR)
+                                walkpath(fn, src_len);
+                        continue;
+                }
+
+#endif
+                if (lstat(fn, &st) == -1)
+                        continue;
+                /* will be false for symlinked dirs */
+                if (S_ISDIR(st.st_mode))
+                        walkpath(fn, src_len);
+        }
+
+out:
+        if (fn)
+                free(fn);
+        if (dir)
+                closedir(dir);
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static void *warmup_task(void *data)
+{
+        (void)data;
+        const char *dir = OPT_STR(OPT_KEY_SRC, 0);
+        struct timeval t1;
+        struct timeval t2;
+
+        pthread_detach(pthread_self());
+
+        syslog(LOG_DEBUG, "cache warmup initiated");
+        gettimeofday(&t1, NULL);
+
+        walkpath(dir, strlen(dir));
+
+        pthread_mutex_lock(&warmup_lock);
+        while (warmup_threads)
+                pthread_cond_wait(&warmup_cond, &warmup_lock);
+        pthread_mutex_unlock(&warmup_lock);
+
+        gettimeofday(&t2, NULL);
+        syslog(LOG_DEBUG, "cache warmup completed after %d seconds",
+               (int)(t2.tv_sec - t1.tv_sec));
+
+        return NULL;
+}
+
 /*!
  *****************************************************************************
  *
@@ -3995,6 +4150,7 @@ static void *rar2_init(struct fuse_conn_info *conn)
 {
         ENTER_();
 
+        pthread_t t;
         (void)conn;             /* touch */
 
         if (mount_type == MOUNT_FOLDER)
@@ -4004,6 +4160,8 @@ static void *rar2_init(struct fuse_conn_info *conn)
         dircache_init(&dircache_cb);
         iob_init();
         sighandler_init();
+        if (mount_type == MOUNT_FOLDER && rar2fs_mount_opts.warmup > 0)
+                pthread_create(&t, NULL, warmup_task, NULL);
 
         return NULL;
 }
@@ -5155,6 +5313,8 @@ enum {
 static struct fuse_opt rar2fs_opts[] = {
 #ifdef HAVE_SETLOCALE
         RAR2FS_MOUNT_OPT("locale=%s", locale, 0),
+        RAR2FS_MOUNT_OPT("warmup=%d", warmup, 0),
+        RAR2FS_MOUNT_OPT("warmup", warmup, 5),
 #endif
 
         FUSE_OPT_KEY("-V",              OPT_KEY_VERSION),

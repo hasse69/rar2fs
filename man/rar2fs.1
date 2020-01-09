@@ -1,4 +1,4 @@
-.TH RAR2FS 1 "v\ " "Thu, Oct 31, 2019" "User Commands"
+.TH RAR2FS 1 "v\ " "Thu, Jan 09, 2020" "User Commands"
 .SH NAME
 .B rar2fs
 \- FUSE file system for reading RAR archives
@@ -230,6 +230,26 @@ translate deterministically for \fIUNICODE\fR file names.
 Since not all platforms have the possibility to manipulate environment variables directly, this mount option can be used to set a
 specific locale to be applied in such character set conversions. The possible values that may be assigned to \fBlocale\fR can
 easily be determined by the \fB`locale -a`\fR command.
+.RE
+.TP
+.B \-o warmup
+.TP
+.B \-o warmup=THREADS
+enable background warmup of internal caches at mount time
+.PP
+.RS
+There are use-cases in which it makes sense to trigger a background warmup of the internal caches.
+This option only has an effect for folder style mounts. The default number of background workers started is 5.
+This can be tweaked by assigning a new warmup value. A warmup value of 0 will disable the function which is
+thus the same as not providing the option at all. On the other hand a too high number here might result in the
+current system limit for number of open files to be reached and the warmup will fail.
+The benefit of using this option compared to manually populating the caches
+by issuing e.g. a recursive \fB`ls -R`\fR or \fB`find`\fR command is that the internal warmup will
+operate directly on the source folder. This is a lot faster than going through the file system mount point which
+is required for the other alternatives. For stacked file systems the warmup, if used on both primary and
+secondary mounts simultaneously, will not perform optimally since file system accesses cannot be avoided
+in this case. While the performance is still expected to be a lot better than when not using this option,
+using it also on secondary mounts comes with a penalty highly depending on current setup.
 .br
 .SH "SEE ALSO"
 .br
