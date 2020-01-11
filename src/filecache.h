@@ -89,7 +89,7 @@ struct filecache_entry {
 #define LOCAL_FS_ENTRY ((void*)-1)
 #define LOOP_FS_ENTRY ((void*)-2)
 
-extern pthread_rwlock_t file_access_mutex;
+extern pthread_rwlock_t file_access_lock;
 
 struct filecache_entry *
 filecache_alloc(const char *path);

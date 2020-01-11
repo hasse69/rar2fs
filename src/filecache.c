@@ -39,7 +39,7 @@
 /* Hash table handle */
 static void *ht = NULL;
 
-pthread_rwlock_t file_access_mutex;
+pthread_rwlock_t file_access_lock;
 
 #define FREE_CACHE_MEM(e)\
         do {\
@@ -198,7 +198,7 @@ void filecache_init()
         };
 
         ht = hashtable_init(FILECACHE_SZ, &ops);
-        pthread_rwlock_init(&file_access_mutex, NULL);
+        pthread_rwlock_init(&file_access_lock, NULL);
 }
 
 /*!
@@ -207,7 +207,7 @@ void filecache_init()
  ****************************************************************************/
 void filecache_destroy()
 {
-        pthread_rwlock_destroy(&file_access_mutex);
+        pthread_rwlock_destroy(&file_access_lock);
         hashtable_destroy(ht);
         ht = NULL;
 }

@@ -33,7 +33,7 @@
 #include <time.h>
 #include "dirlist.h"
 
-extern pthread_rwlock_t dir_access_mutex;
+extern pthread_rwlock_t dir_access_lock;
 
 struct dircache_entry {
         struct dir_entry_list dir_entry_list;
