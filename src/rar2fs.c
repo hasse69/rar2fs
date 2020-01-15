@@ -3272,13 +3272,13 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
 
         pthread_rwlock_rdlock(&file_access_lock);
         struct filecache_entry *entry2_p = filecache_get(path);
+        pthread_rwlock_unlock(&file_access_lock);
         if (!entry2_p) {
                 /* It is possible but not very likely that we end up here
                  * due to that the cache has not yet been populated.
                  * Scan through the entire file path to force a cache update.
                  * This is the same action as required for a cache miss in
                  * getattr(). */
-                pthread_rwlock_unlock(&file_access_lock);
                 char *safe_path = strdup(path);
                 char *tmp = safe_path;
                 while (1) {
@@ -3290,11 +3290,9 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                 free(tmp);
                 pthread_rwlock_rdlock(&file_access_lock);
                 entry2_p = filecache_get(path);
-                if (entry2_p)
-                        goto dump_buff;
                 pthread_rwlock_unlock(&file_access_lock);
-		if (dp == NULL)
-		        goto no_entry;
+                if (!entry2_p && dp == NULL)
+                        goto no_entry;
         }
 
 dump_buff:
