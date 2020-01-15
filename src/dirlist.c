@@ -122,12 +122,17 @@ void dir_list_free(struct dir_entry_list *root)
 struct dir_entry_list *dir_entry_add(struct dir_entry_list *l, const char *key,
                 struct stat *st, int type)
 {
+        struct dir_entry_list *tmp = l;
         uint32_t hash = get_hash(key, 0);
-        if (l->entry.head_flag != DIR_LIST_HEAD_) {
+
+        while (l) {
                 if (hash == l->entry.hash)
                         if (!strcmp(key, l->entry.name))
                                 return l;
+                tmp = l;
+                l = l->next;
         }
+        l = tmp;
         l->next = malloc(sizeof(struct dir_entry_list));
         if (l->next) {
                 l = l->next;

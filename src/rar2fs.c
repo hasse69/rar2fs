@@ -2410,6 +2410,37 @@ static void __listrar_tocache_forcedir(struct filecache_entry *entry_p,
  *****************************************************************************
  *
  ****************************************************************************/
+static inline void __listrar_cachedir(const char *mp)
+{
+        if (!dircache_get(mp))
+		(void)dircache_alloc(mp);
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static void __listrar_cachedirentry(const char *mp)
+{
+        char *safe_path = strdup(mp);
+        char *tmp = safe_path;
+        safe_path = __gnu_dirname(safe_path);
+        if (CHRCMP(safe_path, '/')) {
+                struct dircache_entry *dce = dircache_get(safe_path);
+                if (dce) {
+                        char *tmp = strdup(mp);
+                        dir_entry_add(&dce->dir_entry_list, basename(tmp),
+                                      NULL, DIR_E_RAR);
+                        free(tmp);
+                }
+        }
+        free(tmp);
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 static int listrar(const char *path, struct dir_entry_list **buffer,
                 const char *arch, char **first_arch, int *final)
 {
@@ -2444,7 +2475,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         tmp1 = rar_root;
         rar_root += strlen(OPT_STR2(OPT_KEY_SRC, 0));
         int is_root_path = (!strcmp(rar_root, path) || !CHRCMP(path, '/'));
-	int ret = 0;
+        int ret = 0;
         RARArchiveDataEx *arc = NULL;
 
         if (*first_arch == NULL) {
@@ -2502,6 +2533,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                         entry_p = filecache_alloc(mp2);
                                         __listrar_tocache_forcedir(entry_p, arc,
                                                         safe_path, *first_arch, &d);
+                                        __listrar_cachedir(mp2);
                                 }
                                 free(mp2);
                         }
@@ -2546,6 +2578,9 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
 cache_hit:
                 pthread_rwlock_unlock(&file_access_lock);
                 __add_filler(path, buffer, mp);
+                if (IS_RAR_DIR(&arc->hdr))
+                        __listrar_cachedir(mp);
+                __listrar_cachedirentry(mp);
                 free(mp);
         }
 
@@ -3237,38 +3272,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
 
         pthread_rwlock_rdlock(&file_access_lock);
         struct filecache_entry *entry2_p = filecache_get(path);
-again:
-        if (entry2_p) {
-                char *tmp = strdup(entry2_p->rar_p);
-                int multipart = entry2_p->flags.multipart;
-                short vtype = entry2_p->vtype;
-                pthread_rwlock_unlock(&file_access_lock);
-                if (multipart) {
-                        int vol = 0;
-                        int final = 0;
-                        int vol_end = get_seek_length(entry2_p->rar_p);
-                        vol_end = vol_end ? vol_end + 1 : vol_end;
-                        printd(3, "Search for local directory in %s\n", tmp);
-                        while (!listrar(path, &next2, tmp, &tmp, &final)) {
-                                if ((++vol == vol_end) || final) {
-                                        free(tmp);
-                                        goto dump_buff;
-                                }
-                                RARNextVolumeName(tmp, !vtype);
-                                printd(3, "Search for local directory in %s\n", tmp);
-                        }
-                } else {
-                        if (tmp) {
-                                printd(3, "Search for local directory in %s\n", tmp);
-                                if (!listrar(path, &next2, tmp, &tmp, NULL)) {
-                                        free(tmp);
-                                        goto dump_buff;
-                                }
-                        }
-                }
-
-                free(tmp);
-        } else {
+        if (!entry2_p) {
                 /* It is possible but not very likely that we end up here
                  * due to that the cache has not yet been populated.
                  * Scan through the entire file path to force a cache update.
@@ -3287,7 +3291,7 @@ again:
                 pthread_rwlock_rdlock(&file_access_lock);
                 entry2_p = filecache_get(path);
                 if (entry2_p)
-                        goto again;
+                        goto dump_buff;
                 pthread_rwlock_unlock(&file_access_lock);
 		if (dp == NULL)
 		        goto no_entry;
@@ -3982,7 +3986,7 @@ static pthread_cond_t warmup_cond = PTHREAD_COND_INITIALIZER;
  ****************************************************************************/
 static void *walkpath_task(void *data)
 {
-	pthread_detach(pthread_self());
+        pthread_detach(pthread_self());
 
         syncdir(data);
         free(data);
