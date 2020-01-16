@@ -112,12 +112,16 @@ void dircache_invalidate(const char *path)
 {
         uint32_t hash;
 
-        char *safe_path = strdup(path);
-        char *tmp = safe_path;
-        safe_path = __gnu_dirname(safe_path);
-        hash = get_hash(safe_path, 0);
-        free(tmp);
-        hashtable_entry_delete_subkeys(ht, path, hash);
+        if (path) {
+                char *safe_path = strdup(path);
+                char *tmp = safe_path;
+                safe_path = __gnu_dirname(safe_path);
+                hash = get_hash(safe_path, 0);
+                free(tmp);
+                hashtable_entry_delete_subkeys(ht, path, hash);
+        } else {
+                hashtable_entry_delete(ht, NULL);
+        }
 }
 
 /*!
