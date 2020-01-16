@@ -3270,30 +3270,27 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
         if (entry_p)
                 goto dump_buff;
 
-        pthread_rwlock_rdlock(&file_access_lock);
-        struct filecache_entry *entry2_p = filecache_get(path);
-        pthread_rwlock_unlock(&file_access_lock);
-        if (!entry2_p) {
-                /* It is possible but not very likely that we end up here
-                 * due to that the cache has not yet been populated.
-                 * Scan through the entire file path to force a cache update.
-                 * This is the same action as required for a cache miss in
-                 * getattr(). */
-                char *safe_path = strdup(path);
-                char *tmp = safe_path;
-                while (1) {
-                        safe_path = __gnu_dirname(safe_path);
-                        syncdir(safe_path);
-                        if (!strcmp(safe_path, "/"))
-                                break;
-                }
-                free(tmp);
-                pthread_rwlock_rdlock(&file_access_lock);
-                entry2_p = filecache_get(path);
-                pthread_rwlock_unlock(&file_access_lock);
-                if (!entry2_p && dp == NULL)
-                        goto no_entry;
+        /* It is possible but not very likely that we end up here
+         * due to that the cache has not yet been populated.
+         * Scan through the entire file path to force a cache update.
+         * This is the same action as required for a cache miss in
+         * getattr(). */
+        char *safe_path = strdup(path);
+        char *tmp = safe_path;
+        while (1) {
+                safe_path = __gnu_dirname(safe_path);
+                syncdir(safe_path);
+                if (!strcmp(safe_path, "/"))
+                        break;
         }
+        free(tmp);
+        pthread_rwlock_rdlock(&dir_access_lock);
+        entry_p = dircache_get(path);
+        if (entry_p) {
+                free(dir_list2);
+                dir_list2 = dir_list_dup(&entry_p->dir_entry_list);
+        }
+        pthread_rwlock_unlock(&dir_access_lock);
 
 dump_buff:
 
@@ -3332,17 +3329,6 @@ dump_buff_nocache:
         free(dir_list2);
 
         return 0;
-
-no_entry:
-
-        dir_list_free(&dir_list);
-        if (entry_p) {
-                dir_list_free(dir_list2);
-                free(dir_list2);
-        }
-
-        return -ENOENT;
-
 }
 
 /*!
