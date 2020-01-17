@@ -4045,6 +4045,8 @@ static void walkpath(const char *dname, size_t src_len)
         /* Do not use reentrant version of readdir(3) here.
          * This needs to be revisted if other threads starts to use it. */
         while ((dent = readdir(dir))) {
+                if (fs_terminated)
+                        break;
                 /* Skip '.' and '..' */
                 if (dent->d_name[0] == '.') {
                         if (dent->d_name[1] == 0 ||
@@ -4060,7 +4062,6 @@ static void walkpath(const char *dname, size_t src_len)
                                 walkpath(fn, src_len);
                         continue;
                 }
-
 #endif
                 if (lstat(fn, &st) == -1)
                         continue;
@@ -4089,7 +4090,7 @@ static void *warmup_task(void *data)
 
         pthread_detach(pthread_self());
 
-        syslog(LOG_DEBUG, "cache warmup initiated");
+        syslog(LOG_DEBUG, "cache warmup started");
         gettimeofday(&t1, NULL);
 
         walkpath(dir, strlen(dir));
@@ -4099,9 +4100,11 @@ static void *warmup_task(void *data)
                 pthread_cond_wait(&warmup_cond, &warmup_lock);
         pthread_mutex_unlock(&warmup_lock);
 
-        gettimeofday(&t2, NULL);
-        syslog(LOG_DEBUG, "cache warmup completed after %d seconds",
-               (int)(t2.tv_sec - t1.tv_sec));
+        if (!fs_terminated) {
+                gettimeofday(&t2, NULL);
+                syslog(LOG_DEBUG, "cache warmup completed after %d seconds",
+                       (int)(t2.tv_sec - t1.tv_sec));
+        }
 
         return NULL;
 }
@@ -4162,6 +4165,15 @@ static void rar2_destroy(void *data)
         ENTER_();
 
         (void)data;             /* touch */
+
+        if (rar2fs_mount_opts.warmup) {
+                pthread_mutex_lock(&warmup_lock);
+                if (warmup_threads)
+                        printf("shutting down...\n");
+                while (warmup_threads)
+                        pthread_cond_wait(&warmup_cond, &warmup_lock);
+                pthread_mutex_unlock(&warmup_lock);
+        }
 
         rarconfig_destroy();
         iob_destroy();
