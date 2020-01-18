@@ -119,12 +119,34 @@ void dir_list_free(struct dir_entry_list *root)
  *****************************************************************************
  *
  ****************************************************************************/
+static void add_entry(struct dir_entry *entry, const char *key,
+                      struct stat *st, int type, uint32_t hash)
+{
+        entry->name = strdup(key);
+        entry->hash = hash;
+        entry->st = st;
+        entry->type = type;
+        entry->valid = 1; /* assume entry is valid */
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 struct dir_entry_list *dir_entry_add(struct dir_entry_list *l, const char *key,
                 struct stat *st, int type)
 {
-        struct dir_entry_list *tmp = l;
-        uint32_t hash = get_hash(key, 0);
+        struct dir_entry_list *tmp;
+        uint32_t hash;
 
+        hash = get_hash(key, 0);
+
+        if (l->entry.head_flag == DIR_LIST_HEAD_ && !l->next)
+                 goto new;
+        if (l->entry.head_flag == DIR_LIST_HEAD_)
+                 l = l->next;
+
+        tmp = l;
         while (l) {
                 if (hash == l->entry.hash)
                         if (!strcmp(key, l->entry.name))
@@ -133,15 +155,13 @@ struct dir_entry_list *dir_entry_add(struct dir_entry_list *l, const char *key,
                 l = l->next;
         }
         l = tmp;
+
+new:
         l->next = malloc(sizeof(struct dir_entry_list));
         if (l->next) {
                 l = l->next;
-                l->entry.name = strdup(key);
-                l->entry.hash = hash;
-                l->entry.st = st;
-                l->entry.type = type;
-                l->entry.valid = 1; /* assume entry is valid */
                 l->next = NULL;
+                add_entry(&l->entry, key, st, type, hash);
         }
         return l;
 }

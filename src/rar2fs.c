@@ -1975,8 +1975,8 @@ void set_high_precision_ts(struct timespec *spec, uint64_t stamp)
  *****************************************************************************
  *
  ****************************************************************************/
-static void set_rarstats(struct filecache_entry *entry_p,
-                RARArchiveDataEx *arc, int force_dir)
+static void set_rarstats(struct filecache_entry *entry_p, RARArchiveDataEx *arc,
+                         int force_dir)
 {
 	off_t st_size;
 

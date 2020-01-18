@@ -39,17 +39,19 @@
 typedef struct dir_entry_list dir_entry_list;
 
 __extension__
+struct dir_entry {
+        char *name;
+        uint32_t hash;
+        union {
+                struct stat *st;
+                void *head_flag;
+        };
+        int type;
+        int valid;
+};
+
 struct dir_entry_list {
-        struct dir_entry {
-                char *name;
-                uint32_t hash;
-                union {
-                        struct stat *st;
-                        void *head_flag;
-                };
-                int type;
-                int valid;
-        } entry;
+        struct dir_entry entry;
         struct dir_entry_list *next;
 };
 
