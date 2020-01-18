@@ -45,6 +45,10 @@
 extern "C" {
 #endif
 
+/* This value comes directly from rartypes.h, need to be checked from time
+ * to time to not deviate. */
+#define INT64NDF (0x7fffffff7fffffffLL)
+
 typedef struct RARHeaderData RARHeaderData;
 typedef struct RARHeaderDataEx RARHeaderDataEx;
 typedef struct RAROpenArchiveData RAROpenArchiveData;

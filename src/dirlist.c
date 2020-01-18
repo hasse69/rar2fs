@@ -141,10 +141,11 @@ struct dir_entry_list *dir_entry_add(struct dir_entry_list *l, const char *key,
 
         hash = get_hash(key, 0);
 
-        if (l->entry.head_flag == DIR_LIST_HEAD_ && !l->next)
-                 goto new;
-        if (l->entry.head_flag == DIR_LIST_HEAD_)
-                 l = l->next;
+        if (l->entry.head_flag == DIR_LIST_HEAD_) {
+                if (!l->next)
+                        goto new;
+                l = l->next;
+        }
 
         tmp = l;
         while (l) {

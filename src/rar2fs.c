@@ -1975,6 +1975,56 @@ void set_high_precision_ts(struct timespec *spec, uint64_t stamp)
  *****************************************************************************
  *
  ****************************************************************************/
+static uint64_t extract_file_size(char *arch, const char *file)
+{
+        struct RAROpenArchiveDataEx d;
+        memset(&d, 0, sizeof(RAROpenArchiveDataEx));
+        d.ArcName = arch;
+        d.OpenMode = RAR_OM_LIST_INCSPLIT;
+        d.Callback = list_callback;
+        d.UserData = (LPARAM)arch;
+        struct RARHeaderDataEx header;
+        memset(&header, 0, sizeof(header));
+        HANDLE hdl = RAROpenArchiveEx(&d);
+        uint64_t size = 0;
+
+        if (d.OpenResult)
+                goto out;
+
+        header.CmtBufSize = 0;
+        while (1) {
+                if (RARReadHeaderEx(hdl, &header))
+                        break;
+                if (!strcmp(header.FileName, file)) {
+                        /* Since some archives seems to have corrupt information
+                         * in the uncompressed size, use the accumulated
+                         * compressed size instead. It should anyway be the same
+                         * for archives in store mode (-m0). For archives in
+                         * compressed mode we must trust what is there as the
+                         * uncompressed size. */
+                        if (header.Method == FHD_STORING &&
+                                        !IS_RAR_DIR(&header)) {
+                                size += GET_RAR_PACK_SZ(&header);
+                        } else {
+                                size = GET_RAR_SZ(&header);
+                                break;
+                        }
+                }
+                if (RARProcessFile(hdl, RAR_SKIP, NULL, NULL))
+                        break;
+        }
+
+out:
+        if (hdl)
+                RARCloseArchive(hdl);
+
+        return size;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
 static void set_rarstats(struct filecache_entry *entry_p, RARArchiveDataEx *arc,
                          int force_dir)
 {
@@ -1982,6 +2032,12 @@ static void set_rarstats(struct filecache_entry *entry_p, RARArchiveDataEx *arc,
 
         if (!force_dir) {
                 st_size = GET_RAR_SZ(&arc->hdr);
+                /* Handle the one case discovered so far with archives having
+                 * bad size information in the header. */
+                if ((st_size == INT64NDF) && entry_p->flags.raw &&
+                                arc->hdr.HostOS == HOST_UNIX)
+                        st_size = extract_file_size(entry_p->rar_p,
+                                                    entry_p->file_p);
                 mode_t mode = GET_RAR_MODE(&arc->hdr);
                 if (!S_ISDIR(mode) && !S_ISLNK(mode)) {
                         /* Force file to be treated as a 'regular file' */
