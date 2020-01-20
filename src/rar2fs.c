@@ -2787,24 +2787,13 @@ static int syncdir_scan(const char *dir, const char *root,
 
                         if (!seek_len || vcnt < seek_len) {
                                 ++vcnt;
-                                if (!final) {
+                                if (!final && !error_cnt) {
                                         if (listrar(dir, next, arch,
                                                     &first_arch, &final)) {
                                                 ++error_tot;
                                                 ++error_cnt;
-                                                *next = dir_entry_add(*next,
-                                                               namelist[i]->d_name,
-                                                               NULL, DIR_E_NRM);
                                         }
-                                } else if (error_cnt) {
-                                        *next = dir_entry_add(*next,
-                                                      namelist[i]->d_name,
-                                                      NULL, DIR_E_NRM);
                                 }
-                        } else if (error_cnt) {
-                                *next = dir_entry_add(*next,
-                                              namelist[i]->d_name,
-                                              NULL, DIR_E_NRM);
                         }
                         free(arch);
                         ++i;
@@ -2895,25 +2884,17 @@ static int readdir_scan(const char *dir, const char *root,
 
                         if (!seek_len || vcnt < seek_len) {
                                 ++vcnt;
-                                if (!final) {
+                                if (!final && !error_cnt) {
                                         if (listrar(dir, next2, arch,
                                                     &first_arch, &final)) {
                                                 ++error_tot;
                                                 ++error_cnt;
-                                                *next2 = dir_entry_add(*next2,
-                                                               namelist[i]->d_name,
-                                                               NULL, DIR_E_NRM);
                                         }
-                                } else if (error_cnt) {
-                                        *next2 = dir_entry_add(*next2,
-                                                      namelist[i]->d_name,
-                                                      NULL, DIR_E_NRM);
                                 }
-                        } else if (error_cnt) {
-                                *next2 = dir_entry_add(*next2,
-                                               namelist[i]->d_name,
-                                               NULL, DIR_E_NRM);
                         }
+                        if (error_cnt)
+                                *next = dir_entry_add(*next, namelist[i]->d_name,
+                                                      NULL, DIR_E_NRM);
 
                         free(arch);
 
@@ -3040,7 +3021,6 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         ENTER_("%s", path);
 
         struct filecache_entry *entry_p;
-        int res;
 
         pthread_rwlock_rdlock(&file_access_lock);
         entry_p = path_lookup(path, stbuf);
@@ -3066,13 +3046,11 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         char *tmp = safe_path;
         while (1) {
                 safe_path = __gnu_dirname(safe_path);
-                res = syncdir(safe_path);
-                if (res || !strcmp(safe_path, "/"))
+                syncdir(safe_path);
+                if (!strcmp(safe_path, "/"))
                         break;
         }
         free(tmp);
-        if (res)
-                return res;
 
         pthread_rwlock_rdlock(&file_access_lock);
         entry_p = path_lookup(path, stbuf);
@@ -3092,7 +3070,7 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
                                 !strcmp(&path[len_path - len_cmd], file_cmd[cmd])) {
                         char *root;
                         char *real = (char *)path;
-                        /* Frome here on the real path is not needed anymore
+                        /* From here on the real path is not needed anymore
                          * and adding it to the cache is simply overkil, thus
                          * it is safe to modify it! */
                         real[len_path - len_cmd] = 0;
