@@ -155,6 +155,7 @@ static struct dir_entry_list *arch_list = &arch_list_root;
 static pthread_attr_t thread_attr;
 static unsigned int rar2_ticks;
 static int fs_terminated = 0;
+static int warmup_cancelled = 0;
 static int fs_loop = 0;
 static char *fs_loop_mp_root = NULL;
 static char *fs_loop_mp_base = NULL;
@@ -162,6 +163,9 @@ static size_t fs_loop_mp_base_len = 0;
 static struct stat fs_loop_mp_stat;
 static int64_t blkdev_size = -1;
 static mode_t umask_ = 0022;
+static volatile int warmup_threads = 0;
+static pthread_mutex_t warmup_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t warmup_cond = PTHREAD_COND_INITIALIZER;
 
 #define P_ALIGN_(a) (((a)+page_size_)&~(page_size_-1))
 
@@ -169,6 +173,7 @@ static int extract_rar(char *arch, const char *file, void *arg);
 static int get_vformat(const char *s, int t, int *l, int *p);
 static int CALLBACK list_callback_noswitch(UINT, LPARAM UserData, LPARAM, LPARAM);
 static int CALLBACK list_callback(UINT, LPARAM UserData, LPARAM, LPARAM);
+static void *warmup_task(void *data);
 
 struct eof_cb_arg {
         off_t toff;
@@ -333,11 +338,23 @@ __attribute__((visibility("hidden")))
 #endif
 void __handle_sigusr1()
 {
+        pthread_t t;
+
+        if (mount_type == MOUNT_FOLDER && rar2fs_mount_opts.warmup > 0) {
+                pthread_mutex_lock(&warmup_lock);
+                warmup_cancelled = 1;
+                while (warmup_threads)
+                        pthread_cond_wait(&warmup_cond, &warmup_lock);
+                pthread_mutex_unlock(&warmup_lock);
+                warmup_cancelled = 0;
+        }
         printd(3, "Invalidating path cache\n");
         pthread_rwlock_wrlock(&file_access_lock);
         filecache_invalidate(NULL);
         pthread_rwlock_unlock(&file_access_lock);
         __dircache_invalidate(NULL);
+        if (mount_type == MOUNT_FOLDER && rar2fs_mount_opts.warmup > 0)
+                pthread_create(&t, NULL, warmup_task, NULL);
 }
 
 /*!
@@ -4016,10 +4033,6 @@ static inline int access_chk(const char *path, int new_file)
         return e && !e->flags.unresolved ? 1 : 0;
 }
 
-static volatile int warmup_threads = 0;
-static pthread_mutex_t warmup_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t warmup_cond = PTHREAD_COND_INITIALIZER;
-
 /*!
  *****************************************************************************
  *
@@ -4101,7 +4114,7 @@ static void walkpath(const char *dname, size_t src_len)
         /* Do not use reentrant version of readdir(3) here.
          * This needs to be revisted if other threads starts to use it. */
         while ((dent = readdir(dir))) {
-                if (fs_terminated)
+                if (warmup_cancelled)
                         break;
                 /* Skip '.' and '..' */
                 if (dent->d_name[0] == '.') {
@@ -4156,7 +4169,7 @@ static void *warmup_task(void *data)
                 pthread_cond_wait(&warmup_cond, &warmup_lock);
         pthread_mutex_unlock(&warmup_lock);
 
-        if (!fs_terminated) {
+        if (!warmup_cancelled) {
                 gettimeofday(&t2, NULL);
                 syslog(LOG_DEBUG, "cache warmup completed after %d seconds",
                        (int)(t2.tv_sec - t1.tv_sec));
@@ -4222,7 +4235,7 @@ static void rar2_destroy(void *data)
 
         (void)data;             /* touch */
 
-        if (rar2fs_mount_opts.warmup) {
+        if (mount_type == MOUNT_FOLDER && rar2fs_mount_opts.warmup > 0) {
                 pthread_mutex_lock(&warmup_lock);
                 if (warmup_threads)
                         printf("shutting down...\n");
@@ -5290,6 +5303,7 @@ static int work(struct fuse_args *args)
                 pthread_kill(t, SIGINT);        /* terminate nicely */
 
         fs_terminated = 1;
+        warmup_cancelled = 1;
         pthread_join(t, NULL);
 
         /* This is doing more or less the same as fuse_teardown(). */
