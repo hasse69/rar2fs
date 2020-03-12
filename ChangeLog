@@ -1,5 +1,57 @@
 rar2fs ChangeLog file.
 
+2020-03-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.29.0
+
+        * Improve error reporting (#133)
+
+        * Simplify some directory cache logic
+
+        * Restart warmup at manual cache invalidation
+
+        * Fix a problem with corrupt/invalid size field
+
+        * Fix a crash issue in readdir callback
+
+        * Shutdown cache warmup before fs terminates
+
+        * Fix regression for issue #114
+
+        * Fix SIGUSR1 crash
+
+        * Fix a mutex problem in readdir callback
+
+        * Improve speed when listing archives with many directories
+
+        * Rename mutex for file/directory cache access
+
+        * Fix cache invalidation for child entries
+
+        * Add optional cache warmup
+
+        * Replace cache mutexes with rwlocks
+
+        * Reduce memory footprint during archive scan
+
+        * Add locale mount option
+
+        * Add 'unrar' to .gitignore (#126)
+
+        * Reduce memory footprint during archive scan
+
+        * Fix minor argument parsing bug
+
+        * Add missing call to closedir() in one error branch
+
+        * Remove unused iconv support
+
+        * Fix building with libc++. (#123)
+
+        * Accept pre-mounted FUSE descriptor (#121)
+
+        * Fix broken install of compressed man-page
+
 2019-11-06  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.28.0
