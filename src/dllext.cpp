@@ -510,7 +510,7 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
 
   wcs += msprintf(wcs, L"\n%12ls: RAR %ls(v%d) -m%d -md=%d%s",St(MListCompInfo),
           Format==RARFMT15 ? L"1.5":L"5.0",
-#if RARVER_MAJOR > 5 || ( RARVER_MAJOR == 5 && RARVER_MINOR > 60 )
+#if RARVER_MAJOR > 5 || ( RARVER_MAJOR == 5 && RARVER_MINOR >= 70 )
           hd.UnpVer==VER_UNKNOWN ? 0 : hd.UnpVer,hd.Method,
 #else
           hd.UnpVer,hd.Method,
