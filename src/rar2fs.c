@@ -1892,6 +1892,7 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
                 LPARAM P1, LPARAM P2)
 {
         struct extract_cb_arg *cb_arg = (struct extract_cb_arg *)(UserData);
+
         if (msg == UCM_PROCESSDATA) {
                 /*
                  * We do not need to handle the case that not all data is
@@ -4899,8 +4900,12 @@ static const char *error_to_string(int err)
                 ERROR_TO_STRING_ENTRY(ERAR_SMALL_BUF);
                 ERROR_TO_STRING_ENTRY(ERAR_UNKNOWN);
                 ERROR_TO_STRING_ENTRY(ERAR_MISSING_PASSWORD);
+#ifdef ERAR_EREFERENCE
                 ERROR_TO_STRING_ENTRY(ERAR_EREFERENCE);
+#endif
+#ifdef ERAR_BAD_PASSWORD
                 ERROR_TO_STRING_ENTRY(ERAR_BAD_PASSWORD);
+#endif
 #undef ERROR_TO_STRING_ENTRY
         }
 

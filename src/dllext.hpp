@@ -41,6 +41,11 @@
 #include "headers5.hpp"
 #endif
 
+/* libunrar4 does not define this */
+#ifndef ERAR_SUCCESS
+#define ERAR_SUCCESS 0
+#endif
+
 #define  LINK_T_UNICODE     0x00000001U
 #define  LINK_T_FILECOPY    0x00000002U
 
