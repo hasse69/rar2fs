@@ -782,6 +782,7 @@ static int pclose_(FILE *fp, pid_t pid)
 static char *get_vname(int t, const char *str, int vol, int len, int pos)
 {
         ENTER_("%s   vol=%d, len=%d, pos=%d", str, vol, len, pos);
+
         char *s = strdup(str);
         if (t) {
                 char f[16];
@@ -950,7 +951,7 @@ static int __RARVolNameToFirstName(char *s, int vtype)
         if (IS_NNN(s)) {
                 int len;
                 int pos;
-                if (get_vformat(s, !vtype, &len, &pos) == 1) {
+                if (get_vformat(s, 1, &len, &pos) == 1) {
                         while (--len >= 0 && s_copy[pos + len] == '0');
                         if (len < 0 || access(s, F_OK))
                                 s = strcpy(s, s_copy);
@@ -2411,7 +2412,7 @@ static struct filecache_entry *__listrar_tocache(char *file,
                         int len, pos;
 
                         entry_p->flags.multipart = 1;
-                        entry_p->vtype = VTYPE(d->Flags);
+                        entry_p->vtype = IS_NNN(arch) ? 1 : VTYPE(d->Flags);
                         entry_p->vno_base = get_vformat(arch,
                                         entry_p->vtype, &len, &pos);
                         entry_p->vno_first = get_vformat(entry_p->rar_p,
@@ -2445,7 +2446,7 @@ static struct filecache_entry *__listrar_tocache(char *file,
                 /* Check if part of a volume */
                 if (d->Flags & ROADF_VOLUME) {
                         entry_p->flags.multipart = 1;
-                        entry_p->vtype = VTYPE(d->Flags);
+                        entry_p->vtype = IS_NNN(arch) ? 1 : VTYPE(d->Flags);
                 } else {
                         entry_p->flags.multipart = 0;
                 }
@@ -2479,7 +2480,7 @@ static void __listrar_tocache_forcedir(struct filecache_entry *entry_p,
         /* Check if part of a volume */
         if (d->Flags & ROADF_VOLUME) {
                 entry_p->flags.multipart = 1;
-                entry_p->vtype = VTYPE(d->Flags);
+                entry_p->vtype = IS_NNN(first_arch) ? 1 : VTYPE(d->Flags);
         } else {
                 entry_p->flags.multipart = 0;
         }
