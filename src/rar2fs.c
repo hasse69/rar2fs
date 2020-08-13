@@ -714,12 +714,20 @@ static FILE *popen_(const struct filecache_entry *entry_p, pid_t *cpid)
 
         pid = fork();
         if (pid == 0) {
-                int ret;
+                int ret = 0;
                 setpgid(getpid(), 0);
                 close(pfd[0]);  /* Close unused read end */
-                ret = extract_rar(entry_p->rar_p,
-                                  entry_p->file_p,
-                                  (void *)(uintptr_t) pfd[1]);
+                /* For encrypted archives we need to perform an additional
+                 * dummy extraction attempt to avoid feeding the file
+                 * descriptor with garbage data in case of wrong password. */
+                if (entry_p->flags.encrypted && mount_type == MOUNT_FOLDER)
+                        ret = extract_rar(entry_p->rar_p,
+                                          entry_p->file_p,
+                                          NULL);
+                if (!ret)
+                        ret = extract_rar(entry_p->rar_p,
+                                          entry_p->file_p,
+                                          (void *)(uintptr_t)pfd[1]);
                 close(pfd[1]);
                 _exit(ret);
         } else if (pid < 0) {
@@ -1497,11 +1505,11 @@ check_idx:
                 if (sync_thread_read(op))
                         return -EIO;
                 /* If there is still no data assume something went wrong.
-                 * Also assume that, if the file is encrypted, the reason
-                 * for the error is a missing or invalid password!
+                 * Most likely CRC errors or an invalid password in the case 
+                 * of encrypted aechives.
                  */
                 if (!op->buf->offset)
-                        return op->entry_p->flags.encrypted ? -EPERM : -EIO;
+                        return -EIO;
         }
         if ((off_t)(offset + size) > op->buf->offset) {
                 if (offset >= op->buf->offset) {
@@ -1721,6 +1729,7 @@ static void dump_stat(struct stat *stbuf)
 static int collect_files(const char *arch, struct dir_entry_list *list)
 {
         RAROpenArchiveDataEx d;
+        int files;
 
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
@@ -1731,15 +1740,53 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
         HANDLE h = RAROpenArchiveEx(&d);
 
         /* Check for fault */
-        const int err = d.OpenResult;
-        if (err != ERAR_SUCCESS) {
+        if (d.OpenResult != ERAR_SUCCESS) {
                 if (h)
                         RARCloseArchive(h);
-
-                return -err;
+                /* For invalid passwords ERAR_BAD_DATA is returned for RAR4
+                 * rather than ERAR_BAD_PASSWORD. Thus we must make a qualified
+                 * guess here it is caused by wrong password being provided.
+                 * Effectively this means true CRC errors cannot be detected
+                 * even less reported as such. */
+                if (d.OpenResult == ERAR_BAD_DATA)
+                        return -ERAR_BAD_PASSWORD;
+                return -d.OpenResult;
         }
 
-        int files = 0;
+        /* Pointless to test for encrypted files if header is already encrypted
+         * and could be opened. */
+        if (d.Flags & ROADF_ENCHEADERS)
+                goto skip_file_check;
+
+        RARArchiveDataEx *arc = NULL;
+        int dll_result = RARListArchiveEx(h, &arc);
+        if (dll_result && dll_result != ERAR_EOPEN) {
+                if (dll_result != ERAR_END_ARCHIVE) {
+                        RARFreeArchiveDataEx(&arc);
+                        RARCloseArchive(h);
+                        return -dll_result;
+                }
+        }
+        if (arc->hdr.Flags & RHDF_ENCRYPTED) {
+                dll_result = extract_rar((char *)arch, arc->hdr.FileName, NULL);
+                /* For invalid passwords ERAR_BAD_DATA is returned for RAR4
+                 * rather than ERAR_BAD_PASSWORD. Thus we must make a qualified
+                 * guess here it is caused by wrong password being provided.
+                 * Effectively this means true CRC errors cannot be detected
+                 * even less reported as such. */
+                if (dll_result) {
+                        RARFreeArchiveDataEx(&arc);
+                        RARCloseArchive(h);
+                        if (dll_result == ERAR_BAD_DATA)
+                                return -ERAR_BAD_PASSWORD;
+                        return -dll_result;
+                }
+        }
+        RARFreeArchiveDataEx(&arc);
+
+skip_file_check:
+
+        files = 0;
         if (d.Flags & ROADF_VOLUME) {
                 char *arch_ = strdup(arch);
                 int format = (d.Flags & ROADF_NEWNUMBERING) ? 0 : 1;
@@ -1758,6 +1805,8 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
                 (void)dir_entry_add(list, arch, NULL, DIR_E_NRM);
                 files = 1;
         }
+
+        RARCloseArchive(h);
 
         return files;
 }
@@ -1895,13 +1944,14 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
         struct extract_cb_arg *cb_arg = (struct extract_cb_arg *)(UserData);
 
         if (msg == UCM_PROCESSDATA) {
+                if (!cb_arg->arg)
+                        return 1;
                 /*
                  * We do not need to handle the case that not all data is
                  * written after return from write() since the pipe is not
                  * opened using the O_NONBLOCK flag.
                  */
-                int fd = cb_arg->arg ? (LPARAM)cb_arg->arg : STDOUT_FILENO;
-                if (write(fd, (void *)P1, P2) == -1) {
+                if (write((LPARAM)cb_arg->arg, (void *)P1, P2) == -1) {
                         /*
                          * Do not treat EPIPE as an error. It is the normal
                          * case when the process is terminted, ie. the pipe is
