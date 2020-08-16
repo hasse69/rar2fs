@@ -717,14 +717,14 @@ static FILE *popen_(const struct filecache_entry *entry_p, pid_t *cpid)
                 int ret = 0;
                 setpgid(getpid(), 0);
                 close(pfd[0]);  /* Close unused read end */
-                /* For encrypted archives we need to perform an additional
-                 * dummy extraction attempt to avoid feeding the file
-                 * descriptor with garbage data in case of wrong password. */
-                if (entry_p->flags.encrypted && mount_type == MOUNT_FOLDER)
+                /* For folder mounts we need to perform an additional dummy
+                 * extraction attempt to avoid feeding the file descriptor
+                 * with garbage data in case of wrong password or CRC errors. */
+                if (mount_type == MOUNT_FOLDER)
                         ret = extract_rar(entry_p->rar_p,
                                           entry_p->file_p,
                                           NULL);
-                if (!ret)
+                if (!ret || ret == ERAR_UNKNOWN)
                         ret = extract_rar(entry_p->rar_p,
                                           entry_p->file_p,
                                           (void *)(uintptr_t)pfd[1]);
@@ -1743,13 +1743,6 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
         if (d.OpenResult != ERAR_SUCCESS) {
                 if (h)
                         RARCloseArchive(h);
-                /* For invalid passwords ERAR_BAD_DATA is returned for RAR4
-                 * rather than ERAR_BAD_PASSWORD. Thus we must make a qualified
-                 * guess here it is caused by wrong password being provided.
-                 * Effectively this means true CRC errors cannot be detected
-                 * even less reported as such. */
-                if (d.OpenResult == ERAR_BAD_DATA)
-                        return -ERAR_BAD_PASSWORD;
                 return -d.OpenResult;
         }
 
@@ -1769,23 +1762,15 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
         }
         if (arc->hdr.Flags & RHDF_ENCRYPTED) {
                 dll_result = extract_rar((char *)arch, arc->hdr.FileName, NULL);
-                /* For invalid passwords ERAR_BAD_DATA is returned for RAR4
-                 * rather than ERAR_BAD_PASSWORD. Thus we must make a qualified
-                 * guess here it is caused by wrong password being provided.
-                 * Effectively this means true CRC errors cannot be detected
-                 * even less reported as such. */
-                if (dll_result) {
+                if (dll_result && dll_result != ERAR_UNKNOWN) {
                         RARFreeArchiveDataEx(&arc);
                         RARCloseArchive(h);
-                        if (dll_result == ERAR_BAD_DATA)
-                                return -ERAR_BAD_PASSWORD;
                         return -dll_result;
                 }
         }
         RARFreeArchiveDataEx(&arc);
 
 skip_file_check:
-
         files = 0;
         if (d.Flags & ROADF_VOLUME) {
                 char *arch_ = strdup(arch);
@@ -1944,8 +1929,11 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
         struct extract_cb_arg *cb_arg = (struct extract_cb_arg *)(UserData);
 
         if (msg == UCM_PROCESSDATA) {
+                /* Handle the special case when asking for a quick "dry run"
+                 * to test archive integrity. If all is well this will result
+                 * in an ERAR_UNKNOWN error. */
                 if (!cb_arg->arg)
-                        return 1;
+                        return -1;
                 /*
                  * We do not need to handle the case that not all data is
                  * written after return from write() since the pipe is not
