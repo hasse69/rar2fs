@@ -186,6 +186,7 @@ struct eof_cb_arg {
 struct extract_cb_arg {
         char *arch;
         void *arg;
+        int dry_run;
 };
 
 static int extract_index(const char *, const struct filecache_entry *, off_t);
@@ -1932,8 +1933,13 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
                 /* Handle the special case when asking for a quick "dry run"
                  * to test archive integrity. If all is well this will result
                  * in an ERAR_UNKNOWN error. */
-                if (!cb_arg->arg)
+                if (!cb_arg->arg) {
+                        if (!cb_arg->dry_run) {
+                                cb_arg->dry_run = 1;
+                                return 1;
+                        }
                         return -1;
+                }
                 /*
                  * We do not need to handle the case that not all data is
                  * written after return from write() since the pipe is not
@@ -1982,6 +1988,7 @@ static int extract_rar(char *arch, const char *file, void *arg)
         struct extract_cb_arg cb_arg;
         cb_arg.arch = arch;
         cb_arg.arg = arg;
+        cb_arg.dry_run = 0;
 
         d.Callback = extract_callback;
         d.UserData = (LPARAM)&cb_arg;
