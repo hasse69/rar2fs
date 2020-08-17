@@ -1747,11 +1747,6 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
                 return -d.OpenResult;
         }
 
-        /* Pointless to test for encrypted files if header is already encrypted
-         * and could be opened. */
-        if (d.Flags & ROADF_ENCHEADERS)
-                goto skip_file_check;
-
         RARArchiveDataEx *arc = NULL;
         int dll_result = RARListArchiveEx(h, &arc);
         if (dll_result && dll_result != ERAR_EOPEN) {
@@ -1761,6 +1756,12 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
                         return -dll_result;
                 }
         }
+
+        /* Pointless to test for encrypted files if header is already encrypted
+         * and could be read. */
+        if (d.Flags & ROADF_ENCHEADERS)
+                goto skip_file_check;
+
         if (arc->hdr.Flags & RHDF_ENCRYPTED) {
                 dll_result = extract_rar((char *)arch, arc->hdr.FileName, NULL);
                 if (dll_result && dll_result != ERAR_UNKNOWN) {
@@ -1769,9 +1770,10 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
                         return -dll_result;
                 }
         }
-        RARFreeArchiveDataEx(&arc);
 
 skip_file_check:
+        RARFreeArchiveDataEx(&arc);
+
         files = 0;
         if (d.Flags & ROADF_VOLUME) {
                 char *arch_ = strdup(arch);
