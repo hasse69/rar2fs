@@ -949,24 +949,22 @@ static int __check_vol_header(const char *arch, int vtype)
  ****************************************************************************/
 static int __RARVolNameToFirstName(char *s, int vtype)
 {
-        char *s_copy = strdup(s);
         RARVolNameToFirstName(s, vtype);
-        if (!IS_RAR(s) && !IS_NNN(s)) {
-                free(s_copy);
+        if (!IS_RAR(s) && !IS_NNN(s))
                 return -1;
-        }
         /* RARVolNameToFirstName() might provide the wrong answer for .NNN
          * archives. Lets try to fix that! */
         if (IS_NNN(s)) {
                 int len;
                 int pos;
                 if (get_vformat(s, 1, &len, &pos) == 1) {
-                        while (--len >= 0 && s_copy[pos + len] == '0');
-                        if (len < 0 || access(s, F_OK))
-                                s = strcpy(s, s_copy);
+                        if (--len >= 0 && s[pos + len] == '1') {
+                                s[pos + len] = '0';
+                                if (access(s, F_OK))
+                                        s[pos + len] = '1';
+                        }
                 }
         }
-        free(s_copy);
         return __check_vol_header(s, vtype);
 }
 
