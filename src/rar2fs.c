@@ -913,8 +913,7 @@ static int __RARVolNameToFirstName(char *arch, int vtype)
         memset(&header, 0, sizeof(header));
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.OpenMode = RAR_OM_LIST_INCSPLIT;
-        d.Callback = list_callback;
-        d.UserData = (LPARAM)arch;
+        d.Callback = list_callback_noswitch;
 
         /* Check for fault */
         if (access(arch, F_OK)) {
@@ -929,6 +928,7 @@ static int __RARVolNameToFirstName(char *arch, int vtype)
 
         for (;;) {
                 d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
+                d.UserData = (LPARAM)arch;
                 h = RAROpenArchiveEx(&d);
                 if (d.OpenResult) {
                         ret = -1;
