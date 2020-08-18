@@ -896,76 +896,74 @@ static int get_vformat(const char *s, int t, int *l, int *p)
  *****************************************************************************
  *
  ****************************************************************************/
-static int __check_vol_header(const char *arch, int vtype)
+static int __RARVolNameToFirstName(char *arch, int vtype)
 {
-        HANDLE h;
+        HANDLE h = NULL;
         RAROpenArchiveDataEx d;
         struct RARHeaderDataEx header;
-        (void)vtype;
+        int len;
+        int pos;
+        int vol;
+        char *s_orig = strdup(arch);
+        int ret = 0;
+
+        vol = get_vformat(arch, !vtype, &len, &pos);
+        RARVolNameToFirstName(arch, vtype);
 
         memset(&header, 0, sizeof(header));
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
-        d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
         d.OpenMode = RAR_OM_LIST_INCSPLIT;
-        d.Callback = list_callback_noswitch;
+        d.Callback = list_callback;
         d.UserData = (LPARAM)arch;
-        h = RAROpenArchiveEx(&d);
 
         /* Check for fault */
-        if (d.OpenResult) {
-                if (h)
-                        RARCloseArchive(h);
-                return -1;
-        }
-        if (d.Flags & ROADF_ENCHEADERS) {
-                RARCloseArchive(h);
-                d.Callback = list_callback;
-                h = RAROpenArchiveEx(&d);
+        if (access(arch, F_OK)) {
+                if (IS_RAR(arch) && vtype) {
+                        ret = -1;
+                        goto out;
+                }
+                arch = strcpy(arch, s_orig);
+        } else {
+                vol = 1;
         }
 
-        if (d.Flags & ROADF_VOLUME) {
+        for (;;) {
+                d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
+                h = RAROpenArchiveEx(&d);
+                if (d.OpenResult) {
+                        ret = -1;
+                        goto out;
+                }
 /* All pre 5.x.x versions seems to suffer from the same bug which means
  * the first volume file flag is not set properly for .rNN volumes. */
 #if RARVER_MAJOR < 5
                 if (IS_RAR(arch) && vtype)
                         d.Flags |= ROADF_FIRSTVOLUME;
 #endif
-                if (!(d.Flags & ROADF_FIRSTVOLUME)) {
-                        RARCloseArchive(h);
-                        return -1;
-                }
-        }
-        if (RARReadHeaderEx(h, &header))  {
-                RARCloseArchive(h);
-                return -1;
-        }
-        RARCloseArchive(h);
-        return 0;
-}
+                if (d.Flags & ROADF_FIRSTVOLUME)
+                        break;
 
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-static int __RARVolNameToFirstName(char *s, int vtype)
-{
-        RARVolNameToFirstName(s, vtype);
-        if (!IS_RAR(s) && !IS_NNN(s))
-                return -1;
-        /* RARVolNameToFirstName() might provide the wrong answer for .NNN
-         * archives. Lets try to fix that! */
-        if (IS_NNN(s)) {
-                int len;
-                int pos;
-                if (get_vformat(s, 1, &len, &pos) == 1) {
-                        if (--len >= 0 && s[pos + len] == '1') {
-                                s[pos + len] = '0';
-                                if (access(s, F_OK))
-                                        s[pos + len] = '1';
-                        }
+                if (vol == 0) {
+                    ret = -1;
+                    goto out;
+                }
+                --vol;
+                int z = 1;
+                int i;
+                for (i = len - 1; i >= 0; i--) {
+                      arch[pos + i] = 48 + ((vol / z) % 10);
+                      z *= 10;
                 }
         }
-        return __check_vol_header(s, vtype);
+
+        if (RARReadHeaderEx(h, &header))
+                ret = -1;
+
+out:
+        free(s_orig);
+        if (h)
+                RARCloseArchive(h);
+        return ret;
 }
 
 #if _POSIX_TIMERS < 1
@@ -1729,6 +1727,8 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
 {
         RAROpenArchiveDataEx d;
         int files;
+        char *arch_;
+        int format;
 
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
@@ -1745,12 +1745,22 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
                 return -d.OpenResult;
         }
 
+        arch_ = strdup(arch);
+        format = (d.Flags & ROADF_NEWNUMBERING) ? 0 : 1;
+        if (d.Flags & ROADF_VOLUME) {
+                if (__RARVolNameToFirstName(arch_, format)) {
+                        free(arch_);
+                        return 0;
+                }
+        }
+
         RARArchiveDataEx *arc = NULL;
         int dll_result = RARListArchiveEx(h, &arc);
         if (dll_result && dll_result != ERAR_EOPEN) {
                 if (dll_result != ERAR_END_ARCHIVE) {
                         RARFreeArchiveDataEx(&arc);
                         RARCloseArchive(h);
+                        free(arch_);
                         return -dll_result;
                 }
         }
@@ -1761,10 +1771,11 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
                 goto skip_file_check;
 
         if (arc->hdr.Flags & RHDF_ENCRYPTED) {
-                dll_result = extract_rar((char *)arch, arc->hdr.FileName, NULL);
+                dll_result = extract_rar(arch_, arc->hdr.FileName, NULL);
                 if (dll_result && dll_result != ERAR_UNKNOWN) {
                         RARFreeArchiveDataEx(&arc);
                         RARCloseArchive(h);
+                        free(arch_);
                         return -dll_result;
                 }
         }
@@ -1774,25 +1785,21 @@ skip_file_check:
 
         files = 0;
         if (d.Flags & ROADF_VOLUME) {
-                char *arch_ = strdup(arch);
-                int format = (d.Flags & ROADF_NEWNUMBERING) ? 0 : 1;
-                if (!__RARVolNameToFirstName(arch_, format)) {
-                        while (1) {
-                                if (access(arch_, F_OK))
-                                       break;
-                                list = dir_entry_add(list, arch_, NULL,
-                                                        DIR_E_NRM);
-                                ++files;
-                                RARNextVolumeName(arch_, format);
-                        }
+                while (1) {
+                        if (access(arch_, F_OK))
+                               break;
+                        list = dir_entry_add(list, arch_, NULL,
+                                                DIR_E_NRM);
+                        ++files;
+                        RARNextVolumeName(arch_, format);
                 }
-                free(arch_);
         } else {
-                (void)dir_entry_add(list, arch, NULL, DIR_E_NRM);
+                (void)dir_entry_add(list, arch_, NULL, DIR_E_NRM);
                 files = 1;
         }
 
         RARCloseArchive(h);
+        free(arch_);
 
         return files;
 }
