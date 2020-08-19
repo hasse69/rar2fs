@@ -166,6 +166,7 @@ static mode_t umask_ = 0022;
 static volatile int warmup_threads = 0;
 static pthread_mutex_t warmup_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t warmup_cond = PTHREAD_COND_INITIALIZER;
+static char *src_path_full = NULL;
 
 #define P_ALIGN_(a) (((a)+page_size_)&~(page_size_-1))
 
@@ -367,11 +368,9 @@ __attribute__((visibility("hidden")))
 #endif
 void __handle_sighup()
 {
-        if (mount_type == MOUNT_FOLDER) {
-                rarconfig_destroy();
-                rarconfig_init(OPT_STR(OPT_KEY_SRC, 0),
-                               OPT_STR(OPT_KEY_CONFIG, 0));
-        }
+        rarconfig_destroy();
+        rarconfig_init(OPT_STR(OPT_KEY_SRC, 0),
+                       OPT_STR(OPT_KEY_CONFIG, 0));
 }
 
 /*!
@@ -948,12 +947,10 @@ static int __RARVolNameToFirstName(char *arch, int vtype)
                         goto out;
                 }
                 --vol;
-                int z = 1;
+                int z;
                 int i;
-                for (i = len - 1; i >= 0; i--) {
+                for (z = 1, i = len - 1; i >= 0; i--, z *= 10)
                         arch[pos + i] = 48 + ((vol / z) % 10);
-                        z *= 10;
-                }
 
                 RARCloseArchive(h);
         }
@@ -1719,18 +1716,19 @@ static void dump_stat(struct stat *stbuf)
  *****************************************************************************
  * Checks if archive file |arch| is part of a multipart archive.
  * Identifies all the files that are part of the same multipart archive and
- * located in the same directory as |arch| and stores their paths in |*list|.
+ * located in the same directory as |arch| and stores their paths.
  *
  * Returns the number of files making the multipart archive.
  * Returns 1 if |arch| is not part of a multipart archive.
  * Returns a negative ERAR error code in case of error.
  ****************************************************************************/
-static int collect_files(const char *arch, struct dir_entry_list *list)
+static int collect_files(const char *arch)
 {
         RAROpenArchiveDataEx d;
         int files;
         char *arch_;
         int format;
+        struct dir_entry_list *list;
 
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
@@ -1784,6 +1782,8 @@ static int collect_files(const char *arch, struct dir_entry_list *list)
 
 skip_file_check:
         RARFreeArchiveDataEx(&arc);
+        list = arch_list;
+        dir_list_open(list);
 
         files = 0;
         if (d.Flags & ROADF_VOLUME) {
@@ -1802,7 +1802,10 @@ skip_file_check:
 
         RARCloseArchive(h);
         free(arch_);
+        if (!files)
+                dir_list_free(arch_list);
 
+        /* Do not close the list since it could re-order the entries! */
         return files;
 }
 
@@ -4251,9 +4254,6 @@ static void *rar2_init(struct fuse_conn_info *conn)
         pthread_t t;
         (void)conn;             /* touch */
 
-        if (mount_type == MOUNT_FOLDER)
-                rarconfig_init(OPT_STR(OPT_KEY_SRC, 0),
-                               OPT_STR(OPT_KEY_CONFIG, 0));
         filecache_init();
         dircache_init(&dircache_cb);
         iob_init();
@@ -4283,7 +4283,6 @@ static void rar2_destroy(void *data)
                 pthread_mutex_unlock(&warmup_lock);
         }
 
-        rarconfig_destroy();
         iob_destroy();
         dircache_destroy();
         filecache_destroy();
@@ -4971,58 +4970,53 @@ static const char *error_to_string(int err)
  *****************************************************************************
  *
  ****************************************************************************/
-static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
-                char **src_path_out, char **dst_path_out, int verbose)
+static int check_paths(const char *prog, char *src_path, char *dst_path)
 {
         struct stat st;
+        char *src_path_out;
+        char *dst_path_out;
 
-        char *a1 = realpath(src_path_in, NULL);
+        char *a1 = realpath(src_path, NULL);
 
         if (!a1) {
-                if (verbose)
-                        printf("%s: invalid source: %s\n", prog, src_path_in);
+                printf("%s: invalid source: %s\n", prog, src_path);
                 return -1;
         }
 
 #ifdef __CYGWIN__
-        char *a2 = dst_path_in;
+        char *a2 = dst_path;
 #else
         char *a2;
 
         /* Check if destination path is a pre-mounted FUSE descriptor. */
-        const int fuse_fd = parse_fuse_fd(dst_path_in);
+        const int fuse_fd = parse_fuse_fd(dst_path);
         if (fuse_fd >= 0) {
-                a2 = strdup(dst_path_in);
+                a2 = strdup(dst_path);
         } else {
-                a2 = realpath(dst_path_in, NULL);
+                a2 = realpath(dst_path, NULL);
 
                 if (!a2) {
-                        if (verbose)
-                                printf("%s: invalid mount point: %s\n", prog,
-                                       dst_path_in);
+                        printf("%s: invalid mount point: %s\n", prog,
+                               dst_path);
                         return -1;
                 }
 
                 /* Check if destination path is a directory. */
                 (void)stat(a2, &st);
                 if (!S_ISDIR(st.st_mode)) {
-                        if (verbose)
-                                printf(
-                                    "%s: mount point '%s' is not a directory\n",
-                                    prog, a2);
+                        printf("%s: mount point '%s' is not a directory\n",
+                               prog, a2);
                         return -1;
                 }
         }
 #endif
 
         if (!strcmp(a1, a2)) {
-                if (verbose)
-                        printf("%s: source and mount point are the same: %s\n",
-                               prog, a1);
+                printf("%s: source and mount point are the same: %s\n",
+                       prog, a1);
                 return -1;
         }
 
-        dir_list_open(arch_list);
         (void)stat(a1, &st);
         mount_type = S_ISDIR(st.st_mode) ? MOUNT_FOLDER : MOUNT_ARCHIVE;
 
@@ -5030,45 +5024,31 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
         if (mount_type == MOUNT_ARCHIVE && S_ISBLK(st.st_mode))
                 blkdev_size = get_blkdev_size(&st);
 
-        /* Check file collection at archive mount */
-        if (mount_type == MOUNT_ARCHIVE) {
-                const int ret = collect_files(a1, arch_list);
-                if (ret < 0) {
-                        const int err = -ret;
-                        if (verbose)
-                                printf("%s: cannot open '%s': %s\n", prog, a1,
-                                       error_to_string(err));
-                        return err;
-                }
-                if (ret == 0) {
-                        if (verbose)
-                                printf(
-                                    "%s: cannot find primary file for multipart archive '%s'\n",
-                                    prog, a1);
-                        return 1;
-                }
-        }
-
-        /* Do not try to use 'a1' after this call since dirname() will destroy it! */
 #ifndef __CYGWIN__
         char *tmp = a2;
 #endif
-        *src_path_out = mount_type == MOUNT_FOLDER
-                ? strdup(a1) : strdup(__gnu_dirname(a1));
-        *dst_path_out = strdup(a2);
+        src_path_full = strdup(a1);
+        /* Do not try to use 'a1' after this call since dirname() will destroy it! */
+        src_path_out = mount_type == MOUNT_FOLDER
+                ? a1 : __gnu_dirname(a1);
+        dst_path_out = a2;
+        optdb_save(OPT_KEY_SRC, src_path_out);
+        optdb_save(OPT_KEY_DST, dst_path_out);
         free(a1);
 #ifndef __CYGWIN__
         free(tmp);
 #endif
+        src_path_out = OPT_STR(OPT_KEY_SRC, 0);
+        dst_path_out = OPT_STR(OPT_KEY_DST, 0);
 
         /* Detect a possible file system loop */
         if (mount_type == MOUNT_FOLDER) {
-                if (!strncmp(*src_path_out, *dst_path_out,
-                                        strlen(*src_path_out))) {
-                        if ((*dst_path_out)[strlen(*src_path_out)] == '/') {
+                if (!strncmp(src_path_out, dst_path_out,
+                                        strlen(src_path_out))) {
+                        if ((dst_path_out)[strlen(src_path_out)] == '/') {
                                 memcpy(&fs_loop_mp_stat, &st, sizeof(struct stat));
                                 fs_loop = 1;
-                                char *safe_path = strdup(dst_path_in);
+                                char *safe_path = strdup(dst_path);
                                 char *tmp = basename(safe_path);
                                 fs_loop_mp_root = malloc(strlen(tmp) + 2);
                                 sprintf(fs_loop_mp_root, "/%s", tmp);
@@ -5080,7 +5060,6 @@ static int check_paths(const char *prog, char *src_path_in, char *dst_path_in,
                 }
         }
 
-        /* Do not close the list since it could re-order the entries! */
         return 0;
 }
 
@@ -5610,22 +5589,35 @@ int main(int argc, char *argv[])
 
         /* Check src/dst path */
         if (OPT_SET(OPT_KEY_SRC) && OPT_SET(OPT_KEY_DST)) {
-                char *dst_path = NULL;
-                char *src_path = NULL;
                 const int err = check_paths(argv[0], OPT_STR(OPT_KEY_SRC, 0),
-                                            OPT_STR(OPT_KEY_DST, 0), &src_path,
-                                            &dst_path, 1);
+                                            OPT_STR(OPT_KEY_DST, 0));
                 if (err)
                         return err;
-
-                optdb_save(OPT_KEY_SRC, src_path);
-                optdb_save(OPT_KEY_DST, dst_path);
-                free(src_path);
-                free(dst_path);
         } else {
                 usage(argv[0]);
                 return 0;
         }
+
+        /* This must be initialized before a call to collect_files() */
+        rarconfig_init(OPT_STR(OPT_KEY_SRC, 0),
+                       OPT_STR(OPT_KEY_CONFIG, 0));
+
+        /* Check file collection at archive mount */
+        if (mount_type == MOUNT_ARCHIVE) {
+                const int ret = collect_files(src_path_full);
+                if (ret < 0) {
+                        const int err = -ret;
+                        printf("%s: cannot open '%s': %s\n", argv[0],
+                               src_path_full, error_to_string(err));
+                        return err;
+                }
+                if (ret == 0) {
+                        printf("%s: cannot find primary file for multipart archive '%s'\n",
+                               argv[0], src_path_full);
+                        return 1;
+                }
+        }
+
 
         /* Check I/O buffer and history size */
         if (check_iob(argv[0], 1))
@@ -5677,6 +5669,7 @@ int main(int argc, char *argv[])
 
         /* Clean up what has not already been taken care of */
         fuse_opt_free_args(&args);
+        rarconfig_destroy();
         optdb_destroy();
         if (mount_type == MOUNT_ARCHIVE)
                 dir_list_free(arch_list);
@@ -5684,6 +5677,7 @@ int main(int argc, char *argv[])
                 free(fs_loop_mp_root);
                 free(fs_loop_mp_base);
         }
+        free(src_path_full);
 
         closelog();
 
