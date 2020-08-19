@@ -944,16 +944,18 @@ static int __RARVolNameToFirstName(char *arch, int vtype)
                         break;
 
                 if (vol == 0) {
-                    ret = -1;
-                    goto out;
+                        ret = -1;
+                        goto out;
                 }
                 --vol;
                 int z = 1;
                 int i;
                 for (i = len - 1; i >= 0; i--) {
-                      arch[pos + i] = 48 + ((vol / z) % 10);
-                      z *= 10;
+                        arch[pos + i] = 48 + ((vol / z) % 10);
+                        z *= 10;
                 }
+
+                RARCloseArchive(h);
         }
 
         if (RARReadHeaderEx(h, &header))
