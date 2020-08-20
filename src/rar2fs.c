@@ -1498,13 +1498,14 @@ check_idx:
          * indication that the I/O buffer is set too small.
          */
         if ((off_t)(offset + size) > op->buf->offset) {
+                off_t offset_saved = op->buf->offset;
                 if (sync_thread_read(op))
                         return -EIO;
                 /* If there is still no data assume something went wrong.
                  * Most likely CRC errors or an invalid password in the case 
                  * of encrypted aechives.
                  */
-                if (!op->buf->offset)
+                if (op->buf->offset == offset_saved)
                         return -EIO;
         }
         if ((off_t)(offset + size) > op->buf->offset) {
