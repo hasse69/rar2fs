@@ -3134,19 +3134,18 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
                 if (len_path > len_cmd &&
                                 !strcmp(&path[len_path - len_cmd], file_cmd[cmd])) {
                         char *root;
-                        char *real = (char *)path;
-                        /* From here on the real path is not needed anymore
-                         * and adding it to the cache is simply overkil, thus
-                         * it is safe to modify it! */
+                        char *real = strdup(path);
                         real[len_path - len_cmd] = 0;
                         ABS_ROOT(root, real);
                         if (access(root, F_OK)) {
                                 if (filecache_get(real)) {
                                         memset(stbuf, 0, sizeof(struct stat));
                                         stbuf->st_mode = S_IFREG | 0644;
+                                        free(real);
                                         return 0;
                                 }
                         }
+                        free(real);
                         break;
                 }
                 ++cmd;
@@ -3201,17 +3200,16 @@ static int rar2_getattr2(const char *path, struct stat *stbuf)
                 if (len_path > len_cmd &&
                                 !strcmp(&path[len_path - len_cmd], file_cmd[cmd])) {
                         char *root;
-                        char *real = (char *)path;
-                        /* Frome here on the real path is not needed anymore
-                         * and adding it to the cache is simply overkil, thus
-                         * it is safe to modify it! */
+                        char *real = strdup(path);
                         real[len_path - len_cmd] = 0;
                         ABS_ROOT(root, real);
                         if (filecache_get(real)) {
                                 memset(stbuf, 0, sizeof(struct stat));
                                 stbuf->st_mode = S_IFREG | 0644;
+                                free(real);
                                 return 0;
                         }
+                        free(real);
                         break;
                 }
                 ++cmd;
