@@ -41,13 +41,13 @@
 
 <p>Encrypted archives are supported but since <em>rar2fs</em> is completely non-interactive it requires the archive password to be stored on the local file system in a file in plaintext format. This of course is a major security limitation in itself. If you really need to use this feature, use it wisely. <em>The author(s) of rar2fs will not be held responsible for encrypted information being exposed due to this limitation</em>. If security is really an issue some encryption on file system level should be considered instead. A FUSE based encryption file system, such as <em><a href="http://en.wikipedia.org/wiki/EncFS">encfs</a></em>, has proven to work very well together with <em>rar2fs</em>.</p>
 
-<p><strong>Latest released version of rar2fs is 1.29.0 and can be downloaded <a href="https://github.com/hasse69/rar2fs/releases/download/v1.29.0/rar2fs-1.29.0.tar.gz">here</a>.</strong></p>
+<p><strong>Latest released version of rar2fs is 1.29.1 and can be downloaded <a href="https://github.com/hasse69/rar2fs/releases/download/v1.29.1/rar2fs-1.29.1.tar.gz">here</a>.</strong></p>
 
 <hr>
 
 <p>This program takes use of the free <em>"Portable UnRAR"</em> C++ library and some extensions to it. In order to build the API extensions the complete source tree of unrar is needed.</p>
 
-<p>The latest supported version of the unrar source tree (by <em>Alexander Roshal</em>) can be found here <a href="http://www.rarlab.com/rar/unrarsrc-5.9.2.tar.gz">http://www.rarlab.com/rar/unrarsrc-5.9.2.tar.gz</a>. Later versions, especially minor revision steps, should still be possible to use (should you discover a bug) depending on the level of backward source compatibility it offers. If a new source version breaks the build please report it through the <a href="https://github.com/hasse69/rar2fs/issues">issue tracking</a> system or wait patiently for a new version of rar2fs to be released. New versions will be tested as soon as they are discovered. Also <strong>be aware</strong> that if not linking statically (which is currently the default), changing from one version of the source to another <strong>always</strong> will require that the current version of <em>libunrar.so</em> on the target system is replaced.</p>
+<p>The latest supported version of the unrar source tree (by <em>Alexander Roshal</em>) can be found here <a href="http://www.rarlab.com/rar/unrarsrc-5.9.4.tar.gz">http://www.rarlab.com/rar/unrarsrc-5.9.4.tar.gz</a>. Later versions, especially minor revision steps, should still be possible to use (should you discover a bug) depending on the level of backward source compatibility it offers. If a new source version breaks the build please report it through the <a href="https://github.com/hasse69/rar2fs/issues">issue tracking</a> system or wait patiently for a new version of rar2fs to be released. New versions will be tested as soon as they are discovered. Also <strong>be aware</strong> that if not linking statically (which is currently the default), changing from one version of the source to another <strong>always</strong> will require that the current version of <em>libunrar.so</em> on the target system is replaced.</p>
 
 <hr>
 
