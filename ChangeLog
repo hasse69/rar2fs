@@ -1,5 +1,29 @@
 rar2fs ChangeLog file.
 
+2020-08-22  Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.29.1
+
+        * Fix a problem with the #info function on Cygwin
+
+        * Improve detection of volume extraction errors
+
+        * Fix resolution of first volume name
+
+        * Make sure a bad password is detected for RAR4
+
+        * Require password for encrypted archive mounts
+
+        * Fix a regression with .NNN style volumes
+
+        * Change FUSE library search order
+
+        * Fix invalid library search path
+
+        * Fix compilation errors for some libunrar versions
+
+        * Correct ifdef check for VER_UNKNOWN (#137)
+
 2020-03-08  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.29.0
