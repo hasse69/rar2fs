@@ -739,7 +739,6 @@ AC_LANG_POP
 
 AC_PROG_LN_S
 AC_PROG_MKDIR_P
-AC_PROG_GZIP
 
 # Do some final preparations before we finish
 #
