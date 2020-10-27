@@ -377,7 +377,7 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
   if (hd.UnpSize==INT64NDF)
     wcscpy(UnpSizeText,L"?");
   else
-#if RARVER_MAJOR > 4 && RARVER_MINOR >= 30
+#if ( RARVER_MAJOR > 4 && RARVER_MINOR >= 30 ) || RARVER_MAJOR > 5
     itoa(hd.UnpSize,UnpSizeText,ASIZE(UnpSizeText));
   itoa(hd.PackSize,PackSizeText,ASIZE(PackSizeText));
 #else
@@ -402,7 +402,7 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
         swprintf(RatioStr,ASIZE(RatioStr),L"%d%%",ToPercentUnlim(hd.PackSize,hd.UnpSize));
 
   wchar DateStr[50];
-#if RARVER_MAJOR > 4 && RARVER_MINOR >= 30
+#if ( RARVER_MAJOR > 4 && RARVER_MINOR >= 30 ) || RARVER_MAJOR > 5
   hd.mtime.GetText(DateStr,ASIZE(DateStr),true);
 #else
   hd.mtime.GetText(DateStr,ASIZE(DateStr),true,true);
@@ -464,7 +464,7 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
     wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListMtime),DateStr);
   if (hd.ctime.IsSet())
   {
-#if RARVER_MAJOR > 4 && RARVER_MINOR >= 30
+#if ( RARVER_MAJOR > 4 && RARVER_MINOR >= 30 ) || RARVER_MAJOR > 5
     hd.ctime.GetText(DateStr,ASIZE(DateStr),true);
 #else
     hd.ctime.GetText(DateStr,ASIZE(DateStr),true,true);
@@ -473,7 +473,7 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
   }
   if (hd.atime.IsSet())
   {
-#if RARVER_MAJOR > 4 && RARVER_MINOR >= 30
+#if ( RARVER_MAJOR > 4 && RARVER_MINOR >= 30 ) || RARVER_MAJOR > 5
     hd.atime.GetText(DateStr,ASIZE(DateStr),true);
 #else
     hd.atime.GetText(DateStr,ASIZE(DateStr),true,true);
