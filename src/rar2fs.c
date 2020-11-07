@@ -2116,8 +2116,7 @@ static void set_rarstats(struct filecache_entry *entry_p, RARArchiveDataEx *arc,
                 st_size = GET_RAR_SZ(&arc->hdr);
                 /* Handle the one case discovered so far with archives having
                  * bad size information in the header. */
-                if ((st_size == INT64NDF) && entry_p->flags.raw &&
-                                arc->hdr.HostOS == HOST_UNIX)
+                if ((st_size == INT64NDF) && entry_p->flags.raw)
                         st_size = extract_file_size(entry_p->rar_p,
                                                     entry_p->file_p);
                 mode_t mode = GET_RAR_MODE(&arc->hdr);
