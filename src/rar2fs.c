@@ -2654,6 +2654,7 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                  * later in the header the faked entry will be
                  * invalidated and replaced with the real file stats. */
                 if (is_root_path) {
+                        int populate_cache = 0;
                         char *safe_path = strdup(arc->hdr.FileName);
                         char *tmp = safe_path;
                         while (1) {
@@ -2671,10 +2672,29 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                         __listrar_tocache_forcedir(entry_p, arc,
                                                         safe_path, *first_arch, &d);
                                         __listrar_cachedir(mp2);
+                                        populate_cache = 1;
                                 }
                                 free(mp2);
                         }
                         free(tmp);
+                        if (populate_cache) {
+                                /* Entries have been forced into the cache.
+                                 * Add the child node to each entry. */
+                                safe_path = strdup(arc->hdr.FileName);
+                                tmp = safe_path;
+                                while (1) {
+                                        char *mp2;
+
+                                        safe_path = __gnu_dirname(safe_path);
+                                        if (!CHRCMP(safe_path, '.'))
+                                                break;
+
+                                        ABS_MP2(mp2, path, safe_path);
+                                        __listrar_cachedirentry(mp2);
+                                        free(mp2);
+                               }
+                               free(tmp);
+                       }
                 }
 
                 /* Aliasing is not support for directories */

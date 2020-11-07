@@ -41,7 +41,7 @@
 
 # Example archive #1 (no password, alias)
 #[example1.rar]
-#	# Set seek lengt to 10
+#	# Set seek length to 10
 #	seek-length = 10
 #	alias = "/original_name","/alias_name"
 #
