@@ -48,7 +48,7 @@ using namespace std;
 struct DataSet
 {
   CommandData Cmd;
-#if RARVER_MAJOR > 4 && !(RARVER_MINOR == 0 && RARVER_BETA == 1)
+#if RARVER_MAJOR > 4 && !(RARVER_MAJOR == 5 && RARVER_MINOR == 0 && RARVER_BETA == 1)
   Archive Arc;
   CmdExtract Extract;
 #else
