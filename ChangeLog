@@ -1,5 +1,19 @@
 rar2fs ChangeLog file.
 
+2020-11-08 Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.29.2
+
+        * Fix DLL extension for UnRAR source 6.0.1 and later
+
+        * Handle archives without parent node in file header
+
+        * Fix a problem with corrupt/invalid size field
+
+        * Fix compilation problem for UnRAR source v6.0.1
+
+        * Remove explicit install of compressed man pages
+
 2020-08-22  Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.29.1
