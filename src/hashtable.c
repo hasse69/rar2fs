@@ -241,8 +241,10 @@ void hashtable_entry_delete_subkeys(void *h, const char *key, uint32_t hash)
                 p = b;
                 while (p->next) {
                         p = p->next;
-                        if (strstr(p->key, key) == p->key)
+                        if (strstr(p->key, key) == p->key) {
                                 hashtable_entry_delete_hash(h, p->key, p->hash);
+                                p = b;
+                        }
                 }
                 if (b->key && (strstr(b->key, key) == b->key))
                         hashtable_entry_delete_hash(h, b->key, b->hash);
