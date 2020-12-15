@@ -1,5 +1,11 @@
 rar2fs ChangeLog file.
 
+2020-12-15 Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.29.3
+
+        * Fix a potential crash issue at directory cache invalidation
+
 2020-11-08 Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.29.2

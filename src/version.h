@@ -31,6 +31,6 @@
 
 #define RAR2FS_MAJOR_VER   1
 #define RAR2FS_MINOR_VER   29
-#define RAR2FS_PATCH_LVL   2
+#define RAR2FS_PATCH_LVL   3
 
 #endif
