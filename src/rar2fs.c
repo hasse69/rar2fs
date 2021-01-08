@@ -1605,8 +1605,10 @@ static int lrelease(struct fuse_file_info *fi)
 {
         ENTER_();
 
-        if (FH_TOIO(fi->fh)->type == IO_TYPE_INFO)
+        if (FH_TOIO(fi->fh)->type == IO_TYPE_INFO) {
+                free(FH_TOPATH(fi->fh));
                 free(FH_TOBUF(fi->fh));
+        }
         else if (FH_TOFD(fi->fh))
                 close(FH_TOFD(fi->fh));
         printd(3, "(%05d) %s [0x%-16" PRIx64 "]\n", getpid(), "FREE", fi->fh);
@@ -3039,6 +3041,7 @@ static int syncdir(const char *path)
                 entry_p = dircache_alloc(path);
                 if (entry_p)
                         entry_p->dir_entry_list = *dir_list;
+                free(dir_list);
                 pthread_rwlock_unlock(&dir_access_lock);
         }
 
@@ -3440,6 +3443,7 @@ dump_buff:
                 entry_p = dircache_alloc(path);
                 if (entry_p)
                         entry_p->dir_entry_list = *dir_list2;
+                free(dir_list2);
                 pthread_rwlock_unlock(&dir_access_lock);
         } else {
                 dir_list_free(dir_list2);
