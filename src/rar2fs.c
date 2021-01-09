@@ -3134,7 +3134,7 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         while (1) {
                 safe_path = __gnu_dirname(safe_path);
                 syncdir(safe_path);
-                if (!strcmp(safe_path, "/"))
+                if (*safe_path == '/')
                         break;
         }
         free(tmp);
@@ -3409,15 +3409,13 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
         /* It is possible but not very likely that we end up here
          * due to that the cache has not yet been populated.
          * Scan through the entire file path to force a cache update.
-         * This is the same action as required for a cache miss in
+         * This is a similar action as required for a cache miss in
          * getattr(). */
         char *safe_path = strdup(path);
         char *tmp = safe_path;
-        while (1) {
+        while (*safe_path != '/') {
                 safe_path = __gnu_dirname(safe_path);
                 syncdir(safe_path);
-                if (!strcmp(safe_path, "/"))
-                        break;
         }
         free(tmp);
         pthread_rwlock_rdlock(&dir_access_lock);
@@ -3896,10 +3894,10 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
 
         if (!FH_ISSET(fi->fh)) {
                 if (entry_p->flags.raw) {
-                        FILE *fp = fopen(entry_p->rar_p, "r");
+                        fp = fopen(entry_p->rar_p, "r");
                         if (fp != NULL) {
                                 io = malloc(sizeof(struct io_handle));
-                                op = malloc(sizeof(struct io_context));
+                                op = calloc(1, sizeof(struct io_context));
                                 if (!op || !io)
                                         goto open_error;
                                 printd(3, "Opened %s\n", entry_p->rar_p);
@@ -3947,7 +3945,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                 IOB_RST(buf);
 
                 io = malloc(sizeof(struct io_handle));
-                op = malloc(sizeof(struct io_context));
+                op = calloc(1, sizeof(struct io_context));
                 if (!op || !io)
                         goto open_error;
                 op->buf = buf;
@@ -4036,15 +4034,19 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
 
 open_error:
         pthread_rwlock_unlock(&file_access_lock);
-        if (fp)
-                pclose_(fp, pid);
+        if (fp) {
+                if (entry_p->flags.raw)
+                        fclose(fp);
+                else
+                        pclose_(fp, pid);
+        }
+	free(io);
         if (op) {
                 if (op->entry_p)
                         filecache_freeclone(op->entry_p);
                 free(op);
         }
-        if (buf)
-                free(buf);
+        free(buf);
 
         /*
          * This is the best we can return here. So many different things
