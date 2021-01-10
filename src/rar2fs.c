@@ -856,7 +856,7 @@ static int get_vformat(const char *s, int t, int *l, int *p)
                         vol = strtoul(c + 1, NULL, 10);
                 else
                         vol = 0;
-                pos =  c - s + 1;
+                pos = c - s + 1;
         } else {
                 int dot = 0;
                 len = SLEN - 1;
@@ -1731,7 +1731,9 @@ static int is_first_volume_by_name(const char *arch)
         /* Check for fault */
         if (d.OpenResult && hdl)
                 goto out;
-        if ((d.Flags & ROADF_VOLUME) && (d.Flags & ROADF_FIRSTVOLUME))
+        if (!(d.Flags & ROADF_VOLUME))
+                first = 1;
+        else if((d.Flags & ROADF_VOLUME) && (d.Flags & ROADF_FIRSTVOLUME))
                 first = 1;
 
 out:
@@ -2672,8 +2674,9 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 /* Make sure parent folders are always searched from the first
                  * volume file since sub-folders might actually be placed
                  * elsewhere. Also the alias function depends on this. */
-                if ((d.Flags & ROADF_VOLUME) && __RARVolNameToFirstName(
-                                         *first_arch, !VTYPE(d.Flags))) {
+                if ((d.Flags & ROADF_VOLUME) && !(d.Flags & ROADF_FIRSTVOLUME)
+                                && __RARVolNameToFirstName(
+                                           *first_arch, !VTYPE(d.Flags))) {
                         free(*first_arch);
                         *first_arch = NULL;
                         goto out;
@@ -2865,144 +2868,99 @@ static int f2(SCANDIR_ARG3 e)
         return IS_RXX(e->d_name);
 }
 
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-static int syncdir_scan(const char *dir, const char *root,
-                struct dir_entry_list **next)
-{
-        struct dirent **namelist;
-        unsigned int f;
-        int (*filter[]) (SCANDIR_ARG3) = {f1, f2}; /* f0 not needed */
-        int error_tot = 0;
-        int seek_len = 0;
-        char *first_arch = NULL;
-        int reset = 1;
-
-        ENTER_("%s", dir);
-        for (f = 0; f < (sizeof(filter) / sizeof(filter[0])); f++) {
-                int error_cnt = 0;
-                int final = 0;
-                int vno = 0;
-                int vcnt = f == 0 ? 0 : 1;
-                int i = 0;
-                int n = scandir(root, &namelist, filter[f], alphasort);
-                if (n < 0) {
-                        perror("scandir");
-                        return -errno;
-                }
-                while (i < n) {
-                        int pos;
-                        int oldvno = vno;
-
-                        vno = get_vformat(namelist[i]->d_name, !f, NULL, &pos);
-                        if (i && strncmp(namelist[i]->d_name,
-                                        namelist[i - 1]->d_name,
-                                        pos))
-                                reset = 1;
-                        else if (vno <= oldvno)
-                                reset = 1;
-
-                        char *arch;
-                        ABS_MP2(arch, root, namelist[i]->d_name);
-
-                        if (reset) {
-                                error_cnt = 0;
-                                final = 0;
-                                reset = 0;
-                                seek_len = get_seek_length(arch);
-                                /* We always need to scan at least two volume files */
-                                seek_len = seek_len == 1 ? 2 : seek_len;
-                                free(first_arch);
-                                first_arch = NULL;
-                                vcnt = !!f;
-                        }
-
-                        if (!seek_len || vcnt < seek_len) {
-                                ++vcnt;
-                                if (!final && !error_cnt) {
-                                        if (listrar(dir, next, arch,
-                                                    &first_arch, &final)) {
-                                                ++error_tot;
-                                                ++error_cnt;
-                                        }
-                                }
-                        }
-                        free(arch);
-                        ++i;
-                }
-                for (i = 0; i < n; i++)
-                        free(namelist[i]);
-                free(namelist);
-        }
-
-        free(first_arch);
-
-        return error_tot ? -ENOENT : 0;
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-static int readdir_scan(const char *dir, const char *root,
-                struct dir_entry_list **next,
-                struct dir_entry_list **next2)
-{
-        struct dirent **namelist;
-        unsigned int f;
+struct filter_ops {
+        int (*filter[3]) (SCANDIR_ARG3);
         unsigned int f_end;
-        int (*filter[]) (SCANDIR_ARG3) = {f0, f1, f2};
+        unsigned int f_nrm;
+        unsigned int f_rar;
+        unsigned int f_rxx;
+};
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int __resolve_dir(const char *dir, const char *root,
+                struct dir_entry_list **next,
+                struct dir_entry_list **next2,
+                struct filter_ops *f_ops)
+{
+        struct dirent **namelist;
+        unsigned int f;
         int error_tot = 0;
         int seek_len = 0;
         char *first_arch = NULL;
-        int reset = 1;
+        int ret = 0;
 
-        ENTER_("%s", dir);
-
-        if (*next2) {
-                f_end = (sizeof(filter) / sizeof(filter[0]));
-        } else {
-                /* New RAR files will not be displayed if the cache is in
-                 * effect. Optionally the entry list could be scanned for
-                 * matching filenames and display only those not already
-                 * cached. That would however affect the performance in the
-                 * normal case too and currently the choice is simply to
-                 * ignore such files. */
-                f_end = 1;
-        }
-
-        for (f = 0; f < f_end; f++) {
+        for (f = 0; f < f_ops->f_end; f++) {
+                off_t prev_size = 0;
+                size_t prev_len = 0;
+                int reset = 1;
                 int error_cnt = 0;
                 int final = 0;
                 int vno = 0;
-                int vcnt = f == 0 ? 0 : 1;
+                int vcnt = 0;
                 int i = 0;
-                int n = scandir(root, &namelist, filter[f], alphasort);
+                int n = scandir(root, &namelist, f_ops->filter[f], alphasort);
                 if (n < 0) {
                         perror("scandir");
-                        continue;
+                        ret = -EIO;
+                        goto next_type;
                 }
                 while (i < n) {
-                        if (f == 0) {
+                        int pos = 0;
+                        int pos2 = 0;
+                        char *arch = NULL;
+
+                        if (f == f_ops->f_nrm && next) {
                                 *next = dir_entry_add(*next, namelist[i]->d_name,
                                                       NULL, DIR_E_NRM);
                                 goto next_entry;
                         }
 
-                        int pos;
-                        int oldvno = vno;
-                        vno = get_vformat(namelist[i]->d_name, !!f, NULL, &pos);
-                        if (i && strncmp(namelist[i]->d_name,
-                                        namelist[i - 1]->d_name,
-                                        pos))
-                                reset = 1;
-                        else if (vno <= oldvno)
-                                reset = 1;
-
-                        char *arch;
                         ABS_MP2(arch, root, namelist[i]->d_name);
+
+                        if (f == f_ops->f_rar || f == f_ops->f_rxx) {
+                                int oldvno = vno;
+                                int len;
+                                const char *d_name = namelist[i]->d_name;
+
+                                vno = get_vformat(d_name, f != f_ops->f_rxx,
+                                                        &len, &pos);
+                                pos2 = pos + len;
+                                if (vno <= oldvno)
+                                        reset = 1;
+                        }
+                        if (f == f_ops->f_rar) {
+                                struct stat st;
+	                        size_t len = strlen(namelist[i]->d_name);
+                                if (!stat(arch, &st)) {
+                                        if (vcnt) {
+                                                if (prev_len != len)
+                                                        reset = 1;
+                                                else if (strncmp(namelist[i]->d_name,
+                                                            namelist[i - 1]->d_name,
+                                                            pos))
+                                                        reset = 1;
+                                                else if (strcmp(namelist[i]->d_name
+                                                                    + pos2,
+                                                            namelist[i - 1]->d_name
+                                                                    + pos2))
+                                                        reset = 1;
+                                                else if (prev_len != len)
+                                                        reset = 1;
+                                                else if (st.st_size != (long)prev_size)
+                                                        if (is_first_volume_by_name(arch))
+                                                                reset = 1;
+                                        }
+                                        prev_size = st.st_size;
+                                } else {
+                                        free(arch);
+                                        ret = -EIO;
+                                        goto next_type;
+                                }
+                                prev_len = len;
+                        }
 
                         if (reset) {
                                 error_cnt = 0;
@@ -3013,7 +2971,7 @@ static int readdir_scan(const char *dir, const char *root,
                                 seek_len = seek_len == 1 ? 2 : seek_len;
                                 free(first_arch);
                                 first_arch = NULL;
-                                vcnt = !f;
+                                vcnt = f == f_ops->f_rxx;
                         }
 
                         if (!seek_len || vcnt < seek_len) {
@@ -3026,23 +2984,84 @@ static int readdir_scan(const char *dir, const char *root,
                                         }
                                 }
                         }
-                        if (error_cnt)
+                        if (error_cnt && next)
                                 *next = dir_entry_add(*next, namelist[i]->d_name,
                                                       NULL, DIR_E_NRM);
-
                         free(arch);
 
 next_entry:
                         ++i;
                 }
+
+next_type:
                 for (i = 0; i < n; i++)
                         free(namelist[i]);
                 free(namelist);
+                if (ret)
+                        break;
         }
 
         free(first_arch);
 
-        return error_tot;
+        return ret < 0 ? ret : error_tot;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int syncdir_scan(const char *dir, const char *root,
+                struct dir_entry_list **next)
+{
+        struct filter_ops f_ops;
+
+        ENTER_("%s", dir);
+
+        f_ops.filter[0] = f1;
+        f_ops.filter[1] = f2;
+        f_ops.f_end = 2;
+        f_ops.f_nrm = ~0;
+        f_ops.f_rar = 0;
+        f_ops.f_rxx = 1;
+
+        return __resolve_dir(dir, root, NULL, next, &f_ops);
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int readdir_scan(const char *dir, const char *root,
+                struct dir_entry_list **next,
+                struct dir_entry_list **next2)
+{
+        struct filter_ops f_ops;
+
+        ENTER_("%s", dir);
+
+        if (*next2) {
+                f_ops.filter[0] = f0;
+                f_ops.filter[1] = f1;
+                f_ops.filter[2] = f2;
+                f_ops.f_end = 3;
+                f_ops.f_nrm = 0;
+                f_ops.f_rar = 1;
+                f_ops.f_rxx = 2;
+        } else {
+                /* New RAR files will not be displayed if the cache is in
+                 * effect. Optionally the entry list could be scanned for
+                 * matching filenames and display only those not already
+                 * cached. That would however affect the performance in the
+                 * normal case too and currently the choice is simply to
+                 * ignore such files. */
+                f_ops.filter[0] = f0;
+                f_ops.f_end = 1;
+                f_ops.f_nrm = 0;
+                f_ops.f_rar = ~0;
+                f_ops.f_rxx = ~0;
+        }
+
+        return __resolve_dir(dir, root, next, next2, &f_ops);
 }
 
 /*!
@@ -3082,7 +3101,7 @@ static int syncdir(const char *path)
                 if (res) {
                         dir_list_free(dir_list);
                         free(dir_list);
-                        return res;
+                        return res < 0 ? res : 0;
                 }
 
                 pthread_rwlock_wrlock(&dir_access_lock);
@@ -3404,6 +3423,7 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
 {
         ENTER_("%s", (path ? path : ""));
 
+        int ret = 0;
         (void)offset;           /* touch */
 
         assert(FH_ISSET(fi->fh) && "bad I/O handle");
@@ -3444,7 +3464,8 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
                         }
                 }
                 ABS_ROOT(root, path);
-                if (readdir_scan(path, root, &next, &next2)) {
+                ret = readdir_scan(path, root, &next, &next2);
+                if (ret) {
                         __dircache_invalidate(path);
                         goto dump_buff_nocache;
                 }
@@ -3499,7 +3520,7 @@ dump_buff:
         dump_dir_list(path, buffer, filler, &dir_list);
         dir_list_free(&dir_list);
 
-        return 0;
+        return ret;
 
 dump_buff_nocache:
 
@@ -3511,7 +3532,7 @@ dump_buff_nocache:
         dir_list_free(dir_list2);
         free(dir_list2);
 
-        return 0;
+        return ret < 0 ? ret : 0;
 }
 
 /*!
