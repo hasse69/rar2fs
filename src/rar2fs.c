@@ -1750,7 +1750,7 @@ static int collect_files(const char *arch)
 
         arch_ = strdup(arch);
         format = (d.Flags & ROADF_NEWNUMBERING) ? 0 : 1;
-        if (d.Flags & ROADF_VOLUME) {
+        if (d.Flags & ROADF_VOLUME && !(d.Flags & ROADF_FIRSTVOLUME)) {
                 if (__RARVolNameToFirstName(arch_, format)) {
                         free(arch_);
                         return 0;
