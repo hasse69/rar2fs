@@ -3441,8 +3441,8 @@ dump_buff:
                 entry_p = dircache_alloc(path);
                 if (entry_p)
                         entry_p->dir_entry_list = *dir_list2;
-                free(dir_list2);
                 pthread_rwlock_unlock(&dir_access_lock);
+                free(dir_list2);
         } else {
                 dir_list_free(dir_list2);
                 free(dir_list2);
@@ -3526,6 +3526,7 @@ static int rar2_readdir2(const char *path, void *buffer,
                 if (entry_p)
                         entry_p->dir_entry_list = *dir_list;
                 pthread_rwlock_unlock(&dir_access_lock);
+                free(dir_list);
         } else {
                 dir_list_free(dir_list);
                 free(dir_list);
