@@ -1717,6 +1717,31 @@ static void dump_stat(struct stat *stbuf)
 
 /*!
  *****************************************************************************
+ *
+ ****************************************************************************/
+static int is_first_volume_by_name(const char *arch)
+{
+        RAROpenArchiveDataEx d;
+        memset(&d, 0, sizeof(RAROpenArchiveDataEx));
+        d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
+        d.OpenMode = RAR_OM_LIST;
+        HANDLE hdl = RAROpenArchiveEx(&d);
+        int first = 0;
+
+        /* Check for fault */
+        if (d.OpenResult && hdl)
+                goto out;
+        if ((d.Flags & ROADF_VOLUME) && (d.Flags & ROADF_FIRSTVOLUME))
+                first = 1;
+
+out:
+        RARCloseArchive(hdl);
+
+        return first;
+}
+
+/*!
+ *****************************************************************************
  * Checks if archive file |arch| is part of a multipart archive.
  * Identifies all the files that are part of the same multipart archive and
  * located in the same directory as |arch| and stores their paths.
@@ -1732,28 +1757,45 @@ static int collect_files(const char *arch)
         char *arch_;
         int format;
         struct dir_entry_list *list;
+        int vol = -1;
+        int pos;
+        int len;
 
         memset(&d, 0, sizeof(RAROpenArchiveDataEx));
         d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
         d.OpenMode = RAR_OM_LIST_INCSPLIT;
         d.Callback = list_callback_noswitch;
         d.UserData = (LPARAM)arch;
+        HANDLE h;
 
-        HANDLE h = RAROpenArchiveEx(&d);
+        arch_ = strdup(arch);
+        if (!arch_)
+                return -ERAR_NO_MEMORY;
+
+again:
+        h = RAROpenArchiveEx(&d);
 
         /* Check for fault */
         if (d.OpenResult != ERAR_SUCCESS) {
                 if (h)
                         RARCloseArchive(h);
+                free(arch_);
                 return -d.OpenResult;
         }
 
-        arch_ = strdup(arch);
-        format = (d.Flags & ROADF_NEWNUMBERING) ? 0 : 1;
+        format = IS_NNN(arch) ? 1 : VTYPE(d.Flags);
+        if (vol == -1)
+                vol = get_vformat(arch, format, &len, &pos);
         if (d.Flags & ROADF_VOLUME && !(d.Flags & ROADF_FIRSTVOLUME)) {
-                if (__RARVolNameToFirstName(arch_, format)) {
+                if (vol) {
+                        char *tmp;
+                        RARCloseArchive(h);
+                        --vol;
+                        tmp = get_vname(format, arch_, vol, len, pos);
                         free(arch_);
-                        return 0;
+                        arch_ = tmp;
+                        d.ArcName = (char *)arch_;
+                        goto again;
                 }
         }
 
@@ -1790,13 +1832,19 @@ skip_file_check:
 
         files = 0;
         if (d.Flags & ROADF_VOLUME) {
+                off_t prev_size = 0;
                 while (1) {
-                        if (access(arch_, F_OK))
-                               break;
+                        struct stat st;
+                        if (stat(arch_, &st))
+                                break;
+                        if (files && st.st_size != prev_size)
+                                if (is_first_volume_by_name(arch_))
+                                        break;
+                        prev_size = st.st_size;
                         list = dir_entry_add(list, arch_, NULL,
                                                 DIR_E_NRM);
                         ++files;
-                        RARNextVolumeName(arch_, format);
+                        RARNextVolumeName(arch_, !format);
                 }
         } else {
                 (void)dir_entry_add(list, arch_, NULL, DIR_E_NRM);
