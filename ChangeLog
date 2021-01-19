@@ -1,5 +1,17 @@
 rar2fs ChangeLog file.
 
+2021-01-18 Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.29.4
+
+        * Rework volume file name resolution
+
+        * Rework collection of volume parts at file mount
+
+        * Fix a few bugs with different severity
+
+        * Fix some confirmed memory leaks
+
 2020-12-15 Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.29.3
