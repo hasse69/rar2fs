@@ -27,8 +27,8 @@
 #       alias = <"filename","alias">
 #
 # The optional path format of the archive specifier is an absolute path
-# relative to the mount point root and not the soutce folder. For volumes
-# the archive name must be that of the first file in the set
+# relative to the mount point root and not the source folder. For volumes
+# the archive name must be that of the first file in the set.
 #
 # An 'alias' entry must always start with a '/' since it is expressed as an
 # absolute path relative to the root of the archive.

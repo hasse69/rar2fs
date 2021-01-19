@@ -5535,9 +5535,11 @@ static void print_help()
         printf("    --date-rar\t\t    use file date from main archive file(s)\n");
         printf("    --config=file\t    config file name [source/.rarconfig]\n");
         printf("    --no-inherit-perm\t    do not inherit file permission mode from archive\n");
+        printf("\n");
 #ifdef HAVE_SETLOCALE
-        printf("\n    -o locale=LOCALE        set the locale for file names (Default: according to LC_*/LC_CTYPE)\n");
+        printf("    -o locale=LOCALE        set the locale for file names (default: according to LC_*/LC_CTYPE)\n");
 #endif
+        printf("    -o warmup[=THREADS]     start background cache warmup threads (default: 5)\n");
 }
 
 /* FUSE API specific keys continue where 'optdb' left off */
@@ -5549,9 +5551,9 @@ enum {
 static struct fuse_opt rar2fs_opts[] = {
 #ifdef HAVE_SETLOCALE
         RAR2FS_MOUNT_OPT("locale=%s", locale, 0),
+#endif
         RAR2FS_MOUNT_OPT("warmup=%d", warmup, 0),
         RAR2FS_MOUNT_OPT("warmup", warmup, 5),
-#endif
 
         FUSE_OPT_KEY("-V",              OPT_KEY_VERSION),
         FUSE_OPT_KEY("--version",       OPT_KEY_VERSION),
@@ -5763,8 +5765,8 @@ int main(int argc, char *argv[])
         }
 #endif
 
-	/*
-	 * All static setup is ready, the rest is taken from the configuration.
+        /*
+         * All static setup is ready, the rest is taken from the configuration.
          * Continue in work() function which will not return until the process
          * is about to terminate.
          */

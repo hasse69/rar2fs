@@ -40,8 +40,8 @@
  * interoperability between 32- and 64-bit platforms, also with
  * respect to different byte order (endian).
  * This version of the header is kept here for reference only and
- ' also in the rather unlikely case some safe conversion can be
- ' made to version 1 or later. */
+ * also in the rather unlikely case some safe conversion can be
+ * made to version 1 or later. */
 struct idx_head_broken {
         uint32_t magic;
         uint16_t version;
