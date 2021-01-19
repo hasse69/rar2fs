@@ -2933,9 +2933,9 @@ static int __resolve_dir(const char *dir, const char *root,
                         }
                         if (f == f_ops->f_rar) {
                                 struct stat st;
-	                        size_t len = strlen(namelist[i]->d_name);
+                                size_t len = strlen(namelist[i]->d_name);
                                 if (!stat(arch, &st)) {
-                                        if (vcnt) {
+                                        if (vcnt && !reset) {
                                                 if (prev_len != len)
                                                         reset = 1;
                                                 else if (strncmp(namelist[i]->d_name,
