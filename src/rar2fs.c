@@ -2601,8 +2601,10 @@ static void __listrar_tocache_forcedir(struct filecache_entry *entry_p,
  ****************************************************************************/
 static inline void __listrar_cachedir(const char *mp)
 {
+        pthread_rwlock_wrlock(&dir_access_lock);
         if (!dircache_get(mp))
 		(void)dircache_alloc(mp);
+        pthread_rwlock_unlock(&dir_access_lock);
 }
 
 /*!
@@ -2615,13 +2617,15 @@ static void __listrar_cachedirentry(const char *mp)
         char *tmp = safe_path;
         safe_path = __gnu_dirname(safe_path);
         if (CHRCMP(safe_path, '/')) {
+                pthread_rwlock_wrlock(&dir_access_lock);
                 struct dircache_entry *dce = dircache_get(safe_path);
                 if (dce) {
-                        char *tmp = strdup(mp);
-                        dir_entry_add(&dce->dir_entry_list, basename(tmp),
+                        char *tmp2 = strdup(mp);
+                        dir_entry_add(&dce->dir_entry_list, basename(tmp2),
                                       NULL, DIR_E_RAR);
-                        free(tmp);
+                        free(tmp2);
                 }
+                pthread_rwlock_unlock(&dir_access_lock);
         }
         free(tmp);
 }
@@ -4330,6 +4334,11 @@ static int __dircache_stale(const char *path, struct dir_entry_list *dir)
                 free(mp);
         }
         pthread_rwlock_unlock(&file_access_lock);
+        /* Promote to a wrlock (might already be) */
+        pthread_rwlock_unlock(&dir_access_lock);
+        pthread_rwlock_wrlock(&dir_access_lock);
+        dircache_invalidate(path);
+
         return 0;
 }
 

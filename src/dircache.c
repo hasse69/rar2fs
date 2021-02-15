@@ -192,7 +192,6 @@ struct dircache_entry *dircache_get(const char *path)
 #endif
                                 if (user_cb.stale)
                                         user_cb.stale(path, &e->dir_entry_list);
-                                dircache_invalidate(path);
                                 return NULL;
                         }
                 }
