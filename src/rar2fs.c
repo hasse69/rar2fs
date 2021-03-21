@@ -2992,6 +2992,7 @@ static int __resolve_dir(const char *dir, const char *root,
                                 *next = dir_entry_add(*next, namelist[i]->d_name,
                                                       NULL, DIR_E_NRM);
                         free(arch);
+                        arch = NULL;
 
 next_entry:
                         ++i;
