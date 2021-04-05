@@ -68,8 +68,10 @@ static void *__alloc()
  *****************************************************************************
  *
  ****************************************************************************/
-static void __free(void *data)
+static void __free(const char *key, void *data)
 {
+        (void)key;
+
         struct filecache_entry *e = data;
         if (e) 
                 FREE_CACHE_MEM(e);

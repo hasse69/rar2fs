@@ -133,7 +133,7 @@ static void hashtable_entry_delete_hash(void *h, const char *key,
                 p = p->next;
                 if (p->key && !strcmp(key, p->key)) {
                         if (p->user_data)
-                                ht->ops.free(p->user_data);
+                                ht->ops.free(p->key, p->user_data);
                         prev->next = p->next;
                         free(p->key);
                         free(p);
@@ -147,17 +147,16 @@ static void hashtable_entry_delete_hash(void *h, const char *key,
          * Most likely it is in the bucket, but double check.
          */
         if (b->key && !strcmp(b->key, key)) {
+                if (b->user_data)
+                        ht->ops.free(b->key, b->user_data);
                 /* Need to relink collision chain */
                 if (b->next) {
                         struct hash_table_entry *tmp = b->next;
-                        if (b->user_data)
-                                ht->ops.free(b->user_data);
                         free(b->key);
                         memcpy(b, b->next,
                                     sizeof(struct hash_table_entry));
                         free(tmp);
                 } else {
-                        ht->ops.free(b->user_data);
                         free(b->key);
                         memset(b, 0, sizeof(struct hash_table_entry));
                 }
@@ -186,12 +185,12 @@ void hashtable_entry_delete(void *h, const char *key)
                                 struct hash_table_entry *p = next;
                                 next = p->next;
                                 if (p->user_data)
-                                        ht->ops.free(p->user_data);
+                                        ht->ops.free(p->key, p->user_data);
                                 free(p->key);
                                 free(p);
                         }
                         if (b->user_data)
-                                ht->ops.free(b->user_data);
+                                ht->ops.free(b->key, b->user_data);
                         free(b->key);
                         memset(b, 0, sizeof(struct hash_table_entry));
                 }
@@ -208,14 +207,11 @@ void hashtable_entry_delete_subkeys(void *h, const char *key, uint32_t hash)
         struct hash_table_entry *p;
         struct hash_table_entry *b;
 
-/* Use a linear search algorithm, at least until we can make sure that
- * parent and child nodes are all populated in the cache together, i.e. no
- * broken chains. */
 #if 0
         p = &ht->bucket[hash & (ht->size - 1)];
         b = p;
 
-        /* Search collision chain first */
+        /* Search collision chain first to reduce bucket updates */
         while (p->next) {
                 p = p->next;
                 if (p->key && (hash == p->hash) &&
@@ -223,6 +219,7 @@ void hashtable_entry_delete_subkeys(void *h, const char *key, uint32_t hash)
                         hashtable_entry_delete_subkeys(h, key,
                                                        get_hash(p->key, 0));
                         hashtable_entry_delete_hash(h, p->key, hash);
+                        p = b;
                 }
         }
         /* Finally check the bucket */
@@ -236,9 +233,11 @@ void hashtable_entry_delete_subkeys(void *h, const char *key, uint32_t hash)
         size_t i;
         (void)hash;
 
+        /* Linear search, slower but more "safe" */
         for (i = 0; i < ht->size; i++) {
                 b = &ht->bucket[i];
                 p = b;
+                /* Search collision chain first to reduce bucket updates */
                 while (p->next) {
                         p = p->next;
                         if (strstr(p->key, key) == p->key) {
@@ -246,6 +245,7 @@ void hashtable_entry_delete_subkeys(void *h, const char *key, uint32_t hash)
                                 p = b;
                         }
                 }
+                /* Finally check the bucket */
                 if (b->key && (strstr(b->key, key) == b->key))
                         hashtable_entry_delete_hash(h, b->key, b->hash);
         }

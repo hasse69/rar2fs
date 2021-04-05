@@ -35,7 +35,7 @@
 
 struct hash_table_ops {
         void *(*alloc)();
-        void (*free)(void *);
+        void (*free)(const char *, void *);
 };
 
 struct hash_table_entry {

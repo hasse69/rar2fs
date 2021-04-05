@@ -42,7 +42,8 @@ struct dircache_entry {
 };
 
 struct dircache_cb {
-        int (*stale)(const char *path, struct dir_entry_list *);
+        int (*stale)(const char *path);
+        int (*free)(const char *path, struct dir_entry_list *);
 };
 
 struct dircache_entry *dircache_alloc(const char *path);

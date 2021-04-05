@@ -333,8 +333,10 @@ static void *__alloc()
  *****************************************************************************
  *
  ****************************************************************************/
-static void __free(void *data)
+static void __free(const char *key, void *data)
 {
+        (void)key;
+
         struct config_entry *e = data;
         free(e->password);
         free(e->password_w);

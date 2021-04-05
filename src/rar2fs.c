@@ -4322,18 +4322,33 @@ static void *warmup_task(void *data)
  *****************************************************************************
  *
  ****************************************************************************/
-static int __dircache_stale(const char *path, struct dir_entry_list *dir)
+static int __dircache_free(const char *path, struct dir_entry_list *dir)
 {
-        struct dir_entry_list *next = dir->next;
+        struct dir_entry_list *next;
+
         pthread_rwlock_wrlock(&file_access_lock);
-        while (next) {
-                char *mp;
-                ABS_MP2(mp, path,  next->entry.name);
-                filecache_invalidate(mp);
-                next = next->next;
-                free(mp);
+        if (dir) {
+                next = dir->next;
+                while (next) {
+                        char *mp;
+                        ABS_MP2(mp, path, next->entry.name);
+                        filecache_invalidate(mp);
+                        next = next->next;
+                        free(mp);
+                }
         }
+        filecache_invalidate(path);
         pthread_rwlock_unlock(&file_access_lock);
+
+        return 0;
+}
+
+/*!
+ *****************************************************************************
+ *
+ ****************************************************************************/
+static int __dircache_stale(const char *path)
+{
         /* Promote to a wrlock (might already be) */
         pthread_rwlock_unlock(&dir_access_lock);
         pthread_rwlock_wrlock(&dir_access_lock);
@@ -4344,6 +4359,7 @@ static int __dircache_stale(const char *path, struct dir_entry_list *dir)
 
 static struct dircache_cb dircache_cb = {
         .stale = __dircache_stale,
+        .free = __dircache_free,
 };
 
 /*!

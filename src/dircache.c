@@ -68,9 +68,11 @@ static void *__alloc()
  *****************************************************************************
  *
  ****************************************************************************/
-static void __free(void *data)
+static void __free(const char *key, void *data)
 {
         struct dircache_entry *e = data;
+        if (user_cb.free)
+                user_cb.free(key, e ? &e->dir_entry_list : NULL);
         if (e)
                 dir_list_free(&e->dir_entry_list);
         free(e);
@@ -191,7 +193,7 @@ struct dircache_entry *dircache_get(const char *path)
                         if (ret || st.st_mtime != e->mtim.tv_sec) {
 #endif
                                 if (user_cb.stale)
-                                        user_cb.stale(path, &e->dir_entry_list);
+                                        user_cb.stale(path);
                                 return NULL;
                         }
                 }
