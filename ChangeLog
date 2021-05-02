@@ -1,5 +1,19 @@
 rar2fs ChangeLog file.
 
+2021-04-25 Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.29.5
+
+        * Reset pointer after free
+
+        * Change approach for cache invalidation
+
+        * Add missing cache entry invalidations
+
+        * Fix spelling/wording/missing help text and option
+
+        * Fix race condition at directory cache invalidation
+
 2021-01-18 Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.29.4
