@@ -1,4 +1,3 @@
-
 /*
     Copyright (C) 2009 Hans Beckerus (hans.beckerus@gmail.com)
 
@@ -208,6 +207,7 @@ static int __hashtable_entry_delete_subkeys(void *h, const char *key,
         struct hash_table *ht = h;
         struct hash_table_entry *p;
         struct hash_table_entry *b;
+        struct hash_table_entry *n;
 
         if (++level > MAX_SUBKEY_LEVELS)
                 return level;
@@ -217,25 +217,28 @@ static int __hashtable_entry_delete_subkeys(void *h, const char *key,
 
         /* Search collision chain first to reduce bucket updates */
         while (p->next) {
+                n = p;
                 p = p->next;
-                if ((hash == p->hash) && (strstr(p->key, key) == p->key)) {
+                if ((hash == b->hash) && (strstr(p->key, key) == p->key)) {
                         level = __hashtable_entry_delete_subkeys(h, key,
                                                          get_hash(p->key, 0),
                                                          level);
+                        if (level >= MAX_SUBKEY_LEVELS)
+                                return level;
                         hashtable_entry_delete_hash(h, p->key, hash);
-                        if (level > MAX_SUBKEY_LEVELS)
-                                goto out;
-                        p = b;
+                        p = n;
                 }
         }
         /* Finally check the bucket */
         if (b->key && (hash == b->hash) && (strstr(b->key, key) == b->key)) {
                 level = __hashtable_entry_delete_subkeys(h, key,
-                                                 get_hash(b->key, 0), level);
+                                                 get_hash(b->key, 0),
+                                                 level);
+                if (level >= MAX_SUBKEY_LEVELS)
+                        return level;
                 hashtable_entry_delete_hash(h, b->key, hash);
         }
 
-out:
         --level;
         return level;
 }
@@ -250,6 +253,7 @@ void hashtable_entry_delete_subkeys(void *h, const char *key, uint32_t hash)
         struct hash_table *ht = h;
         struct hash_table_entry *p;
         struct hash_table_entry *b;
+        struct hash_table_entry *n;
         size_t i;
 
         if (!__hashtable_entry_delete_subkeys(h, key, hash, 0))
@@ -261,10 +265,11 @@ void hashtable_entry_delete_subkeys(void *h, const char *key, uint32_t hash)
                 p = b;
                 /* Search collision chain first to reduce bucket updates */
                 while (p->next) {
+                        n = p;
                         p = p->next;
                         if (strstr(p->key, key) == p->key) {
                                 hashtable_entry_delete_hash(h, p->key, p->hash);
-                                p = b;
+                                p = n;
                         }
                 }
                 /* Finally check the bucket */
