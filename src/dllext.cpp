@@ -86,7 +86,9 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveDataEx **NN)
 
     if (!*NN)
     {
-      *NN = new RARArchiveDataEx;
+      *NN = new (std::nothrow) RARArchiveDataEx;
+      if (!*NN)
+        return ERAR_NO_MEMORY;
     }
     N = *NN;
     memcpy(&N->hdr, &h, sizeof(h));
@@ -180,8 +182,6 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveDataEx **NN)
       }
     }
 #endif
-    // Skip to next header
-    return RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
   }
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
   catch (std::bad_alloc&) // Catch 'new' exception.
@@ -191,9 +191,11 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveDataEx **NN)
       *NN = NULL;
     }
     cerr << "RARListArchiveEx() caught std:bac_alloc error" << endl;
+    return ERAR_NO_MEMORY;
   }
 #endif
-  return 0;
+  // Skip to next header
+  return RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
 }
 
 void PASCAL RARFreeArchiveDataEx(RARArchiveDataEx **NN)
