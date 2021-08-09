@@ -36,7 +36,7 @@
 #define DEBUG_ 5
 #endif
 
-#if defined ( DEBUG_ )
+#if DEBUG_ > 0
 #if DEBUG_ > 2
 #define ELVL_ 2
 #else
@@ -51,7 +51,7 @@
 #define ENTER_(...)
 #endif
 
-#ifdef DEBUG_
+#if DEBUG_ > 0
 #define printd(l, fmt, ...) \
         do{ \
                 if (l <= DEBUG_) \

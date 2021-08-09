@@ -35,16 +35,11 @@
 #define IOB_SZ_DEFAULT           (4 * 1024 * 1024)
 #ifdef USE_STATIC_IOB_
 #define IOB_SZ                   IOB_SZ_DEFAULT
-#define IOB_HIST_SZ              (IOB_SZ/2)
+#define IOB_HIST_SZ              (IOB_SZ / 2)
 #else
 #define IOB_SZ                   (iob_sz)
 #define IOB_HIST_SZ              (iob_hist_sz)
 #endif
-
-#define IOB_NO_HIST 0
-#define IOB_SAVE_HIST 1
-
-#define IOB_RST(b)  (memset((b), 0, sizeof(struct iob) + IOB_SZ))
 
 struct idx_info {
         int fd;
@@ -53,22 +48,25 @@ struct idx_info {
 };
 
 struct iob {
+        int fd;
         struct idx_info idx;
         off_t offset;
         volatile size_t ri;
         volatile size_t wi;
         size_t used;
+        pthread_mutex_t lock;
+        pthread_mutex_t io_lock;
         uint8_t data_p[];
 };
 
 size_t
-iob_write(struct iob *dest, FILE *fp, int hist);
+iob_write(struct iob *iob, int fd);
 
 size_t
-iob_read(char *dest, struct iob *src, size_t size, size_t off);
+iob_read(char *dest, struct iob *iob, size_t size, size_t off);
 
 size_t
-iob_copy(char *dest, struct iob *src, size_t size, size_t pos);
+iob_copy(char *dest, struct iob *iob, size_t size, size_t pos);
 
 extern size_t iob_hist_sz;
 extern size_t iob_sz;
@@ -78,6 +76,15 @@ iob_init();
 
 void
 iob_destroy();
+
+struct iob *
+iob_alloc(size_t size);
+
+void
+iob_free(struct iob *iob);
+
+int
+iob_full(struct iob *iob);
 
 #endif
 
