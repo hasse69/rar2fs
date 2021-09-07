@@ -174,7 +174,7 @@ int optdb_save(int opt, const char *s)
         if (s1)
                 free(s1);
 
-#if DEBUG_ > 0
+#ifdef DEBUG_
         {
                 int i;
                 printd(5, "option %d : ", opt);

@@ -78,10 +78,10 @@
 #define MOUNT_ARCHIVE 1
 
 #define RD_IDLE 0
-#define RD_TERM 1
+#define RD_WAKEUP 1
 #define RD_SYNC_NOREAD 2
 #define RD_SYNC_READ 3
-#define RD_ASYNC_READ 4
+#define RD_READ_ASYNC 4
 
 /*#define DEBUG_READ*/
 
@@ -92,7 +92,6 @@ struct volume_handle {
 
 struct io_context {
         FILE* fp;
-        int pfd[2];
         off_t pos;
         struct iob *buf;
         pid_t pid;
@@ -128,6 +127,7 @@ struct io_handle {
         char *path;                             /* type = all */
 };
 
+#define FH_ZERO(fh)            ((fh) = 0)
 #define FH_ISSET(fh)           (fh)
 #define FH_SETCONTEXT(fh, v)   (FH_TOIO(fh)->u.context = (v))
 #define FH_SETFD(fh, v)        (FH_TOIO(fh)->u.fd = (v))
@@ -393,10 +393,8 @@ static int __wait_thread(struct io_context *op)
 static int __wake_thread(struct io_context *op, int req)
 {
         pthread_mutex_lock(&op->rd_req_mutex);
-        if (req != RD_ASYNC_READ) {
-                while (op->rd_req) /* sync */
-                        pthread_cond_wait(&op->rd_req_cond, &op->rd_req_mutex);
-        }
+        while (op->rd_req) /* sync */
+                pthread_cond_wait(&op->rd_req_cond, &op->rd_req_mutex);
         op->rd_req = req;
         pthread_cond_signal(&op->rd_req_cond);
         pthread_mutex_unlock(&op->rd_req_mutex);
@@ -639,7 +637,8 @@ static struct filecache_entry *path_lookup_miss(const char *path, struct stat *s
 
 /*!
  *****************************************************************************
- * This function must always be called with an aquired wrlock.
+ * This function must always be called with an aquired rdlock but never
+ * a wrlock. It is however possible that the rdlock is promoted to a wrlock.
  ****************************************************************************/
 static struct filecache_entry *path_lookup(const char *path, struct stat *stbuf)
 {
@@ -653,6 +652,8 @@ static struct filecache_entry *path_lookup(const char *path, struct stat *stbuf)
         e_p = path_lookup_miss(path, stbuf);
         if (!e_p) {
                 if (e2_p && e2_p->flags.unresolved) {
+                        pthread_rwlock_unlock(&file_access_lock);
+                        pthread_rwlock_wrlock(&file_access_lock);
                         e2_p->flags.unresolved = 0;
                         if (stbuf)
                                 memcpy(stbuf, &e2_p->stat, sizeof(struct stat));
@@ -700,40 +701,33 @@ static int __stop_child(pid_t pid)
  *****************************************************************************
  *
  ****************************************************************************/
-static int popen_(struct io_context *op, pid_t *cpid, int *pfd)
+static FILE *popen_(const struct filecache_entry *entry_p, pid_t *cpid)
 {
+        int fd = -1;
+        int pfd[2] = {-1,};
+
         pid_t pid;
-        int ret;
-        struct filecache_entry *entry_p = op->entry_p;
-
-        pfd[0] = -1;
-        pfd[1] = -1;
-
-        /* For folder mounts we need to perform an additional dummy
-         * extraction attempt to avoid feeding the file descriptor
-         * with garbage data in case of wrong password or CRC errors. */
-        if (!entry_p->flags.dry_run_done && mount_type == MOUNT_FOLDER) {
-                ret = extract_rar(entry_p->rar_p, entry_p->file_p, NULL);
-                if (ret && ret != ERAR_UNKNOWN)
-                        goto error;
-                entry_p->flags.dry_run_done = 1;
-        }
-
         if (pipe(pfd) == -1) {
                 perror("pipe");
                 goto error;
         }
-#ifdef F_SETPIPE_SZ
-        /* Increase pipe capacity to some common limit when requested from an
-         * unprivileged process. */
-        fcntl(pfd[0], F_SETPIPE_SZ, 1000000);
-#endif
 
         pid = fork();
         if (pid == 0) {
+                int ret = 0;
                 setpgid(getpid(), 0);
                 close(pfd[0]);  /* Close unused read end */
-                ret = extract_rar(entry_p->rar_p, entry_p->file_p, op);
+                /* For folder mounts we need to perform an additional dummy
+                 * extraction attempt to avoid feeding the file descriptor
+                 * with garbage data in case of wrong password or CRC errors. */
+                if (mount_type == MOUNT_FOLDER)
+                        ret = extract_rar(entry_p->rar_p,
+                                          entry_p->file_p,
+                                          NULL);
+                if (!ret || ret == ERAR_UNKNOWN)
+                        ret = extract_rar(entry_p->rar_p,
+                                          entry_p->file_p,
+                                          (void *)(uintptr_t)pfd[1]);
                 close(pfd[1]);
                 _exit(ret);
         } else if (pid < 0) {
@@ -744,28 +738,27 @@ static int popen_(struct io_context *op, pid_t *cpid, int *pfd)
         /* This is the parent process. */
         close(pfd[1]);          /* Close unused write end */
         *cpid = pid;
-        return pfd[0];
+        return fdopen(pfd[0], "r");
 
 error:
+        if (fd >= 0)
+                close(fd);
         if (pfd[0] >= 0)
                 close(pfd[0]);
         if (pfd[1] >= 0)
                 close(pfd[1]);
 
-        return -1;
+        return NULL;
 }
 
 /*!
  *****************************************************************************
  *
  ****************************************************************************/
-static int pclose_(struct io_context *op)
+static int pclose_(FILE *fp, pid_t pid)
 {
-        if (op->pfd[0] != -1) {
-                close(op->pfd[0]);
-                op->pfd[0] = -1;
-        }
-        return __stop_child(op->pid);
+        fclose(fp);
+        return __stop_child(pid);
 }
 
 /* Size of file in first volume number in which it exists */
@@ -1515,11 +1508,10 @@ check_idx:
                 if (sync_thread_read(op))
                         return -EIO;
                 /* If there is still no data assume something went wrong.
-                 * I/O buffer might simply be full and cannot receive more
-                 * data or otherwise most likely CRC errors or an invalid
-                 * password in the case of encrypted aechives.
+                 * Most likely CRC errors or an invalid password in the case 
+                 * of encrypted aechives.
                  */
-                if (op->buf->offset == offset_saved && !iob_full(op->buf))
+                if (op->buf->offset == offset_saved)
                         return -EIO;
         }
         if ((off_t)(offset + size) > op->buf->offset) {
@@ -1558,29 +1550,32 @@ check_idx:
                 /* Take control of reader thread */
                 if (sync_thread_noread(op))
                         return -EIO;
-                if (offset > op->buf->offset) {
+                if (!feof(op->fp) && offset > op->buf->offset) {
                         /* consume buffer */
                         op->pos += op->buf->used;
                         op->buf->ri = op->buf->wi;
                         op->buf->used = 0;
-                        (void)iob_write(op->buf, op->pfd[0]);
+                        (void)iob_write(op->buf, op->fp, IOB_SAVE_HIST);
                         sched_yield();
                 }
 
-                op->buf->ri = offset & (IOB_SZ - 1);
-                op->buf->used -= (offset - op->pos);
-                op->pos = offset;
+                if (!feof(op->fp)) {
+                        op->buf->ri = offset & (IOB_SZ - 1);
+                        op->buf->used -= (offset - op->pos);
+                        op->pos = offset;
 
-                /* Pull in rest of data if needed */
-                if ((size_t)(op->buf->offset - offset) < size)
-                        (void)iob_write(op->buf, op->pfd[0]);
+                        /* Pull in rest of data if needed */
+                        if ((size_t)(op->buf->offset - offset) < size)
+                                (void)iob_write(op->buf, op->fp,
+                                                IOB_SAVE_HIST);
+                }
         }
 
         if (size) {
                 int off = offset - op->pos;
                 n += iob_read(buf, op->buf, size, off);
                 op->pos += (off + size);
-                if (__wake_thread(op, RD_ASYNC_READ))
+                if (__wake_thread(op, RD_READ_ASYNC))
                         return -EIO;
         }
 
@@ -1624,6 +1619,7 @@ static int lrelease(struct fuse_file_info *fi)
                 close(FH_TOFD(fi->fh));
         printd(3, "(%05d) %s [0x%-16" PRIx64 "]\n", getpid(), "FREE", fi->fh);
         free(FH_TOIO(fi->fh));
+        FH_ZERO(fi->fh);
         return 0;
 }
 
@@ -2013,14 +2009,12 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
                 LPARAM P1, LPARAM P2)
 {
         struct extract_cb_arg *cb_arg = (struct extract_cb_arg *)(UserData);
-        struct io_context *op = cb_arg->arg;
-        int ret;
 
         if (msg == UCM_PROCESSDATA) {
                 /* Handle the special case when asking for a quick "dry run"
                  * to test archive integrity. If all is well this will result
                  * in an ERAR_UNKNOWN error. */
-                if (!op) {
+                if (!cb_arg->arg) {
                         if (!cb_arg->dry_run) {
                                 cb_arg->dry_run = 1;
                                 return 1;
@@ -2032,8 +2026,7 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
                  * written after return from write() since the pipe is not
                  * opened using the O_NONBLOCK flag.
                  */
-                ret = write(op->pfd[1], (void *)P1, P2);
-                if (ret == -1) {
+                if (write((LPARAM)cb_arg->arg, (void *)P1, P2) == -1) {
                         /*
                          * Do not treat EPIPE as an error. It is the normal
                          * case when the process is terminted, ie. the pipe is
@@ -2101,8 +2094,10 @@ static int extract_rar(char *arch, const char *file, void *arg)
         }
 
 extract_error:
+
         if (hdl)
                 RARCloseArchive(hdl);
+
         return ret;
 }
 
@@ -3201,7 +3196,7 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
 
         struct filecache_entry *entry_p;
 
-        pthread_rwlock_wrlock(&file_access_lock);
+        pthread_rwlock_rdlock(&file_access_lock);
         entry_p = path_lookup(path, stbuf);
         if (entry_p) {
                 if (entry_p != LOOP_FS_ENTRY) {
@@ -3231,7 +3226,7 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         }
         free(tmp);
 
-        pthread_rwlock_wrlock(&file_access_lock);
+        pthread_rwlock_rdlock(&file_access_lock);
         entry_p = path_lookup(path, stbuf);
         if (entry_p) {
                 pthread_rwlock_unlock(&file_access_lock);
@@ -3279,7 +3274,7 @@ static int rar2_getattr2(const char *path, struct stat *stbuf)
 
         int res;
 
-        pthread_rwlock_wrlock(&file_access_lock);
+        pthread_rwlock_rdlock(&file_access_lock);
         if (path_lookup(path, stbuf)) {
                 pthread_rwlock_unlock(&file_access_lock);
                 dump_stat(stbuf);
@@ -3297,7 +3292,7 @@ static int rar2_getattr2(const char *path, struct stat *stbuf)
         if (res)
                 return res;
 
-        pthread_rwlock_wrlock(&file_access_lock);
+        pthread_rwlock_rdlock(&file_access_lock);
         struct filecache_entry *entry_p = path_lookup(path, stbuf);
         if (entry_p) {
                 pthread_rwlock_unlock(&file_access_lock);
@@ -3644,6 +3639,7 @@ static int rar2_releasedir2(const char *path, struct fuse_file_info *fi)
                 return -EIO;
         free(FH_TOPATH(fi->fh));
         free(FH_TOIO(fi->fh));
+        FH_ZERO(fi->fh);
         return 0;
 }
 
@@ -3666,6 +3662,7 @@ static int rar2_releasedir(const char *path, struct fuse_file_info *fi)
                 closedir(dp);
         free(FH_TOPATH(fi->fh));
         free(FH_TOIO(fi->fh));
+        FH_ZERO(fi->fh);
         return 0;
 }
 
@@ -3695,23 +3692,23 @@ restart:
                                 }
                                 goto restart;
                         }
+                        continue;
                 }
                 req = op->rd_req;
                 pthread_mutex_unlock(&op->rd_req_mutex);
 
-                if (req == RD_TERM)
-                        goto out;
-                printd(4, "Reader thread wakeup (fd:%d)\n", op->pfd[0]);
-                if (req > RD_SYNC_NOREAD)
-                        (void)iob_write(op->buf, op->pfd[0]);
+                printd(4, "Reader thread wakeup (fp:%p)\n", op->fp);
+                if (req > RD_SYNC_NOREAD && !feof(op->fp))
+                        (void)iob_write(op->buf, op->fp, IOB_SAVE_HIST);
+
                 pthread_mutex_lock(&op->rd_req_mutex);
                 op->rd_req = RD_IDLE;
-                pthread_cond_signal(&op->rd_req_cond); /* sync */
+                pthread_cond_broadcast(&op->rd_req_cond); /* sync */
                 pthread_mutex_unlock(&op->rd_req_mutex);
         }
 
 out:
-        printd(4, "Reader thread stopped (fd:%d)\n", op->pfd[0]);
+        printd(4, "Reader thread stopped (fp:%p)\n", op->fp);
         return NULL;
 }
 
@@ -3917,7 +3914,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
         fi->flags &= ~(O_CREAT | O_EXCL);
 #endif
         errno = 0;
-        pthread_rwlock_wrlock(&file_access_lock);
+        pthread_rwlock_rdlock(&file_access_lock);
         entry_p = path_lookup(path, NULL);
 
         if (entry_p == NULL) {
@@ -3989,7 +3986,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                 if (entry_p->flags.raw) {
                         fp = fopen(entry_p->rar_p, "r");
                         if (fp != NULL) {
-                                io = calloc(1, sizeof(struct io_handle));
+                                io = malloc(sizeof(struct io_handle));
                                 op = calloc(1, sizeof(struct io_context));
                                 if (!op || !io)
                                         goto open_error;
@@ -4000,6 +3997,11 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                 printd(3, "(%05d) %-8s%s [%-16p]\n", getpid(), "ALLOC", path, FH_TOCONTEXT(fi->fh));
                                 pthread_mutex_init(&op->raw_read_mutex, NULL);
                                 op->fp = fp;
+                                op->pid = 0;
+                                op->seq = 0;
+                                op->buf = NULL;
+                                op->entry_p = NULL;
+                                op->pos = 0;
                                 op->vno = -1;   /* force a miss 1:st time */
 
                                 /*
@@ -4010,7 +4012,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                                  * Since the file contents will never change this should save
                                  * us from some user space calls!
                                  */
-#if 1 /* disable for now (issue #66) */
+#if 0 /* disable for now (issue #66) */
                                 fi->keep_cache = 1;
 #endif
 
@@ -4027,103 +4029,114 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                         goto open_error;
                 }
 
-                buf = iob_alloc(P_ALIGN_(sizeof(struct iob) + IOB_SZ));
+                buf = malloc(P_ALIGN_(sizeof(struct iob) + IOB_SZ));
                 if (!buf)
                         goto open_error;
+                IOB_RST(buf);
 
-                io = calloc(1, sizeof(struct io_handle));
+                io = malloc(sizeof(struct io_handle));
                 op = calloc(1, sizeof(struct io_context));
                 if (!op || !io)
                         goto open_error;
                 op->buf = buf;
-
-                FH_SETIO(fi->fh, io);
-                FH_SETTYPE(fi->fh, IO_TYPE_RAR);
-                FH_SETCONTEXT(fi->fh, op);
-                printd(3, "(%05d) %-8s%s [%-16p]\n", getpid(), "ALLOC",
-                                        path, FH_TOCONTEXT(fi->fh));
-
-                pthread_mutex_init(&op->rd_req_mutex, NULL);
-                pthread_cond_init(&op->rd_req_cond, NULL);
-                op->rd_req = RD_IDLE;
-                fi->keep_cache = 0;
-
-                /*
-                 * The below will take precedence over keep_cache.
-                 * This flag will allow the filesystem to bypass the page cache using
-                 * the "direct_io" flag.  This is not the same as O_DIRECT, it's
-                 * dictated by the filesystem not the application.
-                 * Since compressed archives might sometimes require fake data to be
-                 * returned in read requests, a cache might cause the same faulty
-                 * information to be propagated to sub-sequent reads. Setting this
-                 * flag will force _all_ reads to enter the filesystem.
-                 */
-#if 0 /* disable for now */
-                if (entry_p->flags.direct_io)
-                        fi->direct_io = 1;
-#endif
-                buf->idx.data_p = MAP_FAILED;
-                buf->idx.fd = -1;
-                if (!preload_index(buf, path)) {
-                        entry_p->flags.save_eof = 0;
-                        entry_p->flags.direct_io = 0;
-                        fi->direct_io = 0;
-                } else {
-                        /* Was the file removed ? */
-                        if (get_save_eof(entry_p->rar_p) && !entry_p->flags.save_eof) {
-                                entry_p->flags.save_eof = 1;
-                                entry_p->flags.avi_tested = 0;
-                        }
-                }
-
-                if (entry_p->flags.save_eof && !entry_p->flags.avi_tested) {
-                        if (check_avi_type(op))
-                                entry_p->flags.save_eof = 0;
-                        entry_p->flags.avi_tested = 1;
-                }
-
-#ifdef DEBUG_READ
-                char out_file[32];
-                sprintf(out_file, "%s.%d", "output", pid);
-                op->dbg_fp = fopen(out_file, "w");
-#endif
-                /*
-                 * Make sure cache entry is filled in completely
-                 * before cloning it
-                 */
-                op->entry_p = filecache_clone(entry_p);
-                if (!op->entry_p)
-                        goto open_error;
+                op->entry_p = NULL;
 
                 /* Open PIPE(s) and create child process */
-                if (popen_(op, &pid, op->pfd) == -1)
-                        goto open_error;
-                op->pid = pid;
-                printd(4, "PIPE %d/%d created towards child %u\n",
-                       op->pfd[0], op->pfd[1], pid);
+                fp = popen_(entry_p, &pid);
+                if (fp != NULL) {
+                        FH_SETIO(fi->fh, io);
+                        FH_SETTYPE(fi->fh, IO_TYPE_RAR);
+                        FH_SETCONTEXT(fi->fh, op);
+                        printd(3, "(%05d) %-8s%s [%-16p]\n", getpid(), "ALLOC",
+                                                path, FH_TOCONTEXT(fi->fh));
+                        op->seq = 0;
+                        op->pos = 0;
+                        op->fp = fp;
+                        op->pid = pid;
+                        printd(4, "PIPE %p created towards child %d\n",
+                                                op->fp, pid);
 
-                /* Create reader thread */
-                if (pthread_create(&op->thread, &thread_attr, reader_task, (void *)op))
-                        goto open_error;
-                if (sync_thread_read(op))
-                        goto open_error;
+                        pthread_mutex_init(&op->rd_req_mutex, NULL);
+                        pthread_cond_init(&op->rd_req_cond, NULL);
+                        op->rd_req = RD_IDLE;
 
-                goto open_end;
+                        /*
+                         * The below will take precedence over keep_cache.
+                         * This flag will allow the filesystem to bypass the page cache using
+                         * the "direct_io" flag.  This is not the same as O_DIRECT, it's
+                         * dictated by the filesystem not the application.
+                         * Since compressed archives might sometimes require fake data to be
+                         * returned in read requests, a cache might cause the same faulty
+                         * information to be propagated to sub-sequent reads. Setting this
+                         * flag will force _all_ reads to enter the filesystem.
+                         */
+#if 0 /* disable for now */
+                        if (entry_p->flags.direct_io)
+                                fi->direct_io = 1;
+#endif
+
+                        /* Create reader thread */
+                        if (pthread_create(&op->thread, &thread_attr, reader_task, (void *)op))
+                                goto open_error;
+                        if (sync_thread_noread(op))
+                                goto open_error;
+
+                        /* Promote to a write lock since we might need to
+                         * change the cache entry below. */
+			pthread_rwlock_unlock(&file_access_lock);
+			pthread_rwlock_wrlock(&file_access_lock);
+
+                        buf->idx.data_p = MAP_FAILED;
+                        buf->idx.fd = -1;
+                        if (!preload_index(buf, path)) {
+                                entry_p->flags.save_eof = 0;
+                                entry_p->flags.direct_io = 0;
+                                fi->direct_io = 0;
+                        } else {
+                                /* Was the file removed ? */
+                                if (get_save_eof(entry_p->rar_p) && !entry_p->flags.save_eof) {
+                                        entry_p->flags.save_eof = 1;
+                                        entry_p->flags.avi_tested = 0;
+                                }
+                        }
+
+                        if (entry_p->flags.save_eof && !entry_p->flags.avi_tested) {
+                                if (check_avi_type(op))
+                                        entry_p->flags.save_eof = 0;
+                                entry_p->flags.avi_tested = 1;
+                        }
+
+#ifdef DEBUG_READ
+                        char out_file[32];
+                        sprintf(out_file, "%s.%d", "output", pid);
+                        op->dbg_fp = fopen(out_file, "w");
+#endif
+                        /*
+                         * Make sure cache entry is filled in completely
+                         * before cloning it
+                         */
+                        op->entry_p = filecache_clone(entry_p);
+                        if (!op->entry_p)
+                                goto open_error;
+                        goto open_end;
+                }
         }
 
 open_error:
         pthread_rwlock_unlock(&file_access_lock);
-        if (fp && entry_p->flags.raw)
-                fclose(fp);
+        if (fp) {
+                if (entry_p->flags.raw)
+                        fclose(fp);
+                else
+                        pclose_(fp, pid);
+        }
 	free(io);
         if (op) {
                 if (op->entry_p)
                         filecache_freeclone(op->entry_p);
-                if (op->pid)
-                        pclose_(op);
                 free(op);
         }
-        iob_free(buf);
+        free(buf);
 
         /*
          * This is the best we can return here. So many different things
@@ -4513,25 +4526,30 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                         FH_TOIO(fi->fh)->type == IO_TYPE_RAW) {
                 struct io_context *op = FH_TOCONTEXT(fi->fh);
                 free(FH_TOPATH(fi->fh));
-                if (op->fp && op->entry_p->flags.raw) {
-                        printd(3, "Closing file handle %p\n", op->fp);
-                        fclose(op->fp);
-                        pthread_mutex_destroy(&op->raw_read_mutex);
+                if (op->fp) {
+                        if (op->entry_p->flags.raw) {
+                                printd(3, "Closing file handle %p\n", op->fp);
+                                fclose(op->fp);
+                                pthread_mutex_destroy(&op->raw_read_mutex);
+                        } else {
+                                if (!pthread_cancel(op->thread))
+                                        pthread_join(op->thread, NULL);
+
+                                pthread_cond_destroy(&op->rd_req_cond);
+                                pthread_mutex_destroy(&op->rd_req_mutex);
+
+                                if (pclose_(op->fp, op->pid))
+                                        printd(4, "child closed abnormally\n");
+                                printd(4, "PIPE %p closed towards child %05d\n",
+                                               op->fp, op->pid);
+#ifdef DEBUG_READ
+                                fclose(op->dbg_fp);
+#endif
+                        }
                 }
                 printd(3, "(%05d) %s [0x%-16" PRIx64 "]\n", getpid(), "FREE", fi->fh);
                 if (op->buf) {
-                        __wake_thread(op, RD_TERM);
-                        pthread_join(op->thread, NULL);
-                        pthread_cond_destroy(&op->rd_req_cond);
-                        pthread_mutex_destroy(&op->rd_req_mutex);
-
-                        if (pclose_(op))
-                                printd(4, "child closed abnormally\n");
-                        printd(4, "PIPE %d/%d closed towards child %u\n",
-                               op->pfd[0], op->pfd[1], op->pid);
-#ifdef DEBUG_READ
-                        fclose(op->dbg_fp);
-#endif
+                        /* XXX clean up */
 #ifdef HAVE_MMAP
                         if (op->buf->idx.data_p != MAP_FAILED &&
                                         op->buf->idx.mmap)
@@ -4543,11 +4561,12 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                                 free(op->buf->idx.data_p);
                         if (op->buf->idx.fd != -1)
                                 close(op->buf->idx.fd);
-                        iob_free(op->buf);
+                        free(op->buf);
                 }
                 filecache_freeclone(op->entry_p);
                 free(op);
                 free(FH_TOIO(fi->fh));
+                FH_ZERO(fi->fh);
         } else {
                 return lrelease(fi);
         }

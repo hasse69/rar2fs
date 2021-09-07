@@ -264,11 +264,11 @@ AC_SUBST(UNRAR_LDFLAGS)
 enableval=
 AC_ARG_ENABLE([debug],
    [AS_HELP_STRING([--enable-debug[[=LEVEL]]],
-               [enable debug mode [LEVEL=0]])],
+               [enable debug mode [LEVEL=4]])],
    [], [])
 if test x"$enableval" != x"no"; then
    if test x"$enableval" = x"yes"; then
-       debug_level=0
+       debug_level=4
    else
        debug_level=$enableval
    fi

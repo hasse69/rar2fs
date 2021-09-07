@@ -36,31 +36,35 @@
 size_t iob_hist_sz = 0;
 size_t iob_sz = 0;
 
-/* -1 to avoid wi = ri */
-#define SPACE_LEFT(ri, wi) ((IOB_SZ - SPACE_USED((ri), (wi))) - IOB_HIST_SZ - 1)
+static pthread_mutex_t io_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+#define SPACE_LEFT(ri, wi) (IOB_SZ - SPACE_USED((ri), (wi)))
 #define SPACE_USED(ri, wi) (((wi) - (ri)) & (IOB_SZ-1))
 
 /*!
  *****************************************************************************
  *
  ****************************************************************************/
-size_t iob_write(struct iob *iob, int fd)
+size_t iob_write(struct iob *dest, FILE *fp, int hist)
 {
         unsigned tot = 0;
-        pthread_mutex_lock(&iob->lock);
-        unsigned int lwi = iob->wi;  /* read once */
-        unsigned int lri = iob->ri;
-        pthread_mutex_unlock(&iob->lock);
-        size_t left = SPACE_LEFT(lri, lwi);
-        if (!left)
-                return 0; /* quick exit */
-
+        pthread_mutex_lock(&io_mutex);
+        unsigned int lwi = dest->wi;  /* read once */
+        unsigned int lri = dest->ri;  
+        pthread_mutex_unlock(&io_mutex);
+        size_t left = SPACE_LEFT(lri, lwi) - 1;   /* -1 to avoid wi = ri */
+        if (IOB_HIST_SZ && hist == IOB_SAVE_HIST) {
+                left = left > IOB_HIST_SZ ? left - IOB_HIST_SZ : 0;
+                if (!left) {
+                        return 0; /* quick exit */
+                }
+        }
         unsigned int chunk = IOB_SZ - lwi;   /* assume one large chunk */
         chunk = chunk < left ? chunk : left; /* reconsider assumption */
         while (left > 0) {
-                ssize_t n = read(fd, iob->data_p + lwi, chunk);
+                size_t n = fread(dest->data_p + lwi, 1, chunk, fp);
                 if (n != chunk) {
-                        if (n < 0) {
+                        if (ferror(fp)) {
                                 perror("read");
                                 break;
                         }
@@ -73,12 +77,12 @@ size_t iob_write(struct iob *iob, int fd)
                 chunk -= n;
                 chunk = !chunk ? left : chunk;
         }
-        pthread_mutex_lock(&iob->lock);
-        iob->wi = lwi;
-        iob->used = SPACE_USED(iob->ri, lwi); /* iob->ri might have changed */
-        pthread_mutex_unlock(&iob->lock);
+        pthread_mutex_lock(&io_mutex);
+        dest->wi = lwi;
+        dest->used = SPACE_USED(dest->ri, lwi); /* dest->ri might have changed */
+        pthread_mutex_unlock(&io_mutex);
         MB();
-        iob->offset += tot;
+        dest->offset += tot;
 
         return tot;
 }
@@ -87,13 +91,13 @@ size_t iob_write(struct iob *iob, int fd)
  *****************************************************************************
  *
  ****************************************************************************/
-size_t iob_read(char *dest, struct iob *iob, size_t size, size_t off)
+size_t iob_read(char *dest, struct iob *src, size_t size, size_t off)
 {
         size_t tot = 0;
-        pthread_mutex_lock(&iob->lock);
-        unsigned int lri = iob->ri; /* read once */
-        size_t used = iob->used;
-        pthread_mutex_unlock(&iob->lock);
+        pthread_mutex_lock(&io_mutex);
+        unsigned int lri = src->ri; /* read once */
+        size_t used = src->used;
+        pthread_mutex_unlock(&io_mutex);
         if (off) {
                 /* consume offset */
                 off = off < used ? off : used;
@@ -104,17 +108,17 @@ size_t iob_read(char *dest, struct iob *iob, size_t size, size_t off)
         unsigned int chunk = IOB_SZ - lri;   /* assume one large chunk */
         chunk = chunk < size ? chunk : size; /* reconsider assumption */
         while (size) {
-                memcpy(dest, iob->data_p + lri, chunk);
+                memcpy(dest, src->data_p + lri, chunk);
                 lri = (lri + chunk) & (IOB_SZ - 1);
                 tot += chunk;
                 size -= chunk;
                 dest += chunk;
                 chunk = size;
         }
-        pthread_mutex_lock(&iob->lock);
-        iob->ri = lri;
-        iob->used -= tot;       /* iob->used might have changed */
-        pthread_mutex_unlock(&iob->lock);
+        pthread_mutex_lock(&io_mutex);
+        src->ri = lri;
+        src->used -= tot;       /* src->used might have changed */
+        pthread_mutex_unlock(&io_mutex);
 
         return tot;
 }
@@ -123,21 +127,21 @@ size_t iob_read(char *dest, struct iob *iob, size_t size, size_t off)
  *****************************************************************************
  *
  ****************************************************************************/
-size_t iob_copy(char *dest, struct iob *iob, size_t size, size_t pos)
+size_t iob_copy(char *dest, struct iob *src, size_t size, size_t pos)
 {
         size_t tot = 0;
         unsigned int chunk = IOB_SZ - pos;   /* assume one large chunk */
         chunk = chunk < size ? chunk : size; /* reconsider assumption */
-        pthread_mutex_lock(&iob->lock);
+        pthread_mutex_lock(&io_mutex);
         while (size) {
-                memcpy(dest, iob->data_p + pos, chunk);
+                memcpy(dest, src->data_p + pos, chunk);
                 pos = (pos + chunk) & (IOB_SZ - 1);
                 tot += chunk;
                 size -= chunk;
                 dest += chunk;
                 chunk = size;
         }
-        pthread_mutex_unlock(&iob->lock);
+        pthread_mutex_unlock(&io_mutex);
         return tot;
 }
 
@@ -161,46 +165,3 @@ void iob_destroy()
 {
 }
 
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-struct iob *iob_alloc(size_t size)
-{
-        struct iob *iob;
-
-        iob = calloc(1, size);
-        if (!iob)
-                return NULL;
-
-        pthread_mutex_init(&iob->lock, NULL);
-        pthread_mutex_init(&iob->io_lock, NULL);
-
-        return iob;
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-void iob_free(struct iob *iob)
-{
-        if (iob) {
-                pthread_mutex_destroy(&iob->lock);
-                pthread_mutex_destroy(&iob->io_lock);
-                free(iob);
-        }
-}
-
-/*!
- *****************************************************************************
- *
- ****************************************************************************/
-int iob_full(struct iob *iob)
-{
-        int res;
-        pthread_mutex_lock(&iob->lock);
-        res = !SPACE_LEFT(iob->ri, iob->wi);
-        pthread_mutex_unlock(&iob->lock);
-        return res;
-}
