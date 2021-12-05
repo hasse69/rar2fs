@@ -2904,7 +2904,7 @@ static int __resolve_dir(const char *dir, const char *root,
                 struct dir_entry_list **next2,
                 struct filter_ops *f_ops)
 {
-        struct dirent **namelist;
+        struct dirent **namelist = NULL;
         unsigned int f;
         int error_tot = 0;
         int seek_len = 0;
@@ -3014,9 +3014,13 @@ next_entry:
                 }
 
 next_type:
-                for (i = 0; i < n; i++)
-                        free(namelist[i]);
-                free(namelist);
+                if (namelist) {
+                        for (i = 0; i < n; i++)
+                                free(namelist[i]);
+                        free(namelist);
+                        namelist = NULL;
+                }
+
                 if (ret)
                         break;
         }
