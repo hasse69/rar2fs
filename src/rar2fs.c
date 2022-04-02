@@ -78,10 +78,10 @@
 #define MOUNT_ARCHIVE 1
 
 #define RD_IDLE 0
-#define RD_WAKEUP 1
+#define RD_TERM 1
 #define RD_SYNC_NOREAD 2
 #define RD_SYNC_READ 3
-#define RD_READ_ASYNC 4
+#define RD_ASYNC_READ 4
 
 /*#define DEBUG_READ*/
 
@@ -393,8 +393,10 @@ static int __wait_thread(struct io_context *op)
 static int __wake_thread(struct io_context *op, int req)
 {
         pthread_mutex_lock(&op->rd_req_mutex);
-        while (op->rd_req) /* sync */
-                pthread_cond_wait(&op->rd_req_cond, &op->rd_req_mutex);
+        if (req != RD_ASYNC_READ) {
+                while (op->rd_req) /* sync */
+                        pthread_cond_wait(&op->rd_req_cond, &op->rd_req_mutex);
+        }
         op->rd_req = req;
         pthread_cond_signal(&op->rd_req_cond);
         pthread_mutex_unlock(&op->rd_req_mutex);
@@ -701,12 +703,24 @@ static int __stop_child(pid_t pid)
  *****************************************************************************
  *
  ****************************************************************************/
-static FILE *popen_(const struct filecache_entry *entry_p, pid_t *cpid)
+static FILE *popen_(struct filecache_entry *entry_p, pid_t *cpid)
 {
         int fd = -1;
         int pfd[2] = {-1,};
 
         pid_t pid;
+        int ret;
+
+        /* For folder mounts we need to perform an additional dummy
+         * extraction attempt to avoid feeding the file descriptor
+         * with garbage data in case of wrong password or CRC errors. */
+        if (!entry_p->flags.dry_run_done && mount_type == MOUNT_FOLDER) {
+                ret = extract_rar(entry_p->rar_p, entry_p->file_p, NULL);
+                if (ret && ret != ERAR_UNKNOWN)
+                        goto error;
+                entry_p->flags.dry_run_done = 1;
+        }
+
         if (pipe(pfd) == -1) {
                 perror("pipe");
                 goto error;
@@ -714,20 +728,10 @@ static FILE *popen_(const struct filecache_entry *entry_p, pid_t *cpid)
 
         pid = fork();
         if (pid == 0) {
-                int ret = 0;
                 setpgid(getpid(), 0);
                 close(pfd[0]);  /* Close unused read end */
-                /* For folder mounts we need to perform an additional dummy
-                 * extraction attempt to avoid feeding the file descriptor
-                 * with garbage data in case of wrong password or CRC errors. */
-                if (mount_type == MOUNT_FOLDER)
-                        ret = extract_rar(entry_p->rar_p,
-                                          entry_p->file_p,
-                                          NULL);
-                if (!ret || ret == ERAR_UNKNOWN)
-                        ret = extract_rar(entry_p->rar_p,
-                                          entry_p->file_p,
-                                          (void *)(uintptr_t)pfd[1]);
+                ret = extract_rar(entry_p->rar_p, entry_p->file_p,
+                                  (void *)(uintptr_t)pfd[1]);
                 close(pfd[1]);
                 _exit(ret);
         } else if (pid < 0) {
@@ -1508,10 +1512,11 @@ check_idx:
                 if (sync_thread_read(op))
                         return -EIO;
                 /* If there is still no data assume something went wrong.
-                 * Most likely CRC errors or an invalid password in the case 
-                 * of encrypted aechives.
+                 * I/O buffer might simply be full and cannot receive more
+                 * data or otherwise most likely CRC errors or an invalid
+                 * password in the case of encrypted archives.
                  */
-                if (op->buf->offset == offset_saved)
+                if (op->buf->offset == offset_saved && !iob_full(op->buf))
                         return -EIO;
         }
         if ((off_t)(offset + size) > op->buf->offset) {
@@ -1575,7 +1580,7 @@ check_idx:
                 int off = offset - op->pos;
                 n += iob_read(buf, op->buf, size, off);
                 op->pos += (off + size);
-                if (__wake_thread(op, RD_READ_ASYNC))
+                if (__wake_thread(op, RD_ASYNC_READ))
                         return -EIO;
         }
 
@@ -3687,7 +3692,7 @@ static void *reader_task(void *arg)
 restart:
                 clock_gettime(CLOCK_REALTIME, &ts);
                 ts.tv_sec += 1;
-                while (!op->rd_req) {
+                while (op->rd_req == RD_IDLE) {
                         if (pthread_cond_timedwait(&op->rd_req_cond,
                                         &op->rd_req_mutex, &ts) == ETIMEDOUT) {
                                 if (fs_terminated) {
@@ -3701,13 +3706,14 @@ restart:
                 req = op->rd_req;
                 pthread_mutex_unlock(&op->rd_req_mutex);
 
+                if (req == RD_TERM)
+                        goto out;
                 printd(4, "Reader thread wakeup (fp:%p)\n", op->fp);
-                if (req > RD_SYNC_NOREAD && !feof(op->fp))
+                if (req != RD_SYNC_NOREAD && !feof(op->fp))
                         (void)iob_write(op->buf, op->fp, IOB_SAVE_HIST);
-
                 pthread_mutex_lock(&op->rd_req_mutex);
                 op->rd_req = RD_IDLE;
-                pthread_cond_broadcast(&op->rd_req_cond); /* sync */
+                pthread_cond_signal(&op->rd_req_cond); /* sync */
                 pthread_mutex_unlock(&op->rd_req_mutex);
         }
 
@@ -4033,10 +4039,9 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                         goto open_error;
                 }
 
-                buf = malloc(P_ALIGN_(sizeof(struct iob) + IOB_SZ));
+                buf = iob_alloc(P_ALIGN_(sizeof(struct iob) + IOB_SZ));
                 if (!buf)
                         goto open_error;
-                IOB_RST(buf);
 
                 io = malloc(sizeof(struct io_handle));
                 op = calloc(1, sizeof(struct io_context));
@@ -4140,7 +4145,7 @@ open_error:
                         filecache_freeclone(op->entry_p);
                 free(op);
         }
-        free(buf);
+        iob_free(buf);
 
         /*
          * This is the best we can return here. So many different things
@@ -4530,30 +4535,26 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                         FH_TOIO(fi->fh)->type == IO_TYPE_RAW) {
                 struct io_context *op = FH_TOCONTEXT(fi->fh);
                 free(FH_TOPATH(fi->fh));
-                if (op->fp) {
-                        if (op->entry_p->flags.raw) {
-                                printd(3, "Closing file handle %p\n", op->fp);
-                                fclose(op->fp);
-                                pthread_mutex_destroy(&op->raw_read_mutex);
-                        } else {
-                                if (!pthread_cancel(op->thread))
-                                        pthread_join(op->thread, NULL);
-
-                                pthread_cond_destroy(&op->rd_req_cond);
-                                pthread_mutex_destroy(&op->rd_req_mutex);
-
-                                if (pclose_(op->fp, op->pid))
-                                        printd(4, "child closed abnormally\n");
-                                printd(4, "PIPE %p closed towards child %05d\n",
-                                               op->fp, op->pid);
-#ifdef DEBUG_READ
-                                fclose(op->dbg_fp);
-#endif
-                        }
+                if (op->fp && op->entry_p->flags.raw) {
+                        printd(3, "Closing file handle %p\n", op->fp);
+                        fclose(op->fp);
+                        pthread_mutex_destroy(&op->raw_read_mutex);
                 }
                 printd(3, "(%05d) %s [0x%-16" PRIx64 "]\n", getpid(), "FREE", fi->fh);
                 if (op->buf) {
-                        /* XXX clean up */
+                        __wake_thread(op, RD_TERM);
+                        pthread_join(op->thread, NULL);
+                        pthread_cond_destroy(&op->rd_req_cond);
+                        pthread_mutex_destroy(&op->rd_req_mutex);
+
+                        if (pclose_(op->fp, op->pid))
+                                printd(4, "child closed abnormally\n");
+                        printd(4, "PIPE %p closed towards child %05d\n",
+                               op->fp, op->pid);
+#ifdef DEBUG_READ
+                        fclose(op->dbg_fp);
+#endif
+
 #ifdef HAVE_MMAP
                         if (op->buf->idx.data_p != MAP_FAILED &&
                                         op->buf->idx.mmap)
@@ -4565,7 +4566,7 @@ static int rar2_release(const char *path, struct fuse_file_info *fi)
                                 free(op->buf->idx.data_p);
                         if (op->buf->idx.fd != -1)
                                 close(op->buf->idx.fd);
-                        free(op->buf);
+                        iob_free(op->buf);
                 }
                 filecache_freeclone(op->entry_p);
                 free(op);

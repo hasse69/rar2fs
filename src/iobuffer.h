@@ -35,7 +35,7 @@
 #define IOB_SZ_DEFAULT           (4 * 1024 * 1024)
 #ifdef USE_STATIC_IOB_
 #define IOB_SZ                   IOB_SZ_DEFAULT
-#define IOB_HIST_SZ              (IOB_SZ/2)
+#define IOB_HIST_SZ              (IOB_SZ / 2)
 #else
 #define IOB_SZ                   (iob_sz)
 #define IOB_HIST_SZ              (iob_hist_sz)
@@ -43,8 +43,6 @@
 
 #define IOB_NO_HIST 0
 #define IOB_SAVE_HIST 1
-
-#define IOB_RST(b)  (memset((b), 0, sizeof(struct iob) + IOB_SZ))
 
 struct idx_info {
         int fd;
@@ -78,6 +76,15 @@ iob_init();
 
 void
 iob_destroy();
+
+struct iob *
+iob_alloc(size_t size);
+
+void
+iob_free(struct iob *iob);
+
+int
+iob_full(struct iob *iob);
 
 #endif
 
