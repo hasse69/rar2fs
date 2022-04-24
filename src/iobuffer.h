@@ -56,6 +56,7 @@ struct iob {
         volatile size_t ri;
         volatile size_t wi;
         size_t used;
+        pthread_mutex_t lock;
         uint8_t data_p[];
 };
 
