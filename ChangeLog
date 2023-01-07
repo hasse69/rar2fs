@@ -1,5 +1,19 @@
 rar2fs ChangeLog file.
 
+2023-01-07 Hans Beckerus <hans.beckerus#AT#gmail.com>
+
+        * Release v1.29.6
+
+        * Change to a per session mutex in I/O buffer
+
+        * Make sure reader thread is terminated properly
+
+        * Handle potential race condition at directory scan
+
+        * Fix crash in collect files
+
+        * Fix directory cache invalidation
+
 2021-04-25 Hans Beckerus <hans.beckerus#AT#gmail.com>
 
         * Release v1.29.5
