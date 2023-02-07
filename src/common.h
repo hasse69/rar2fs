@@ -51,4 +51,6 @@
 #define ABS_MP(s, path, file) ABS_MP_(s, path, file, alloca)
 #define ABS_MP2(s, path, file) ABS_MP_(s, path, file, malloc)
 
+#define str_beginwith(text, prefix) (!strncmp(text, prefix, strlen(prefix)))
+
 #endif
