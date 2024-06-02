@@ -171,13 +171,21 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveDataEx **NN)
         }
         else
         {
+#if RARVER_MAJOR >= 7
+          wcscpy(N->LinkTargetW,Arc.FileHead.RedirName.c_str());
+#else
           wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
+#endif
           N->LinkTargetFlags |= LINK_T_UNICODE; // Make sure UNICODE is set
         }
       }
       else if (Arc.FileHead.RedirType == FSREDIR_FILECOPY)
       {
+#if RARVER_MAJOR >= 7
+          wcscpy(N->LinkTargetW,Arc.FileHead.RedirName.c_str());
+#else
           wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
+#endif
           N->LinkTargetFlags |= LINK_T_FILECOPY;
       }
     }
@@ -210,6 +218,13 @@ void PASCAL RARNextVolumeName(char *arch, bool oldstylevolume)
 {
 #if RARVER_MAJOR < 5
   NextVolumeName(arch, NULL, 0, oldstylevolume);
+#elif RARVER_MAJOR >= 7
+  wstring ArchiveW;
+  size_t len=strlen(arch);
+  ArchiveW.assign(arch,arch+len);
+  NextVolumeName(ArchiveW,oldstylevolume);
+  string NextArchive(ArchiveW.begin(),ArchiveW.end());
+  strcpy(arch,NextArchive.c_str());
 #else
   wchar NextName[NM];
   CharToWide(arch, NextName, ASIZE(NextName));
@@ -223,6 +238,14 @@ void PASCAL RARVolNameToFirstName(char *arch, bool oldstylevolume)
 {
 #if RARVER_MAJOR < 5
   VolNameToFirstName(arch, arch, !oldstylevolume);
+#elif RARVER_MAJOR >=7
+  wstring ArcName;
+  size_t len=strlen(arch);
+  ArcName.assign(arch,arch+len);
+  VolNameToFirstName(ArcName, ArcName, !oldstylevolume);
+  string FirstName(ArcName.begin(),ArcName.end());
+  strcpy(arch,FirstName.c_str());
+  return;
 #else
   wchar ArcName[NM];
   CharToWide(arch, ArcName, ASIZE(ArcName));
@@ -241,7 +264,6 @@ static size_t ListFileHeader(wchar *,Archive &);
 void PASCAL RARGetFileInfo(HANDLE hArcData, const char *FileName, struct RARWcb *wcb)
 {
 #if RARVER_MAJOR > 4
-  char FileNameUtf[NM];
   DataSet *Data = (DataSet *)hArcData;
   Archive& Arc = Data->Arc;
   struct RARHeaderDataEx h;
@@ -250,8 +272,11 @@ void PASCAL RARGetFileInfo(HANDLE hArcData, const char *FileName, struct RARWcb 
   wcb->bytes = 0;
   while (!RARReadHeaderEx(hArcData, &h))
   {
-    WideToUtf(Arc.FileHead.FileName,FileNameUtf,ASIZE(FileNameUtf));
-    if (!strcmp(FileNameUtf, FileName))
+    size_t FileNameLen=Arc.FileHead.FileName.size()*sizeof(char32_t);
+    string FileNameUtf(FileNameLen,'\0');
+    WideToUtf(Arc.FileHead.FileName.c_str(),&FileNameUtf[0],FileNameLen);
+    FileNameUtf.resize(strlen(FileNameUtf.c_str()));
+    if (!strcmp(FileNameUtf.c_str(), FileName))
     {
       wcb->bytes = ListFileHeader(wcb->data, Arc);
       return;
@@ -370,7 +395,11 @@ static void ListFileAttr(uint A,HOST_SYSTEM_TYPE HostType,wchar *AttrStr,size_t 
 static size_t ListFileHeader(wchar *wcs,Archive &Arc)
 {
   FileHeader &hd=Arc.FileHead;
+#if RARVER_MAJOR >= 7
+  wstring *Name=&hd.FileName;
+#else
   wchar *Name=hd.FileName;
+#endif
   RARFORMAT Format=Arc.Format;
 
   void *wcs_start = (void *)wcs;
@@ -435,21 +464,37 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
   {
     if (Format==RARFMT15)
     {
+#if RARVER_MAJOR >= 7
+      string LinkTargetA;
+#else
       char LinkTargetA[NM];
+#endif
       if (Arc.FileHead.Encrypted)
       {
         // Link data are encrypted. We would need to ask for password
         // and initialize decryption routine to display the link target.
+#if RARVER_MAJOR >= 7
+        LinkTargetA="*<-?->";
+#else
         strncpyz(LinkTargetA,"*<-?->",ASIZE(LinkTargetA));
+#endif
       }
       else
       {
         int DataSize=(int)Min((size_t)hd.PackSize,ASIZE(LinkTargetA)-1);
+#if RARVER_MAJOR >= 7
+        Arc.Read(&LinkTargetA,DataSize);
+#else
         Arc.Read(LinkTargetA,DataSize);
+#endif
         LinkTargetA[DataSize > 0 ? DataSize : 0] = 0;
       }
+#if RARVER_MAJOR >= 7
+      wstring LinkTarget(LinkTargetA.begin(),LinkTargetA.end());
+#else
       wchar LinkTarget[NM];
       CharToWide(LinkTargetA,LinkTarget,ASIZE(LinkTarget));
+#endif
       wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListTarget),LinkTarget);
     }
     else
@@ -489,8 +534,13 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
       hd.FileHash.CRC32);
   if (hd.FileHash.Type==HASH_BLAKE2)
   {
+#if RARVER_MAJOR >= 7
+    wstring BlakeStr;
+    BinToHex(hd.FileHash.Digest,BLAKE2_DIGEST_SIZE,BlakeStr);
+#else
     wchar BlakeStr[BLAKE2_DIGEST_SIZE*2+1];
     BinToHex(hd.FileHash.Digest,BLAKE2_DIGEST_SIZE,NULL,BlakeStr,ASIZE(BlakeStr));
+#endif
     wcs += msprintf(wcs, L"\n%12ls: %ls",
       hd.UseHashKey ? L"BLAKE2 MAC":hd.SplitAfter ? L"Pack-BLAKE2":L"BLAKE2",
       BlakeStr);
@@ -531,7 +581,11 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
 
   if (hd.Version)
   {
+#if RARVER_MAJOR >= 7
+    uint Version=ParseVersionFileName(*Name,false);
+#else
     uint Version=ParseVersionFileName(Name,false);
+#endif
     if (Version!=0)
       wcs += msprintf(wcs, L"\n%12ls: %u",St(MListFileVer),Version);
   }
