@@ -272,11 +272,17 @@ void PASCAL RARGetFileInfo(HANDLE hArcData, const char *FileName, struct RARWcb 
   wcb->bytes = 0;
   while (!RARReadHeaderEx(hArcData, &h))
   {
+#if RARVER_MAJOR >= 7
     size_t FileNameLen=Arc.FileHead.FileName.size()*sizeof(char32_t);
     string FileNameUtf(FileNameLen,'\0');
     WideToUtf(Arc.FileHead.FileName.c_str(),&FileNameUtf[0],FileNameLen);
     FileNameUtf.resize(strlen(FileNameUtf.c_str()));
     if (!strcmp(FileNameUtf.c_str(), FileName))
+#else
+    char FileNameUtf[NM];
+    WideToUtf(Arc.FileHead.FileName,FileNameUtf,ASIZE(FileNameUtf));
+    if (!strcmp(FileNameUtf, FileName))
+#endif
     {
       wcb->bytes = ListFileHeader(wcb->data, Arc);
       return;
