@@ -497,14 +497,18 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
       }
 #if RARVER_MAJOR >= 7
       wstring LinkTarget(LinkTargetA.begin(),LinkTargetA.end());
+      wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListTarget),LinkTarget.c_str());
+    }
+    else
+      wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListTarget),hd.RedirName.c_str());
 #else
       wchar LinkTarget[NM];
       CharToWide(LinkTargetA,LinkTarget,ASIZE(LinkTarget));
-#endif
       wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListTarget),LinkTarget);
     }
     else
       wcs += msprintf(wcs, L"\n%12ls: %ls",St(MListTarget),hd.RedirName);
+#endif
   }
 
   if (!hd.Dir)
@@ -549,7 +553,11 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
 #endif
     wcs += msprintf(wcs, L"\n%12ls: %ls",
       hd.UseHashKey ? L"BLAKE2 MAC":hd.SplitAfter ? L"Pack-BLAKE2":L"BLAKE2",
+#if RARVER_MAJOR >= 7
+      BlakeStr.c_str());
+#else
       BlakeStr);
+#endif
   }
 
   const wchar *HostOS=L"";
@@ -600,9 +608,17 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
   {
     wcs += msprintf(wcs, L"\n%12ls: ",L"Unix owner");
     if (*hd.UnixOwnerName!=0)
+#if RARVER_MAJOR >= 7
+      wcs += msprintf(wcs, L"%ls:",GetWide(hd.UnixOwnerName).c_str());
+#else
       wcs += msprintf(wcs, L"%ls:",GetWide(hd.UnixOwnerName));
+#endif
     if (*hd.UnixGroupName!=0)
+#if RARVER_MAJOR >= 7
+      wcs += msprintf(wcs, L"%ls",GetWide(hd.UnixGroupName).c_str());
+#else
       wcs += msprintf(wcs, L"%ls",GetWide(hd.UnixGroupName));
+#endif
     if ((*hd.UnixOwnerName!=0 || *hd.UnixGroupName!=0) && (hd.UnixOwnerNumeric || hd.UnixGroupNumeric))
       wcs += msprintf(wcs, L"  ");
     if (hd.UnixOwnerNumeric)
@@ -617,5 +633,3 @@ static size_t ListFileHeader(wchar *wcs,Archive &Arc)
 }
 
 #endif
-
-
