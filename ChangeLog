@@ -2,6 +2,16 @@ rar2fs ChangeLog file.
 
 2023-01-07 Hans Beckerus <hans.beckerus#AT#gmail.com>
 
+        * Release v1.29.7
+
+        * Additional fixes for UnRAR 7.x
+
+        * Add UnRAR 7 compatibility
+
+        * Add .clang_format
+
+2023-01-07 Hans Beckerus <hans.beckerus#AT#gmail.com>
+
         * Release v1.29.6
 
         * Change to a per session mutex in I/O buffer
