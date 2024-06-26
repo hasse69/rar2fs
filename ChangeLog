@@ -4,11 +4,11 @@ rar2fs ChangeLog file.
 
         * Release v1.29.7
 
-        * Change to a per session mutex in I/O buffer
+        * Additional fixes for UnRAR 7.x
 
-        * Make sure reader thread is terminated properly
+        * Add UnRAR 7 compatibility
 
-        * Handle potential race condition at directory scan
+        * Add .clang_format
 
 2023-01-07 Hans Beckerus <hans.beckerus#AT#gmail.com>
 
