@@ -219,7 +219,7 @@ static int __hashtable_entry_delete_subkeys(void *h, const char *key,
         while (p->next) {
                 n = p;
                 p = p->next;
-                if ((hash == b->hash) && (strstr(p->key, key) == p->key)) {
+                if ((hash == b->hash) && str_beginwith(p->key, key)) {
                         level = __hashtable_entry_delete_subkeys(h, key,
                                                          get_hash(p->key, 0),
                                                          level);
@@ -230,7 +230,7 @@ static int __hashtable_entry_delete_subkeys(void *h, const char *key,
                 }
         }
         /* Finally check the bucket */
-        if (b->key && (hash == b->hash) && (strstr(b->key, key) == b->key)) {
+        if (b->key && (hash == b->hash) && str_beginwith(b->key, key)) {
                 level = __hashtable_entry_delete_subkeys(h, key,
                                                  get_hash(b->key, 0),
                                                  level);
@@ -267,13 +267,13 @@ void hashtable_entry_delete_subkeys(void *h, const char *key, uint32_t hash)
                 while (p->next) {
                         n = p;
                         p = p->next;
-                        if (strstr(p->key, key) == p->key) {
+                        if (str_beginwith(p->key, key)) {
                                 hashtable_entry_delete_hash(h, p->key, p->hash);
                                 p = n;
                         }
                 }
                 /* Finally check the bucket */
-                if (b->key && (strstr(b->key, key) == b->key))
+                if (b->key && str_beginwith(b->key, key))
                         hashtable_entry_delete_hash(h, b->key, b->hash);
         }
 }
