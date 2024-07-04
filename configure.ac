@@ -504,6 +504,8 @@ fi
 ########################################################
 
 AM_ICONV
+AM_GNU_GETTEXT([external])
+AM_GNU_GETTEXT_VERSION([0.14.4])
 
 AC_MSG_CHECKING(for commit hash in git repo)
 GITHEAD=$BUILDDIR/.git/$(cat $BUILDDIR/.git/HEAD 2>/dev/null | cut -d" " -f2)
