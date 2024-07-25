@@ -246,12 +246,20 @@ static struct parent_node *find_next_parent(FILE *fp, struct parent_node *p)
                 fseek(fp, 0L, SEEK_SET);
 
         while (fgets(line, LINE_MAX, fp)) {
-                if (sscanf(line, " [ %[^]] ", s) == 1) {
-                        p = malloc(sizeof(struct parent_node));
-                        p->name = strdup(s);
-                        p->pos = ftell(fp);
-                        return p;
-                }
+                const char *lstart=line;
+                while (isspace(*lstart)) lstart++;
+                if (*lstart!='[') continue;
+                lstart++;
+
+                const char *lend=lstart+strlen(lstart)-1;
+                while (lend>lstart && *lend!=']') lend--;
+                if (lend==lstart) continue;    // Shall we warn on invalid line here?
+                *(char*)lend = '\0';
+
+                p = malloc(sizeof(struct parent_node));
+                p->name = strdup(lstart);
+                p->pos = ftell(fp);
+                return p;
         }
 
         return NULL;
