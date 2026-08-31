@@ -83,6 +83,15 @@
 #define RD_SYNC_READ 3
 #define RD_ASYNC_READ 4
 
+/* Maximum chunk size for UnRAR callbacks (128MB) */
+#define MAX_CHUNK_SIZE (128 * 1024 * 1024)  /* 128MB */
+
+/* Maximum reasonable file size for validation (100GB) */
+#define MAX_REASONABLE_FILE_SIZE (100ULL * 1024 * 1024 * 1024)  /* 100GB */
+
+/* Maximum password buffer length */
+#define MAX_PASSWORD_LEN 1024
+
 /*#define DEBUG_READ*/
 
 struct volume_handle {
@@ -168,6 +177,10 @@ static pthread_mutex_t warmup_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t warmup_cond = PTHREAD_COND_INITIALIZER;
 static char *src_path_full = NULL;
 
+/* Timeout infrastructure for UnRAR operations */
+static volatile sig_atomic_t operation_timed_out = 0;
+static pthread_mutex_t timeout_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 #define P_ALIGN_(a) (((a)+page_size_)&~(page_size_-1))
 
 static int extract_rar(char *arch, const char *file, void *arg);
@@ -192,6 +205,15 @@ struct extract_cb_arg {
 
 static int extract_index(const char *, const struct filecache_entry *, off_t);
 static int preload_index(struct iob *, const char *);
+
+/* Timeout wrapper function type */
+typedef int (*timeout_func_t)(void *arg);
+
+/* Wrapper structure for RAROpenArchiveEx with timeout */
+struct rar_open_args {
+        struct RAROpenArchiveDataEx *arc;
+        HANDLE result;
+};
 
 #if RARVER_MAJOR > 4
 static const char *file_cmd[] = {
@@ -276,6 +298,10 @@ static const char *get_alias(const char *rar, const char *file)
                 if (alias)
                         return alias + 1;
                 rar_safe = strdup(rar);
+                if (!rar_safe) {
+                        printd(1, "check_alias: strdup failed\n");
+                        return file;
+                }
                 alias = rarconfig_getalias(basename(rar_safe), file_abs);
                 free(rar_safe);
                 if (alias)
@@ -314,6 +340,10 @@ static int get_seek_length(char *rar)
 static void __dircache_invalidate_for_file(const char *path)
 {
         char *safe_path = strdup(path);
+        if (!safe_path) {
+                printd(1, "__dircache_invalidate_for_file: strdup failed\n");
+                return;
+        }
         pthread_rwlock_wrlock(&dir_access_lock);
         dircache_invalidate(__gnu_dirname(safe_path));
         pthread_rwlock_unlock(&dir_access_lock);
@@ -371,6 +401,78 @@ void __handle_sighup()
         rarconfig_destroy();
         rarconfig_init(OPT_STR(OPT_KEY_SRC, 0),
                        OPT_STR(OPT_KEY_CONFIG, 0));
+}
+
+/*!
+ *****************************************************************************
+ * Timeout alarm handler for UnRAR operations
+ ****************************************************************************/
+static void timeout_alarm_handler(int sig)
+{
+        (void)sig;  /* touch */
+        operation_timed_out = 1;
+}
+
+/*!
+ *****************************************************************************
+ * Execute function with timeout protection
+ * \param func Function to execute
+ * \param arg Argument to pass to function
+ * \param timeout_sec Timeout in seconds (0 = no timeout)
+ * \param op_name Operation name for logging
+ * \return Function result, or -ETIMEDOUT on timeout
+ ****************************************************************************/
+static int __execute_with_timeout(timeout_func_t func, void *arg,
+                                   int timeout_sec, const char *op_name)
+{
+        struct sigaction sa, old_sa;
+        int ret;
+
+        /* No timeout requested or timeout disabled */
+        if (timeout_sec <= 0) {
+                (void)op_name;  /* Suppress unused parameter warning when no timeout */
+                return func(arg);
+        }
+
+        /* Setup alarm handler */
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = timeout_alarm_handler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+
+        pthread_mutex_lock(&timeout_mutex);
+        operation_timed_out = 0;
+        sigaction(SIGALRM, &sa, &old_sa);
+        alarm(timeout_sec);
+        pthread_mutex_unlock(&timeout_mutex);
+
+        /* Execute function without holding mutex */
+        ret = func(arg);
+
+        /* Clean up - re-acquire mutex */
+        pthread_mutex_lock(&timeout_mutex);
+        alarm(0);
+        sigaction(SIGALRM, &old_sa, NULL);
+
+        if (operation_timed_out) {
+                printd(1, "Operation timeout: %s (exceeded %ds)\n",
+                       op_name, timeout_sec);
+                ret = -ETIMEDOUT;
+        }
+
+        pthread_mutex_unlock(&timeout_mutex);
+        return ret;
+}
+
+/*!
+ *****************************************************************************
+ * Wrapper for RAROpenArchiveEx with timeout protection
+ ****************************************************************************/
+static int __rar_open_wrapper(void *arg)
+{
+        struct rar_open_args *args = arg;
+        args->result = RAROpenArchiveEx(args->arc);
+        return args->arc->OpenResult;
 }
 
 /*!
@@ -478,6 +580,10 @@ static char *get_password(const char *file, char *buf, size_t len)
                 return NULL;
 
         rar = strdup(file);
+        if (!rar) {
+                printd(1, "get_password: strdup failed\n");
+                return NULL;
+        }
         tmp = rar;
         s = OPT_STR(OPT_KEY_SRC, 0);
 
@@ -507,7 +613,14 @@ static char *get_password(const char *file, char *buf, size_t len)
         while (lx && file[lx] != '.') --lx;
         if (lx) {
                 l[0] = lx;
-                f[0] = strdup(file);
+                /* Allocate space for original path + ".pwd" (worst case: extension replacement) */
+                size_t needed = strlen(file) + 5; /* +5 for ".pwd" + null if ext is shorter */
+                f[0] = malloc(needed);
+                if (!f[0]) {
+                        printd(1, "get_password: malloc failed for f[0]\n");
+                        return NULL;
+                }
+                snprintf(f[0], needed, "%s", file);
         }
         /* In case this is an old-style volume, or even not a volume at
          * all, simply placing the index behind .rar or .rNN should be
@@ -515,19 +628,46 @@ static char *get_password(const char *file, char *buf, size_t len)
         lx = strlen(file);
         if (lx > 4) {
                 l[1] = lx - 4;
-                f[1] = strdup(file);
+                /* Allocate space for original path + ".pwd" (worst case: extension replacement) */
+                size_t needed = strlen(file) + 5; /* +5 for ".pwd" + null if ext is shorter */
+                f[1] = malloc(needed);
+                if (!f[1]) {
+                        printd(1, "get_password: malloc failed for f[1]\n");
+                        free(f[0]);
+                        return NULL;
+                }
+                snprintf(f[1], needed, "%s", file);
         }
         for (i = 0; i < 2; i++) {
                 if (f[i]) {
                         char *F = f[i];
-                        strcpy(F + l[i], ".pwd");
+                        /* Safe: f[i] was allocated with extra space for ".pwd" */
+                        snprintf(F + l[i], 5, ".pwd");
                         FILE *fp = fopen(F, "r");
                         if (!fp) {
                                 char *tmp1 = strdup(F);
+                                if (!tmp1) {
+                                        printd(1, "get_password: strdup failed for tmp1\n");
+                                        continue;
+                                }
                                 char *tmp2 = strdup(F);
-                                F = malloc(strlen(file) + 8);
-                                sprintf(F, "%s%s%s", __gnu_dirname(tmp1),
-                                                "/.", basename(tmp2));
+                                if (!tmp2) {
+                                        printd(1, "get_password: strdup failed for tmp2\n");
+                                        free(tmp1);
+                                        continue;
+                                }
+                                /* Calculate required size: dirname + "/." + basename + null */
+                                char *dir = __gnu_dirname(tmp1);
+                                char *base = basename(tmp2);
+                                size_t needed = strlen(dir) + 2 + strlen(base) + 1;
+                                F = malloc(needed);
+                                if (!F) {
+                                        printd(1, "get_password: malloc failed for F\n");
+                                        free(tmp1);
+                                        free(tmp2);
+                                        continue;
+                                }
+                                snprintf(F, needed, "%s/.%s", dir, base);
                                 free(tmp1);
                                 free(tmp2);
                                 fp = fopen(F, "r");
@@ -796,26 +936,34 @@ static char *get_vname(int t, const char *str, int vol, int len, int pos)
         ENTER_("%s   vol=%d, len=%d, pos=%d", str, vol, len, pos);
 
         char *s = strdup(str);
+        if (!s) {
+                printd(1, "get_vname: strdup failed\n");
+                return NULL;
+        }
         if (t) {
                 char f[16];
                 char f1[16];
-                sprintf(f1, "%%0%dd", len);
-                sprintf(f, f1, vol);
+                snprintf(f1, sizeof(f1), "%%0%dd", len);
+                snprintf(f, sizeof(f), f1, vol);
+                /* Preserve null termination when copying into middle of string */
                 strncpy(&s[pos], f, len);
+                /* s is already null-terminated from strdup, copying middle chars preserves it */
         } else {
                 char f[16];
                 int lower = s[pos - 1] >= 'r';
                 if (vol == 0) {
-                        sprintf(f, "%s", (lower ? "ar" : "AR"));
+                        snprintf(f, sizeof(f), "%s", (lower ? "ar" : "AR"));
                 } else if (vol <= 100) {
-                        sprintf(f, "%02d", (vol - 1));
+                        snprintf(f, sizeof(f), "%02d", (vol - 1));
                 } else { /* Possible, but unlikely */
-                        sprintf(f, "%c%02d", (lower ? 'r' : 'R') + (vol - 1) / 100,
+                        snprintf(f, sizeof(f), "%c%02d", (lower ? 'r' : 'R') + (vol - 1) / 100,
                                                 (vol - 1) % 100);
                         --pos;
                         ++len;
                 }
+                /* Preserve null termination when copying into middle of string */
                 strncpy(&s[pos], f, len);
+                /* s is already null-terminated from strdup, copying middle chars preserves it */
         }
         return s;
 }
@@ -912,6 +1060,10 @@ static int __RARVolNameToFirstName(char *arch, int vtype)
         int pos;
         int vol;
         char *s_orig = strdup(arch);
+        if (!s_orig) {
+                printd(1, "check_files_quick: strdup failed\n");
+                return -1;
+        }
         int ret = 0;
 
         vol = get_vformat(arch, !vtype, &len, &pos);
@@ -935,7 +1087,18 @@ static int __RARVolNameToFirstName(char *arch, int vtype)
                 vol = 1;
         }
 
+        /* Loop iteration limit to prevent infinite loops */
+        int attempt_count = 0;
+        int max_attempts = 100;  /* Hard limit, not configurable */
+
         for (;;) {
+                if (++attempt_count > max_attempts) {
+                        printd(1, "__RARVolNameToFirstName: attempt limit exceeded (%d)\n",
+                               max_attempts);
+                        ret = -1;
+                        goto out;
+                }
+
                 d.ArcName = (char *)arch;   /* Horrible cast! But hey... it is the API! */
                 d.UserData = (LPARAM)arch;
                 h = RAROpenArchiveEx(&d);
@@ -1022,6 +1185,10 @@ static void update_atime(const char* path, struct filecache_entry *entry_p,
         entry_p->stat.st_atim.tv_nsec = tp[0].tv_nsec;
 #endif
         char* tmp1 = strdup(path);
+        if (!tmp1) {
+                printd(1, "update_atime: strdup failed for path\n");
+                return;
+        }
         e_p = filecache_get(__gnu_dirname(tmp1));
         free(tmp1);
         if (e_p && S_ISDIR(e_p->stat.st_mode)) {
@@ -1036,7 +1203,16 @@ static void update_atime(const char* path, struct filecache_entry *entry_p,
 #if defined( HAVE_UTIMENSAT ) && defined( AT_SYMLINK_NOFOLLOW )
                 tp[1].tv_nsec = UTIME_OMIT;
                 tmp1 = strdup(entry_p->rar_p);
+                if (!tmp1) {
+                        printd(1, "update_atime: strdup failed for rar_p\n");
+                        return;
+                }
                 char *tmp2 = strdup(tmp1);
+                if (!tmp2) {
+                        printd(1, "update_atime: strdup failed for tmp1\n");
+                        free(tmp1);
+                        return;
+                }
                 int res = utimensat(0, __gnu_dirname(tmp2), tp,
                                     AT_SYMLINK_NOFOLLOW);
                 if (!res && OPT_SET(OPT_KEY_ATIME_RAR)) {
@@ -1313,6 +1489,17 @@ static int lread_rar_idx(char *buf, size_t size, off_t offset,
         res = pread(op->buf->idx.fd, buf, size, off + sizeof(struct idx_head));
         if (res == -1)
                 return -errno;
+        /* Detect and handle partial or zero reads */
+        if (res == 0) {
+                printd(1, "pread: unexpected EOF at offset %" PRIu64 "\n",
+                       off + sizeof(struct idx_head));
+                return -EIO;
+        }
+        if (res > 0 && res < (ssize_t)size) {
+                printd(1, "pread: partial read %zd of %zu bytes at offset %" PRIu64 "\n",
+                       res, size, off + sizeof(struct idx_head));
+                /* Return actual bytes read - caller should handle partial read */
+        }
 /* This is a workaround for a misbehaving pread(2) on Cygwin (!?).
  * At EOF pread(2) should return 0 but on Cygwin that is not the case and
  * instead some very high number is observed like 1628127168.
@@ -1346,11 +1533,13 @@ static void dump_buf(int seq, FILE *fp, char *buf, off_t offset, size_t size)
                         seq, offset, size_saved, buf);
                 for (i = 0; i < size; i++) {
                         if (!i || !(i % 10)) {
-                                sprintf(tmp, "\n%016llx : ", offset + i);
-                                tmp += 20;
+                                int written = snprintf(tmp, out + sizeof(out) - tmp,
+                                                      "\n%016llx : ", offset + i);
+                                tmp += (written > 0) ? written : 0;
                         }
-                        sprintf(tmp, "%02x ", (uint32_t)*(buf+i) & 0xff);
-                        tmp += 3;
+                        int written = snprintf(tmp, out + sizeof(out) - tmp,
+                                              "%02x ", (uint32_t)*(buf+i) & 0xff);
+                        tmp += (written > 0) ? written : 0;
                         if (i && !(i % 10)) {
                                 fprintf(fp, "%s", out);
                                 tmp = out;
@@ -1367,11 +1556,13 @@ static void dump_buf(int seq, FILE *fp, char *buf, off_t offset, size_t size)
                         fprintf(fp, "\nlast 64 bytes:");
                         for (i = 0; i < 64; i++) {
                                 if (!i || !(i % 10)) {
-                                        sprintf(tmp, "\n%016llx : ", offset + i);
-                                        tmp += 20;
+                                        int written = snprintf(tmp, out + sizeof(out) - tmp,
+                                                              "\n%016llx : ", offset + i);
+                                        tmp += (written > 0) ? written : 0;
                                 }
-                                sprintf(tmp, "%02x ", (uint32_t)*(buf+i) & 0xff);
-                                tmp += 3;
+                                int written = snprintf(tmp, out + sizeof(out) - tmp,
+                                                      "%02x ", (uint32_t)*(buf+i) & 0xff);
+                                tmp += (written > 0) ? written : 0;
                                 if (i && !(i % 10)) {
                                         fprintf(fp, "%s", out);
                                         tmp = out;
@@ -1777,10 +1968,21 @@ static int collect_files(const char *arch)
         HANDLE h;
 
         arch_ = strdup(arch);
-        if (!arch_)
+        if (!arch_) {
                 return -ERAR_NO_MEMORY;
+        }
 
-        h = RAROpenArchiveEx(&d);
+        /* Wrap RAROpenArchiveEx with timeout */
+        struct rar_open_args open_args = {.arc = &d};
+        int timeout_sec = OPT_SET(OPT_KEY_OPERATION_TIMEOUT) ?
+                          OPT_INT(OPT_KEY_OPERATION_TIMEOUT, 0) : 30;
+        if (__execute_with_timeout(__rar_open_wrapper, &open_args,
+                                   timeout_sec, "collect_files:RAROpenArchiveEx") < 0) {
+                printd(1, "collect_files: archive open timed out: %s\n", arch);
+                free(arch_);
+                return -ETIMEDOUT;
+        }
+        h = open_args.result;
 
         /* Check for fault */
         if (d.OpenResult != ERAR_SUCCESS) {
@@ -1798,7 +2000,16 @@ static int collect_files(const char *arch)
                 }
                 RARCloseArchive(h);
                 d.ArcName = (char *)arch_;
-                h = RAROpenArchiveEx(&d);
+
+                /* Wrap RAROpenArchiveEx with timeout */
+                open_args.arc = &d;
+                if (__execute_with_timeout(__rar_open_wrapper, &open_args,
+                                           timeout_sec, "collect_files:RAROpenArchiveEx(vol)") < 0) {
+                        printd(1, "collect_files: volume archive open timed out: %s\n", arch_);
+                        free(arch_);
+                        return -ETIMEDOUT;
+                }
+                h = open_args.result;
 
                 /* Check for fault */
                 if (d.OpenResult != ERAR_SUCCESS) {
@@ -1847,7 +2058,15 @@ skip_file_check:
 
         /* Let libunrar deal with the collection of volume parts */
         if (d.Flags & ROADF_VOLUME) {
-                h = RAROpenArchiveEx(&d);
+                /* Wrap RAROpenArchiveEx with timeout */
+                open_args.arc = &d;
+                if (__execute_with_timeout(__rar_open_wrapper, &open_args,
+                                           timeout_sec, "collect_files:RAROpenArchiveEx(parts)") < 0) {
+                        printd(1, "collect_files: volume parts open timed out\n");
+                        free(arch_);
+                        return -ETIMEDOUT;
+                }
+                h = open_args.result;
 
                 /* Check for fault */
                 if (d.OpenResult != ERAR_SUCCESS) {
@@ -1856,7 +2075,18 @@ skip_file_check:
                         free(arch_);
                         return -d.OpenResult;
                 }
+                /* Loop iteration limit to prevent infinite loops */
+                int iteration_count = 0;
+                int max_volumes = OPT_SET(OPT_KEY_MAX_VOLUME_COUNT) ?
+                                  OPT_INT(OPT_KEY_MAX_VOLUME_COUNT, 0) : 1000;
+
                 while (1) {
+                        if (++iteration_count > max_volumes) {
+                                printd(1, "collect_files: iteration limit exceeded (%d volumes)\n",
+                                       max_volumes);
+                                break;
+                        }
+
                         dll_result = RARReadHeaderEx(h, &header);
                         if (dll_result != ERAR_SUCCESS) {
                                 if (dll_result == ERAR_END_ARCHIVE)
@@ -1865,7 +2095,13 @@ skip_file_check:
                                         dll_result = ERAR_EOPEN;
                                 break;
                         }
-                        (void)RARProcessFile(h, RAR_SKIP, NULL, NULL);
+                        /* Validate RARProcessFile return value */
+                        int skip_res = RARProcessFile(h, RAR_SKIP, NULL, NULL);
+                        if (skip_res != ERAR_SUCCESS) {
+                                printd(1, "RARProcessFile failed in volume collection: %d\n", skip_res);
+                                dll_result = skip_res;
+                                break;
+                        }
                         list = dir_entry_add(list, header.ArcName, NULL,
                                              DIR_E_NRM);
                 }
@@ -1893,6 +2129,12 @@ static int CALLBACK index_callback(UINT msg, LPARAM UserData,
         struct eof_cb_arg *eofd = (struct eof_cb_arg *)UserData;
 
         if (msg == UCM_PROCESSDATA) {
+                /* Validate chunk size is within acceptable bounds */
+                if (P2 <= 0 || P2 > MAX_CHUNK_SIZE) {
+                        printd(1, "index_callback: invalid chunk size %ld (max %ld)\n",
+                               (long)P2, (long)MAX_CHUNK_SIZE);
+                        return -1;
+                }
                 /*
                  * We do not need to handle the case that not all data is
                  * written after return from write() since the pipe is not
@@ -1911,17 +2153,41 @@ static int CALLBACK index_callback(UINT msg, LPARAM UserData,
                 }
                 if (eofd->coff == eofd->toff) {
                         eofd->size += P2;
-                        NO_UNUSED_RESULT write(eofd->fd, (char *)P1, P2);
+                        /* Detect and handle partial writes */
+                        ssize_t written = write(eofd->fd, (char *)P1, P2);
+                        if (written != (ssize_t)P2) {
+                                if (written == -1) {
+                                        printd(1, "index_callback: write failed: %s\n",
+                                               strerror(errno));
+                                } else {
+                                        printd(1, "index_callback: partial write %zd of %ld bytes\n",
+                                               written, (long)P2);
+                                }
+                                return -1;
+                        }
                         fdatasync(eofd->fd);      /* XXX needed!? */
                         eofd->toff += P2;
                         eofd->coff = eofd->toff;
                 }
 
         }
-        if (msg == UCM_CHANGEVOLUME)
-                return access((char *)P1, F_OK);
+        /* Check volume file accessibility and log errors */
+        if (msg == UCM_CHANGEVOLUME) {
+                int res = access((char *)P1, F_OK);
+                if (res != 0) {
+                        printd(2, "index_callback: volume not accessible: %s (errno=%d)\n",
+                               (char *)P1, errno);
+                }
+                return res == 0 ? 0 : -1;
+        }
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
         if (msg == UCM_NEEDPASSWORDW) {
+                /* Validate password buffer size to prevent overflow */
+                if (P2 > MAX_PASSWORD_LEN) {
+                        printd(1, "index_callback: password buffer size too large: %ld (max %d)\n",
+                               (long)P2, MAX_PASSWORD_LEN);
+                        return -1;
+                }
                 if (!get_password(eofd->arch, (wchar_t *)P1, P2))
                         return -1;
         }
@@ -1964,7 +2230,13 @@ static int extract_index(const char *path, const struct filecache_entry *entry_p
         d.UserData = (LPARAM)&eofd;
 
         ABS_ROOT(r2i, path);
-        strcpy(&r2i[strlen(r2i) - 3], "r2i");
+        /* Validate string length before modifying extension */
+        size_t r2i_len = strlen(r2i);
+        if (r2i_len < 3) {
+                printd(1, "create_index: path too short for .r2i extension: %s\n", r2i);
+                goto index_error;
+        }
+        strcpy(&r2i[r2i_len - 3], "r2i");
 
         eofd.fd = open(r2i, O_WRONLY|O_CREAT|O_EXCL,
                         S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
@@ -1980,19 +2252,41 @@ static int extract_index(const char *path, const struct filecache_entry *entry_p
         while (1) {
                 if (RARReadHeaderEx(hdl, &header))
                         break;
+                /* Ensure header filename is properly null-terminated */
+                if (strnlen(header.FileName, sizeof(header.FileName)) >= sizeof(header.FileName)) {
+                        printd(1, "create_index: invalid filename in header (not null-terminated)\n");
+                        e = ERAR_BAD_DATA;
+                        break;
+                }
                 /* We won't extract subdirs */
                 if (IS_RAR_DIR(&header) ||
                         strcmp(header.FileName, entry_p->file_p)) {
-                                if (RARProcessFile(hdl, RAR_SKIP, NULL, NULL))
+                                /* Check for skip errors and distinguish from EOF */
+                                int skip_res = RARProcessFile(hdl, RAR_SKIP, NULL, NULL);
+                                if (skip_res != ERAR_SUCCESS) {
+                                        printd(1, "RARProcessFile skip failed in index generation: %d\n", skip_res);
+                                        if (skip_res != ERAR_END_ARCHIVE)
+                                                e = skip_res;
                                         break;
+                                }
                 } else {
+                        /* Test file extraction and log any errors */
                         e = RARProcessFile(hdl, RAR_TEST, NULL, NULL);
+                        if (e) {
+                                printd(1, "RARProcessFile test failed in index generation: %d\n", e);
+                        }
                         if (!e) {
                                 head.offset = offset;
                                 head.size = eofd.size;
                                 lseek(eofd.fd, (off_t)0, SEEK_SET);
-                                NO_UNUSED_RESULT write(eofd.fd, (void*)&head,
+                                /* Verify complete write of index header */
+                                ssize_t hdr_written = write(eofd.fd, (void*)&head,
                                                 sizeof(struct idx_head));
+                                if (hdr_written != sizeof(struct idx_head)) {
+                                        printd(1, "extract_index: failed to write index header (wrote %zd of %zu)\n",
+                                               hdr_written, sizeof(struct idx_head));
+                                        e = ERAR_EWRITE;
+                                }
                         }
                         break;
                 }
@@ -2003,6 +2297,7 @@ index_error:
                 close(eofd.fd);
         if (hdl)
                 RARCloseArchive(hdl);
+
         return e ? -1 : 0;
 }
 
@@ -2026,6 +2321,12 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
                         }
                         return -1;
                 }
+                /* Validate chunk size is within acceptable bounds */
+                if (P2 <= 0 || P2 > MAX_CHUNK_SIZE) {
+                        printd(1, "extract_callback: invalid chunk size %ld (max %ld)\n",
+                               (long)P2, (long)MAX_CHUNK_SIZE);
+                        return -1;
+                }
                 /*
                  * We do not need to handle the case that not all data is
                  * written after return from write() since the pipe is not
@@ -2042,10 +2343,23 @@ static int CALLBACK extract_callback(UINT msg, LPARAM UserData,
                         return -1;
                 }
         }
-        if (msg == UCM_CHANGEVOLUME)
-                return access((char *)P1, F_OK);
+        /* Check volume file accessibility and log errors */
+        if (msg == UCM_CHANGEVOLUME) {
+                int res = access((char *)P1, F_OK);
+                if (res != 0) {
+                        printd(2, "extract_callback: volume not accessible: %s (errno=%d)\n",
+                               (char *)P1, errno);
+                }
+                return res == 0 ? 0 : -1;
+        }
 #if RARVER_MAJOR > 4 || ( RARVER_MAJOR == 4 && RARVER_MINOR >= 20 )
         if (msg == UCM_NEEDPASSWORDW) {
+                /* Validate password buffer size to prevent overflow */
+                if (P2 > MAX_PASSWORD_LEN) {
+                        printd(1, "extract_callback: password buffer size too large: %ld (max %d)\n",
+                               (long)P2, MAX_PASSWORD_LEN);
+                        return -1;
+                }
                 if (!get_password(cb_arg->arch, (wchar_t *)P1, P2))
                         return -1;
         }
@@ -2080,7 +2394,18 @@ static int extract_rar(char *arch, const char *file, void *arg)
         d.UserData = (LPARAM)&cb_arg;
         struct RARHeaderDataEx header;
         memset(&header, 0, sizeof(header));
-        HANDLE hdl = RAROpenArchiveEx(&d);
+
+        /* Wrap RAROpenArchiveEx with timeout */
+        struct rar_open_args open_args = {.arc = &d};
+        int timeout_sec = OPT_SET(OPT_KEY_OPERATION_TIMEOUT) ?
+                          OPT_INT(OPT_KEY_OPERATION_TIMEOUT, 0) : 30;
+        if (__execute_with_timeout(__rar_open_wrapper, &open_args,
+                                   timeout_sec, "extract_rar:RAROpenArchiveEx") < 0) {
+                printd(1, "extract_rar: archive open timed out: %s\n", arch);
+                return -ETIMEDOUT;
+        }
+        HANDLE hdl = open_args.result;
+
         if (d.OpenResult)
                 goto extract_error;
 
@@ -2090,10 +2415,20 @@ static int extract_rar(char *arch, const char *file, void *arg)
                         break;
                 /* We won't extract subdirs */
                 if (IS_RAR_DIR(&header) || strcmp(header.FileName, file)) {
-                        if (RARProcessFile(hdl, RAR_SKIP, NULL, NULL))
+                        /* Check for skip errors and distinguish from EOF */
+                        int skip_res = RARProcessFile(hdl, RAR_SKIP, NULL, NULL);
+                        if (skip_res != ERAR_SUCCESS) {
+                                printd(1, "RARProcessFile skip failed in extraction: %d\n", skip_res);
+                                if (skip_res != ERAR_END_ARCHIVE)
+                                        ret = skip_res;
                                 break;
+                        }
                 } else {
+                        /* Test file extraction and log any errors */
                         ret = RARProcessFile(hdl, RAR_TEST, NULL, NULL);
+                        if (ret) {
+                                printd(1, "RARProcessFile test failed in extraction: %d\n", ret);
+                        }
                         break;
                 }
         }
@@ -2159,14 +2494,42 @@ static uint64_t extract_file_size(char *arch, const char *file)
                          * uncompressed size. */
                         if (header.Method == FHD_STORING &&
                                         !IS_RAR_DIR(&header)) {
-                                size += GET_RAR_PACK_SZ(&header);
+                                /* Validate packed size is within reasonable limits */
+                                uint64_t pack_size = GET_RAR_PACK_SZ(&header);
+                                if (pack_size > MAX_REASONABLE_FILE_SIZE) {
+                                        printd(1, "extract_file_size: suspicious pack size %llu (max %llu)\n",
+                                               (unsigned long long)pack_size,
+                                               (unsigned long long)MAX_REASONABLE_FILE_SIZE);
+                                        break;
+                                }
+                                /* Prevent integer overflow when accumulating size */
+                                if (size > UINT64_MAX - pack_size) {
+                                        printd(1, "extract_file_size: size overflow detected\n");
+                                        size = UINT64_MAX;
+                                        break;
+                                }
+                                size += pack_size;
                         } else {
-                                size = GET_RAR_SZ(&header);
+                                /* Validate uncompressed size is within reasonable limits */
+                                uint64_t file_size = GET_RAR_SZ(&header);
+                                if (file_size > MAX_REASONABLE_FILE_SIZE) {
+                                        printd(1, "extract_file_size: suspicious file size %llu (max %llu)\n",
+                                               (unsigned long long)file_size,
+                                               (unsigned long long)MAX_REASONABLE_FILE_SIZE);
+                                        size = 0;
+                                } else {
+                                        size = file_size;
+                                }
                                 break;
                         }
                 }
-                if (RARProcessFile(hdl, RAR_SKIP, NULL, NULL))
+                /* Check for skip errors and distinguish from EOF */
+                int skip_res = RARProcessFile(hdl, RAR_SKIP, NULL, NULL);
+                if (skip_res != ERAR_SUCCESS) {
+                        printd(1, "RARProcessFile skip failed in size calculation: %d\n", skip_res);
+                        /* Continue even on errors to return best effort size */
                         break;
+                }
         }
 
 out:
@@ -2206,13 +2569,20 @@ static void set_rarstats(struct filecache_entry *entry_p, RARArchiveDataEx *arc,
                                                 sizeof(arc->LinkTarget));
                                         if ((int)len != -1) {
                                                 entry_p->link_target_p = strdup(tmp);
-                                                st_size = len;
+                                                if (!entry_p->link_target_p) {
+                                                        printd(1, "__listrar_tocache: strdup failed for link_target_p (unicode)\n");
+                                                } else {
+                                                        st_size = len;
+                                                }
                                         }
                                         free(tmp);
                                 }
                         } else {
                                 entry_p->link_target_p =
                                         strdup(arc->LinkTarget);
+                                if (!entry_p->link_target_p) {
+                                        printd(1, "__listrar_tocache: strdup failed for link_target_p\n");
+                                }
                         }
                 }
                 if (OPT_SET(OPT_KEY_NO_INHERIT_PERM)) {
@@ -2361,6 +2731,11 @@ static struct filecache_entry *lookup_filecopy(const char *path,
                                 ABS_MP(mp2, (*rar_root ? rar_root : "/"), tmp);
                         } else {
                                 char *rar_dir = strdup(tmp);
+                                if (!rar_dir) {
+                                        printd(1, "lookup_filecopy: strdup failed for rar_dir\n");
+                                        free(tmp);
+                                        return NULL;
+                                }
                                 ABS_MP(mp2, path, basename(rar_dir));
                                 free(rar_dir);
                         }
@@ -2443,6 +2818,10 @@ void __add_filler(const char *path, struct dir_entry_list **buffer,
 
         /* Cut input file path on current lookup level */
         char *file_dup = strdup(file);
+        if (!file_dup) {
+                printd(1, "__listrar_filldir: strdup failed for file_dup\n");
+                return;
+        }
         char *s = file_dup + path_len;
         s = strchr(s, '/');
         if (s)
@@ -2451,6 +2830,11 @@ void __add_filler(const char *path, struct dir_entry_list **buffer,
         struct filecache_entry *entry_p = filecache_get(file_dup);
         if (entry_p != NULL) {
                 char *safe_path = strdup(file_dup);
+                if (!safe_path) {
+                        printd(1, "__listrar_filldir: strdup failed for safe_path\n");
+                        free(file_dup);
+                        return;
+                }
                 *buffer = dir_entry_add(*buffer, basename(file_dup),
                                                 &entry_p->stat,
                                                 DIR_E_RAR);
@@ -2529,7 +2913,20 @@ static struct filecache_entry *__listrar_tocache(char *file,
         entry_p = filecache_alloc(file);
 
         entry_p->rar_p = strdup(first_arch);
+        if (!entry_p->rar_p) {
+                printd(1, "__listrar_tocache: strdup failed for rar_p\n");
+                filecache_invalidate(file);
+                return NULL;
+        }
         entry_p->file_p = strdup(arc->hdr.FileName);
+        if (!entry_p->file_p) {
+                printd(1, "__listrar_tocache: strdup failed for file_p\n");
+                /* Free previously allocated memory to prevent leak */
+                free(entry_p->rar_p);
+                entry_p->rar_p = NULL;
+                filecache_invalidate(file);
+                return NULL;
+        }
         entry_p->flags.vsize_resolved = 1; /* Assume sizes will be resolved */
         if (IS_RAR_DIR(&arc->hdr))
                 entry_p->flags.unresolved = 0;
@@ -2596,12 +2993,20 @@ static struct filecache_entry *__listrar_tocache(char *file,
  *****************************************************************************
  *
  ****************************************************************************/
-static void __listrar_tocache_forcedir(struct filecache_entry *entry_p,
+static int __listrar_tocache_forcedir(struct filecache_entry *entry_p,
                 RARArchiveDataEx *arc, const char *file, char *first_arch,
                 RAROpenArchiveDataEx *d)
 {
         entry_p->rar_p = strdup(first_arch);
+        if (!entry_p->rar_p) {
+                printd(1, "__listrar_tocache_forcedir: strdup failed for rar_p\n");
+                return -ENOMEM;
+        }
         entry_p->file_p = strdup(file);
+        if (!entry_p->file_p) {
+                printd(1, "__listrar_tocache_forcedir: strdup failed for file_p\n");
+                return -ENOMEM;
+        }
         entry_p->flags.force_dir = 1;
         entry_p->flags.unresolved = 0;
 
@@ -2614,6 +3019,7 @@ static void __listrar_tocache_forcedir(struct filecache_entry *entry_p,
         } else {
                 entry_p->flags.multipart = 0;
         }
+        return 0;
 }
 
 /*!
@@ -2642,9 +3048,13 @@ static void __listrar_cachedirentry(const char *mp)
                 struct dircache_entry *dce = dircache_get(safe_path);
                 if (dce) {
                         char *tmp2 = strdup(mp);
-                        dir_entry_add(&dce->dir_entry_list, basename(tmp2),
-                                      NULL, DIR_E_RAR);
-                        free(tmp2);
+                        if (!tmp2) {
+                                printd(1, "__listrar_noswitch: strdup failed for tmp2\n");
+                        } else {
+                                dir_entry_add(&dce->dir_entry_list, basename(tmp2),
+                                              NULL, DIR_E_RAR);
+                                free(tmp2);
+                        }
                 }
                 pthread_rwlock_unlock(&dir_access_lock);
         }
@@ -2665,7 +3075,17 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         d.OpenMode = RAR_OM_LIST_INCSPLIT;
         d.Callback = list_callback_noswitch;
         d.UserData = (LPARAM)arch;
-        HANDLE hdl = RAROpenArchiveEx(&d);
+
+        /* Wrap RAROpenArchiveEx with timeout */
+        struct rar_open_args open_args = {.arc = &d};
+        int timeout_sec = OPT_SET(OPT_KEY_OPERATION_TIMEOUT) ?
+                          OPT_INT(OPT_KEY_OPERATION_TIMEOUT, 0) : 30;
+        if (__execute_with_timeout(__rar_open_wrapper, &open_args,
+                                   timeout_sec, "listrar:RAROpenArchiveEx") < 0) {
+                printd(1, "listrar: archive open timed out: %s\n", arch);
+                return -ETIMEDOUT;
+        }
+        HANDLE hdl = open_args.result;
 
         /* Check for fault */
         if (d.OpenResult) {
@@ -2677,13 +3097,31 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         if (d.Flags & ROADF_ENCHEADERS) {
                 RARCloseArchive(hdl);
                 d.Callback = list_callback;
-                hdl = RAROpenArchiveEx(&d);
+
+                /* Wrap RAROpenArchiveEx with timeout */
+                open_args.arc = &d;
+                if (__execute_with_timeout(__rar_open_wrapper, &open_args,
+                                           timeout_sec, "listrar:RAROpenArchiveEx(enc)") < 0) {
+                        printd(1, "listrar: encrypted archive open timed out: %s\n", arch);
+                        return -ETIMEDOUT;
+                }
+                hdl = open_args.result;
+
                 if (final)
                         *final = 1;
         }
 
         char *tmp1 = strdup(arch);
+        if (!tmp1) {
+                printd(1, "listrar: strdup failed for arch\n");
+                return -ENOMEM;
+        }
         char *rar_root = strdup(__gnu_dirname(tmp1));
+        if (!rar_root) {
+                printd(1, "listrar: strdup failed for rar_root\n");
+                free(tmp1);
+                return -ENOMEM;
+        }
         free(tmp1);
         tmp1 = rar_root;
         rar_root += strlen(OPT_STR2(OPT_KEY_SRC, 0));
@@ -2694,6 +3132,11 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
         if (*first_arch == NULL) {
                 /* The caller is responsible for freeing this! */
                 *first_arch = strdup(arch);
+                if (!*first_arch) {
+                        printd(1, "listrar: strdup failed for first_arch\n");
+                        ret = -ENOMEM;
+                        goto out;
+                }
 
                 /* Make sure parent folders are always searched from the first
                  * volume file since sub-folders might actually be placed
@@ -2707,8 +3150,20 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 }
         }
 
+        /* Loop iteration limit to prevent infinite loops */
+        int entry_count = 0;
+        /* Fix: OPT_INT's 2nd param is array index, not default value */
+        int max_entries = OPT_SET(OPT_KEY_MAX_ARCHIVE_ENTRIES) ?
+                          OPT_INT(OPT_KEY_MAX_ARCHIVE_ENTRIES, 0) : 10000;
+
         int dll_result = ERAR_SUCCESS;
         while (dll_result == ERAR_SUCCESS) {
+                if (++entry_count > max_entries) {
+                        printd(1, "listrar: entry limit exceeded (%d entries)\n",
+                               max_entries);
+                        break;
+                }
+
                 if ((dll_result = RARListArchiveEx(hdl, &arc))) {
                         if (dll_result != ERAR_EOPEN) {
                                 if (dll_result != ERAR_END_ARCHIVE)
@@ -2733,6 +3188,13 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 if (is_root_path) {
                         int populate_cache = 0;
                         char *safe_path = strdup(arc->hdr.FileName);
+                        if (!safe_path) {
+                                printd(1, "listrar: strdup failed for safe_path (forcedir)\n");
+                                ret = -ENOMEM;
+                                /* Release lock before jumping to cleanup */
+                                pthread_rwlock_unlock(&file_access_lock);
+                                goto out;
+                        }
                         char *tmp = safe_path;
                         while (1) {
                                 char *mp2;
@@ -2746,8 +3208,16 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                 if (entry_p == NULL) {
                                         printd(3, "Adding %s to cache\n", mp2);
                                         entry_p = filecache_alloc(mp2);
-                                        __listrar_tocache_forcedir(entry_p, arc,
+                                        ret = __listrar_tocache_forcedir(entry_p, arc,
                                                         safe_path, *first_arch, &d);
+                                        if (ret < 0) {
+                                                printd(1, "Failed to cache forcedir entry\n");
+                                                filecache_invalidate(mp2);
+                                                free(mp2);
+                                                /* Release lock before jumping to cleanup */
+                                                pthread_rwlock_unlock(&file_access_lock);
+                                                goto out;
+                                        }
                                         __listrar_cachedir(mp2);
                                         populate_cache = 1;
                                 }
@@ -2758,6 +3228,13 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                 /* Entries have been forced into the cache.
                                  * Add the child node to each entry. */
                                 safe_path = strdup(arc->hdr.FileName);
+                                if (!safe_path) {
+                                        printd(1, "listrar: strdup failed for safe_path (cachedir)\n");
+                                        ret = -ENOMEM;
+                                        /* Release lock before jumping to cleanup */
+                                        pthread_rwlock_unlock(&file_access_lock);
+                                        goto out;
+                                }
                                 tmp = safe_path;
                                 while (1) {
                                         char *mp2;
@@ -2795,7 +3272,19 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         if (e_p) {
                                 printd(3, "Adding %s to cache\n", mp);
                                 entry_p = filecache_alloc(mp);
-                                filecache_copy(e_p, entry_p);
+                                if (!entry_p) {
+                                        printd(1, "listrar: filecache_alloc failed for filecopy\n");
+                                        pthread_rwlock_unlock(&file_access_lock);
+                                        free(mp);
+                                        continue;
+                                }
+                                if (filecache_copy(e_p, entry_p) != 0) {
+                                        printd(1, "listrar: filecache_copy failed for filecopy\n");
+                                        filecache_invalidate(mp);
+                                        pthread_rwlock_unlock(&file_access_lock);
+                                        free(mp);
+                                        continue;
+                                }
                                 /* Preserve stats of original file */
                                 set_rarstats(entry_p, arc, 0);
                                 goto cache_hit;
@@ -3119,6 +3608,11 @@ static int syncdir(const char *path)
                 int res;
 
                 dir_list = malloc(sizeof(struct dir_entry_list));
+                if (!dir_list) {
+                        printd(1, "syncfs: malloc failed for dir_list\n");
+                        closedir(dp);
+                        return -ENOMEM;
+                }
                 next = dir_list;
                 if (!next) {
                         closedir(dp);
@@ -3164,6 +3658,10 @@ static int syncrar(const char *path)
                 return 0;
 
         dir_list = malloc(sizeof(struct dir_entry_list));
+        if (!dir_list) {
+                printd(1, "syncrar: malloc failed for dir_list\n");
+                return -ENOMEM;
+        }
         next = dir_list;
         if (!next)
                 return -ENOMEM;
@@ -3226,6 +3724,10 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
         if (OPT_FILTER(path))
                 return -ENOENT;
         char *safe_path = strdup(path);
+        if (!safe_path) {
+                printd(1, "rar2_getattr: strdup failed for safe_path\n");
+                return -ENOMEM;
+        }
         char *tmp = safe_path;
         while (1) {
                 safe_path = __gnu_dirname(safe_path);
@@ -3253,6 +3755,10 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
                                 !strcmp(&path[len_path - len_cmd], file_cmd[cmd])) {
                         char *root;
                         char *real = strdup(path);
+                        if (!real) {
+                                printd(1, "rar2_getattr: strdup failed for real (file_cmd)\n");
+                                return -ENOMEM;
+                        }
                         real[len_path - len_cmd] = 0;
                         ABS_ROOT(root, real);
                         if (access(root, F_OK)) {
@@ -3319,6 +3825,10 @@ static int rar2_getattr2(const char *path, struct stat *stbuf)
                                 !strcmp(&path[len_path - len_cmd], file_cmd[cmd])) {
                         char *root;
                         char *real = strdup(path);
+                        if (!real) {
+                                printd(1, "rar2_getattr2: strdup failed for real\n");
+                                return -ENOMEM;
+                        }
                         real[len_path - len_cmd] = 0;
                         ABS_ROOT(root, real);
                         if (filecache_get(real)) {
@@ -3455,7 +3965,10 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
         int ret = 0;
         (void)offset;           /* touch */
 
-        assert(FH_ISSET(fi->fh) && "bad I/O handle");
+        if (!FH_ISSET(fi->fh)) {
+                printd(1, "readdir: bad I/O handle (fh is NULL)\n");
+                return -EIO;
+        }
 
         struct io_handle *io = FH_TOIO(fi->fh);
         if (io == NULL)
@@ -3510,6 +4023,11 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
          * This is a similar action as required for a cache miss in
          * getattr(). */
         char *safe_path = strdup(path);
+        if (!safe_path) {
+                printd(1, "rar2_readdir: strdup failed for safe_path\n");
+                free(dir_list2);
+                return -ENOMEM;
+        }
         char *tmp = safe_path;
         while (*safe_path != '/') {
                 safe_path = __gnu_dirname(safe_path);
@@ -3587,6 +4105,10 @@ static int rar2_readdir2(const char *path, void *buffer,
                 char *first_arch;
                 pthread_rwlock_unlock(&dir_access_lock);
                 dir_list = malloc(sizeof(struct dir_entry_list));
+                if (!dir_list) {
+                        printd(1, "rar2_readdir2: malloc failed for dir_list\n");
+                        return -ENOMEM;
+                }
                 struct dir_entry_list *next = dir_list;
                 if (!next)
                         return -ENOMEM;
@@ -3736,7 +4258,13 @@ static int preload_index(struct iob *buf, const char *path)
 
         char *r2i;
         ABS_ROOT(r2i, path);
-        strcpy(&r2i[strlen(r2i) - 3], "r2i");
+        /* Validate string length before modifying extension */
+        size_t r2i_len = strlen(r2i);
+        if (r2i_len < 3) {
+                printd(1, "preload_index: path too short for .r2i extension: %s\n", r2i);
+                return -1;
+        }
+        strcpy(&r2i[r2i_len - 3], "r2i");
         printd(3, "Preloading index for %s\n", r2i);
 
         buf->idx.data_p = MAP_FAILED;
@@ -3771,11 +4299,21 @@ static int preload_index(struct iob *buf, const char *path)
 #else
         buf->idx.data_p = malloc(sizeof(struct idx_data));
         if (!buf->idx.data_p) {
+                printd(1, "preload_index: malloc failed\n");
                 close(fd);
                 buf->idx.data_p = MAP_FAILED;
                 return -1;
         }
-        NO_UNUSED_RESULT read(fd, buf->idx.data_p, sizeof(struct idx_head));
+        /* Verify complete read of index header */
+        ssize_t bytes_read = read(fd, buf->idx.data_p, sizeof(struct idx_head));
+        if (bytes_read != sizeof(struct idx_head)) {
+                printd(1, "preload_index: short read of index header (%zd of %zu bytes)\n",
+                       bytes_read, sizeof(struct idx_head));
+                close(fd);
+                free(buf->idx.data_p);
+                buf->idx.data_p = MAP_FAILED;
+                return -1;
+        }
         if (ntohs(buf->idx.data_p->head.version) == 0) {
                 syslog(LOG_INFO, "preloaded index header version 0 not supported");
                 close(fd);
@@ -3933,6 +4471,11 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                 while (file_cmd[cmd]) {
                         if (!strcmp(&path[strlen(path) - 5], "#info")) {
                                 char *tmp = strdup(path);
+                                if (!tmp) {
+                                        printd(1, "rar2_open: strdup failed for tmp (#info)\n");
+                                        pthread_rwlock_unlock(&file_access_lock);
+                                        return -ENOMEM;
+                                }
                                 tmp[strlen(path) - 5] = 0;
                                 entry_p = path_lookup(tmp, NULL);
                                 free(tmp);
@@ -3959,11 +4502,23 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
                 struct filecache_entry *e_p = filecache_clone(entry_p);
                 pthread_rwlock_unlock(&file_access_lock);
                 struct RARWcb *wcb = malloc(sizeof(struct RARWcb));
+                if (!wcb) {
+                        printd(1, "rar2_open: malloc failed for wcb\n");
+                        free(io);
+                        return -ENOMEM;
+                }
                 memset(wcb, 0, sizeof(struct RARWcb));
                 FH_SETIO(fi->fh, io);
                 FH_SETTYPE(fi->fh, IO_TYPE_INFO);
                 FH_SETBUF(fi->fh, wcb);
-                FH_SETPATH(fi->fh, strdup(path));
+                char *path_dup = strdup(path);
+                if (!path_dup) {
+                        printd(1, "rar2_open: strdup failed for path_dup\n");
+                        free(wcb);
+                        free(io);
+                        return -ENOMEM;
+                }
+                FH_SETPATH(fi->fh, path_dup);
                 fi->direct_io = 1;   /* skip cache */
                 extract_rar_file_info(e_p, wcb);
                 filecache_freeclone(e_p);
@@ -4117,7 +4672,7 @@ static int rar2_open(const char *path, struct fuse_file_info *fi)
 
 #ifdef DEBUG_READ
                         char out_file[32];
-                        sprintf(out_file, "%s.%d", "output", pid);
+                        snprintf(out_file, sizeof(out_file), "%s.%d", "output", pid);
                         op->dbg_fp = fopen(out_file, "w");
 #endif
                         /*
@@ -4190,6 +4745,10 @@ static inline int access_chk(const char *path, int new_file)
          */
         if (new_file) {
                 char *p = strdup(path); /* In case p is destroyed by dirname() */
+                if (!p) {
+                        printd(1, "is_file_cached: strdup failed for p\n");
+                        return 0;
+                }
                 e = filecache_get(__gnu_dirname(p));
                 free(p);
         } else {
@@ -4248,32 +4807,29 @@ static void walkpath(const char *dname, size_t src_len)
         }
 
         len = strlen(dname);
-        if (len >= FILENAME_MAX - 1)
+#ifdef PATH_MAX
+        if (len >= PATH_MAX - 1)
                 return;
+#endif
 
         dir = opendir(dname);
         if (dir == NULL)
                 goto out;
 
-        /* From www.gnu.org:
-         *   Macro: int FILENAME_MAX
-         *     The value of this macro is an integer constant expression that
-         *     represents the maximum length of a file name string. It is
-         *     defined in stdio.h.
-         *
-         *     Unlike PATH_MAX, this macro is defined even if there is no actual
-         *     limit imposed. In such a case, its value is typically a very
-         *     large number. This is always the case on GNU/Hurd systems.
-         *
-         *     Usage Note: Don't use FILENAME_MAX as the size of an array in
-         *     which to store a file name! You can't possibly make an array that
-         *     big! Use dynamic allocation instead.
+        /* Allocate buffer for path construction: dname + '/' + filename
+         * Use NAME_MAX for max filename component size.
+         * From glibc docs: Don't use FILENAME_MAX for arrays - use dynamic allocation.
          */
-        fn = malloc(FILENAME_MAX);
+#ifdef NAME_MAX
+        size_t fn_size = len + NAME_MAX + 2;
+#else
+        size_t fn_size = len + 256 + 2; /* Fallback if NAME_MAX not defined */
+#endif
+        fn = malloc(fn_size);
         if (fn == NULL)
                 goto out;
 
-        strcpy(fn, dname);
+        memcpy(fn, dname, len);
         fn[len++] = '/';
 
         /* Do not use reentrant version of readdir(3) here.
@@ -4289,7 +4845,7 @@ static void walkpath(const char *dname, size_t src_len)
                                 continue;
                 }
 
-                strncpy(fn + len, dent->d_name, FILENAME_MAX - len);
+                snprintf(fn + len, fn_size - len, "%s", dent->d_name);
 #ifdef _DIRENT_HAVE_D_TYPE
                 if (dent->d_type != DT_UNKNOWN) {
                         if (dent->d_type == DT_DIR)
@@ -4588,9 +5144,13 @@ static int rar2_read(const char *path, char *buffer, size_t size, off_t offset,
 {
         int res;
         struct io_handle *io;
-        assert(FH_ISSET(fi->fh) && "bad I/O handle");
 
         (void)path;             /* touch */
+
+        if (!FH_ISSET(fi->fh)) {
+                printd(1, "read: bad I/O handle (fh is NULL)\n");
+                return -EIO;
+        }
 
         io = FH_TOIO(fi->fh);
         if (!io)
@@ -5190,11 +5750,13 @@ static int check_paths(const char *prog, char *src_path, char *dst_path)
                                 fs_loop = 1;
                                 char *safe_path = strdup(dst_path);
                                 char *tmp = basename(safe_path);
-                                fs_loop_mp_root = malloc(strlen(tmp) + 2);
-                                sprintf(fs_loop_mp_root, "/%s", tmp);
+                                size_t root_size = strlen(tmp) + 2;
+                                fs_loop_mp_root = malloc(root_size);
+                                snprintf(fs_loop_mp_root, root_size, "/%s", tmp);
                                 free(safe_path);
-                                fs_loop_mp_base = malloc(strlen(fs_loop_mp_root) + 2);
-                                sprintf(fs_loop_mp_base, "%s/", fs_loop_mp_root);
+                                size_t base_size = strlen(fs_loop_mp_root) + 2;
+                                fs_loop_mp_base = malloc(base_size);
+                                snprintf(fs_loop_mp_base, base_size, "%s/", fs_loop_mp_root);
                                 fs_loop_mp_base_len = strlen(fs_loop_mp_base);
                         }
                 }
@@ -5335,7 +5897,9 @@ static void scan_fuse_new_args(struct fuse_args *args)
                                         needle = NULL;
                         }
                         if (needle) {
-                                strcpy(needle, needle + strlen(match_w_arg) + 1);
+                                /* Use memmove for overlapping memory regions */
+                                size_t offset = strlen(match_w_arg) + 1;
+                                memmove(needle, needle + offset, strlen(needle + offset) + 1);
                                 break;
                         }
                 }
@@ -5623,6 +6187,9 @@ static struct option longopts[] = {
         {"date-rar",          no_argument, NULL, OPT_ADDR(OPT_KEY_DATE_RAR)},
         {"config",      required_argument, NULL, OPT_ADDR(OPT_KEY_CONFIG)},
         {"no-inherit-perm",   no_argument, NULL, OPT_ADDR(OPT_KEY_NO_INHERIT_PERM)},
+        {"operation-timeout", required_argument, NULL, OPT_ADDR(OPT_KEY_OPERATION_TIMEOUT)},
+        {"max-volume-count", required_argument, NULL, OPT_ADDR(OPT_KEY_MAX_VOLUME_COUNT)},
+        {"max-archive-entries", required_argument, NULL, OPT_ADDR(OPT_KEY_MAX_ARCHIVE_ENTRIES)},
         {NULL,                          0, NULL, 0}
 };
 

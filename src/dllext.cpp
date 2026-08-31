@@ -172,9 +172,25 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveDataEx **NN)
         else
         {
 #if RARVER_MAJOR >= 7
-          wcscpy(N->LinkTargetW,Arc.FileHead.RedirName.c_str());
+          size_t len = Arc.FileHead.RedirName.length();
+          if (len >= 1024) {
+            cerr << "RedirName too long for UNIXSYMLINK: " << len << " (max 1023)" << endl;
+            delete N;
+            *NN = NULL;
+            return ERAR_BAD_DATA;
+          }
+          wcsncpy(N->LinkTargetW, Arc.FileHead.RedirName.c_str(), 1023);
+          N->LinkTargetW[1023] = L'\0';
 #else
-          wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
+          size_t len = wcslen(Arc.FileHead.RedirName);
+          if (len >= 1024) {
+            cerr << "RedirName too long for UNIXSYMLINK: " << len << " (max 1023)" << endl;
+            delete N;
+            *NN = NULL;
+            return ERAR_BAD_DATA;
+          }
+          wcsncpy(N->LinkTargetW, Arc.FileHead.RedirName, 1023);
+          N->LinkTargetW[1023] = L'\0';
 #endif
           N->LinkTargetFlags |= LINK_T_UNICODE; // Make sure UNICODE is set
         }
@@ -182,9 +198,25 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveDataEx **NN)
       else if (Arc.FileHead.RedirType == FSREDIR_FILECOPY)
       {
 #if RARVER_MAJOR >= 7
-          wcscpy(N->LinkTargetW,Arc.FileHead.RedirName.c_str());
+          size_t len = Arc.FileHead.RedirName.length();
+          if (len >= 1024) {
+            cerr << "RedirName too long for FILECOPY: " << len << " (max 1023)" << endl;
+            delete N;
+            *NN = NULL;
+            return ERAR_BAD_DATA;
+          }
+          wcsncpy(N->LinkTargetW, Arc.FileHead.RedirName.c_str(), 1023);
+          N->LinkTargetW[1023] = L'\0';
 #else
-          wcscpy(N->LinkTargetW,Arc.FileHead.RedirName);
+          size_t len = wcslen(Arc.FileHead.RedirName);
+          if (len >= 1024) {
+            cerr << "RedirName too long for FILECOPY: " << len << " (max 1023)" << endl;
+            delete N;
+            *NN = NULL;
+            return ERAR_BAD_DATA;
+          }
+          wcsncpy(N->LinkTargetW, Arc.FileHead.RedirName, 1023);
+          N->LinkTargetW[1023] = L'\0';
 #endif
           N->LinkTargetFlags |= LINK_T_FILECOPY;
       }
@@ -202,8 +234,12 @@ int PASCAL RARListArchiveEx(HANDLE hArcData, RARArchiveDataEx **NN)
     return ERAR_NO_MEMORY;
   }
 #endif
-  // Skip to next header
-  return RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
+  // Skip to next header with error logging
+  int skip_res = RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
+  if (skip_res != ERAR_SUCCESS && skip_res != ERAR_END_ARCHIVE) {
+    cerr << "RARProcessFile skip failed in RARReadHeader: " << skip_res << endl;
+  }
+  return skip_res;
 }
 
 void PASCAL RARFreeArchiveDataEx(RARArchiveDataEx **NN)
@@ -224,7 +260,14 @@ void PASCAL RARNextVolumeName(char *arch, bool oldstylevolume)
   ArchiveW.assign(arch,arch+len);
   NextVolumeName(ArchiveW,oldstylevolume);
   string NextArchive(ArchiveW.begin(),ArchiveW.end());
-  strcpy(arch,NextArchive.c_str());
+  /* Safe copy with size limit based on original buffer */
+  size_t bufsize = len + 1;
+  if (NextArchive.length() >= bufsize) {
+    cerr << "NextVolumeName: result too long (" << NextArchive.length()
+         << " >= " << bufsize << "), truncating" << endl;
+  }
+  strncpy(arch, NextArchive.c_str(), bufsize - 1);
+  arch[bufsize - 1] = '\0';
 #else
   wchar NextName[NM];
   CharToWide(arch, NextName, ASIZE(NextName));
@@ -244,7 +287,14 @@ void PASCAL RARVolNameToFirstName(char *arch, bool oldstylevolume)
   ArcName.assign(arch,arch+len);
   VolNameToFirstName(ArcName, ArcName, !oldstylevolume);
   string FirstName(ArcName.begin(),ArcName.end());
-  strcpy(arch,FirstName.c_str());
+  /* Safe copy with size limit based on original buffer */
+  size_t bufsize = len + 1;
+  if (FirstName.length() >= bufsize) {
+    cerr << "VolNameToFirstName: result too long (" << FirstName.length()
+         << " >= " << bufsize << "), truncating" << endl;
+  }
+  strncpy(arch, FirstName.c_str(), bufsize - 1);
+  arch[bufsize - 1] = '\0';
   return;
 #else
   wchar ArcName[NM];
@@ -287,7 +337,12 @@ void PASCAL RARGetFileInfo(HANDLE hArcData, const char *FileName, struct RARWcb 
       wcb->bytes = ListFileHeader(wcb->data, Arc);
       return;
     }
-    (void)RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
+    // Check RARProcessFile return value for errors
+    int skip_res = RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
+    if (skip_res != ERAR_SUCCESS && skip_res != ERAR_END_ARCHIVE) {
+      cerr << "RARProcessFile skip failed in RARGetFileInfo: " << skip_res << endl;
+      wcb->bytes = 0;
+    }
   }
 #else
   (void)hArcData;

@@ -103,7 +103,7 @@ filecache_invalidate(const char *path);
 struct filecache_entry *
 filecache_clone(const struct filecache_entry *src);
 
-void
+int
 filecache_copy(const struct filecache_entry *src, struct filecache_entry *dest);
 
 void

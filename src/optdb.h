@@ -52,6 +52,9 @@ enum {
         OPT_KEY_DATE_RAR,
         OPT_KEY_CONFIG,
         OPT_KEY_NO_INHERIT_PERM,
+        OPT_KEY_OPERATION_TIMEOUT,   /* UnRAR operation timeout (seconds) */
+        OPT_KEY_MAX_VOLUME_COUNT,    /* Maximum volumes to process */
+        OPT_KEY_MAX_ARCHIVE_ENTRIES, /* Maximum archive entries to process */
         OPT_KEY_END, /* Must *always* be last key */
         OPT_KEY_LAST = (OPT_KEY_END - 1)
 };

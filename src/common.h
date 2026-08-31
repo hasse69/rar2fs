@@ -33,19 +33,23 @@
 
 #define ABS_ROOT(s, path) \
         do { \
-                (s) = alloca(strlen(path) + strlen(OPT_STR2(OPT_KEY_SRC,0)) + 1); \
-                strcpy((s), OPT_STR2(OPT_KEY_SRC,0)); \
-                strcat((s), path); \
+                size_t __root_len = strlen(OPT_STR2(OPT_KEY_SRC,0)); \
+                size_t __path_len = strlen(path); \
+                size_t __total = __root_len + __path_len + 1; \
+                (s) = alloca(__total); \
+                snprintf((s), __total, "%s%s", OPT_STR2(OPT_KEY_SRC,0), path); \
         } while (0)
 
 #define ABS_MP_(s, path, file, __alloc) \
         do { \
-                int l = strlen(path); \
-                (s) = __alloc(l + strlen(file) + 2); \
-                strcpy((s), path); \
-                if (l && path[l - 1] != '/') \
-                        strcat((s), "/"); \
-                strcat((s), file); \
+                size_t __path_len = strlen(path); \
+                size_t __file_len = strlen(file); \
+                size_t __total = __path_len + __file_len + 2; \
+                (s) = __alloc(__total); \
+                if (__path_len && path[__path_len - 1] != '/') \
+                        snprintf((s), __total, "%s/%s", path, file); \
+                else \
+                        snprintf((s), __total, "%s%s", path, file); \
         } while(0)
 
 #define ABS_MP(s, path, file) ABS_MP_(s, path, file, alloca)

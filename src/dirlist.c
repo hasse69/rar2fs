@@ -29,6 +29,8 @@
 #include <platform.h>
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
+#include "debug.h"
 #include "dirlist.h"
 #include "hash.h"
 
@@ -119,14 +121,19 @@ void dir_list_free(struct dir_entry_list *root)
  *****************************************************************************
  *
  ****************************************************************************/
-static void add_entry(struct dir_entry *entry, const char *key,
-                      struct stat *st, int type, uint32_t hash)
+static int add_entry(struct dir_entry *entry, const char *key,
+                     struct stat *st, int type, uint32_t hash)
 {
         entry->name = strdup(key);
+        if (!entry->name) {
+                printd(1, "add_entry: strdup failed\n");
+                return -ENOMEM;
+        }
         entry->hash = hash;
         entry->st = st;
         entry->type = type;
         entry->valid = 1; /* assume entry is valid */
+        return 0;
 }
 
 /*!
@@ -159,10 +166,17 @@ struct dir_entry_list *dir_entry_add(struct dir_entry_list *l, const char *key,
 
 new:
         l->next = malloc(sizeof(struct dir_entry_list));
-        if (l->next) {
-                l = l->next;
-                l->next = NULL;
-                add_entry(&l->entry, key, st, type, hash);
+        if (!l->next) {
+                printd(1, "dir_entry_add: malloc failed\n");
+                return NULL;
+        }
+        tmp = l;  /* Save previous entry for cleanup */
+        l = l->next;
+        l->next = NULL;
+        if (add_entry(&l->entry, key, st, type, hash) != 0) {
+                free(l);
+                tmp->next = NULL;  /* Restore list */
+                return NULL;
         }
         return l;
 }
@@ -174,22 +188,38 @@ new:
 struct dir_entry_list *dir_list_dup(const struct dir_entry_list *src)
 {
         dir_entry_list *root = malloc(sizeof(struct dir_entry_list));
-        dir_entry_list *l = root;
-        if (l) {
-                struct dir_entry_list *next = src->next;
-                dir_list_open(root);
-                while (next) {
-                        l->next = malloc(sizeof(struct dir_entry_list));
-                        l = l->next;
-                        l->entry.name = strdup(next->entry.name);
-                        l->entry.hash = next->entry.hash;
-                        l->entry.type = next->entry.type;
-                        l->entry.valid = next->entry.valid;
-                        l->entry.st = next->entry.st;
-                        next = next->next;
-                }
-                l->next = NULL;
+        if (!root) {
+                printd(1, "dir_list_dup: malloc failed for root\n");
+                return NULL;
         }
+
+        dir_entry_list *l = root;
+        struct dir_entry_list *next = src->next;
+        dir_list_open(root);
+
+        while (next) {
+                l->next = malloc(sizeof(struct dir_entry_list));
+                if (!l->next) {
+                        printd(1, "dir_list_dup: malloc failed for entry\n");
+                        dir_list_free(root);
+                        free(root);
+                        return NULL;
+                }
+                l = l->next;
+                l->entry.name = strdup(next->entry.name);
+                if (!l->entry.name) {
+                        printd(1, "dir_list_dup: strdup failed\n");
+                        dir_list_free(root);
+                        free(root);
+                        return NULL;
+                }
+                l->entry.hash = next->entry.hash;
+                l->entry.type = next->entry.type;
+                l->entry.valid = next->entry.valid;
+                l->entry.st = next->entry.st;
+                next = next->next;
+        }
+        l->next = NULL;
         return root;
 }
 
@@ -212,9 +242,22 @@ struct dir_entry_list *dir_list_append(struct dir_entry_list *list1,
 
         while (next2) {
                 next1->next = malloc(sizeof(struct dir_entry_list));
+                if (!next1->next) {
+                        printd(1, "dir_list_append: malloc failed\n");
+                        return NULL;
+                }
                 memcpy(next1->next, next2, sizeof(struct dir_entry_list));
                 next1 = next1->next;
                 next1->entry.name = strdup(next2->entry.name);
+                if (!next1->entry.name) {
+                        printd(1, "dir_list_append: strdup failed\n");
+                        /*
+                         * Partial list has been created. Caller must handle
+                         * potential memory leak of incomplete list.
+                         * TODO: Consider more robust cleanup
+                         */
+                        return NULL;
+                }
                 next2 = next2->next;
         }
         return next1;

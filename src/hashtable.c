@@ -59,25 +59,52 @@ struct hash_table_entry *hashtable_entry_alloc_hash(void *h, const char *key, ui
         if (p->key) {
                 if (!strcmp(key, p->key))
                         return p;
+                struct hash_table_entry *prev = p;
                 while (p->next) {
+                        prev = p;
                         p = p->next;
                         if (hash == p->hash && !strcmp(key, p->key))
                                 return p;
                 }
+                prev = p;  /* Save last entry for cleanup on failure */
                 p->next = malloc(sizeof(struct hash_table_entry));
-                p = p->next;
-                if (p) {
-                        p->next = NULL;
-                        p->key = strdup(key);
-                        p->hash = hash;
-                        p->user_data = ht->ops.alloc();
-                        return p;
+                if (!p->next) {
+                        return NULL;
                 }
+                p = p->next;
+                p->next = NULL;
+                p->key = strdup(key);
+                if (!p->key) {
+                        printd(1, "hashtable_entry_alloc_hash: strdup failed in collision chain\n");
+                        free(p);
+                        prev->next = NULL;
+                        return NULL;
+                }
+                p->hash = hash;
+                p->user_data = ht->ops.alloc();
+                if (!p->user_data) {
+                        printd(1, "hashtable_entry_alloc_hash: ops.alloc failed in collision chain\n");
+                        free(p->key);
+                        free(p);
+                        prev->next = NULL;
+                        return NULL;
+                }
+                return p;
+        }
+        /* Empty bucket case */
+        p->key = strdup(key);
+        if (!p->key) {
+                printd(1, "hashtable_entry_alloc_hash: strdup failed for bucket\n");
                 return NULL;
         }
-        p->key = strdup(key);
         p->hash = hash;
         p->user_data = ht->ops.alloc();
+        if (!p->user_data) {
+                printd(1, "hashtable_entry_alloc_hash: ops.alloc failed for bucket\n");
+                free(p->key);
+                p->key = NULL;  /* Restore bucket to empty state */
+                return NULL;
+        }
         return p;
 }
 

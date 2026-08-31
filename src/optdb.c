@@ -51,7 +51,10 @@ static struct opt_entry opt_entry_[] = {
         {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 0},
         {{NULL,}, 0, 0, 0, 0, 0},
-        {{NULL,}, 0, 0, 0, 0, 0}
+        {{NULL,}, 0, 0, 0, 0, 0},
+        {{NULL,}, 0, 0, 0, 0, 1},  /* OPT_KEY_OPERATION_TIMEOUT */
+        {{NULL,}, 0, 0, 0, 0, 1},  /* OPT_KEY_MAX_VOLUME_COUNT */
+        {{NULL,}, 0, 0, 0, 0, 1}   /* OPT_KEY_MAX_ARCHIVE_ENTRIES */
 };
 
 struct opt_entry *opt_entry_p  = &opt_entry_[0];
@@ -65,13 +68,23 @@ struct opt_entry *opt_entry_p  = &opt_entry_[0];
         do { \
                 OPT_(o)->is_set = 1; \
                 if ((OPT_(o))->n_elem == (OPT_(o))->n_max) { \
+                        void *new_ptr = realloc((t*)OPT_(o)->m, \
+                                (OPT_(o)->n_max + 16) * sizeof(t*)); \
+                        if (!new_ptr) { \
+                                printd(1, "ADD_OPT__: realloc failed for option\n"); \
+                                break; \
+                        } \
+                        OPT_(o)->m = (t*)new_ptr; \
                         OPT_(o)->n_max += 16; \
-                        OPT_(o)->m = (t*)realloc((t*)OPT_(o)->m, \
-                                OPT_(o)->n_max * sizeof(t*)); \
                 } \
-                if (IS_STR_(o)) \
-                        OPT_(o)->m[OPT_(o)->n_elem++] = (t)strdup(s1); \
-                else \
+                if (IS_STR_(o)) { \
+                        char *str_dup = strdup(s1); \
+                        if (!str_dup) { \
+                                printd(1, "ADD_OPT__: strdup failed\n"); \
+                                break; \
+                        } \
+                        OPT_(o)->m[OPT_(o)->n_elem++] = (t)str_dup; \
+                } else \
                         OPT_(o)->m[OPT_(o)->n_elem++] = (t)strtoul(s1, NULL, 10); \
         } while (0)
 
@@ -122,8 +135,13 @@ int optdb_save(int opt, const char *s)
                         fclose(fp);
                 }
         } else {
-                if (s)
+                if (s) {
                         s1 = strdup(s);
+                        if (!s1) {
+                                printd(1, "optdb_save: strdup failed\n");
+                                return 1;
+                        }
+                }
         }
         if (!s1)
                 return 0;
@@ -239,6 +257,10 @@ int optdb_find(int opt, char *path)
                 while (i != OPT_CNT(opt)) {
                         char *tmp = OPT_STR(OPT_KEY_EXCLUDE, i);
                         char *safe_path = strdup(path);
+                        if (!safe_path) {
+                                printd(1, "optdb_find: strdup failed\n");
+                                return 0;  /* Not found due to error */
+                        }
                         if (!strcmp(basename(safe_path), tmp ? tmp : "")) {
                                 free(safe_path);
                                 return 1;

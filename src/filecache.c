@@ -29,8 +29,10 @@
 #include "platform.h"
 #include <memory.h>
 #include <string.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <pthread.h>
+#include "debug.h"
 #include "hashtable.h"
 #include "filecache.h"
 
@@ -142,39 +144,64 @@ struct filecache_entry *filecache_clone(const struct filecache_entry *src)
  *
  ****************************************************************************/
 #define CP_ENTRY_F(f) dest->f = src->f
-void filecache_copy(const struct filecache_entry *src,
-                    struct filecache_entry *dest)
+int filecache_copy(const struct filecache_entry *src,
+                   struct filecache_entry *dest)
 {
-        if (dest != NULL && src != NULL) {
-                free(dest->rar_p);
-                if (src->rar_p)
-                        dest->rar_p = strdup(src->rar_p);
-                else
-                        dest->rar_p = NULL;
-                free(dest->file_p);
-                if (src->file_p)
-                        dest->file_p = strdup(src->file_p);
-                else
-                        dest->file_p = NULL;
-                if (dest->link_target_p)
-                        free(dest->link_target_p);
-                if (src->link_target_p)
-                        dest->link_target_p = strdup(src->link_target_p);
-                else
-                        dest->link_target_p = NULL;
+        if (dest == NULL || src == NULL)
+                return -EINVAL;
 
-                CP_ENTRY_F(stat);
-                CP_ENTRY_F(offset);
-                CP_ENTRY_F(vsize_real_first);
-                CP_ENTRY_F(vsize_real_next);
-                CP_ENTRY_F(vsize_next);
-                CP_ENTRY_F(vno_base);
-                CP_ENTRY_F(vlen);
-                CP_ENTRY_F(vpos);
-                CP_ENTRY_F(vtype);
-                CP_ENTRY_F(method);
-                CP_ENTRY_F(flags_uint32);
+        free(dest->rar_p);
+        if (src->rar_p) {
+                dest->rar_p = strdup(src->rar_p);
+                if (!dest->rar_p) {
+                        printd(1, "filecache_copy: strdup failed for rar_p\n");
+                        return -ENOMEM;
+                }
+        } else {
+                dest->rar_p = NULL;
         }
+
+        free(dest->file_p);
+        if (src->file_p) {
+                dest->file_p = strdup(src->file_p);
+                if (!dest->file_p) {
+                        printd(1, "filecache_copy: strdup failed for file_p\n");
+                        free(dest->rar_p);
+                        dest->rar_p = NULL;
+                        return -ENOMEM;
+                }
+        } else {
+                dest->file_p = NULL;
+        }
+
+        if (dest->link_target_p)
+                free(dest->link_target_p);
+        if (src->link_target_p) {
+                dest->link_target_p = strdup(src->link_target_p);
+                if (!dest->link_target_p) {
+                        printd(1, "filecache_copy: strdup failed for link_target_p\n");
+                        free(dest->rar_p);
+                        free(dest->file_p);
+                        dest->rar_p = NULL;
+                        dest->file_p = NULL;
+                        return -ENOMEM;
+                }
+        } else {
+                dest->link_target_p = NULL;
+        }
+
+        CP_ENTRY_F(stat);
+        CP_ENTRY_F(offset);
+        CP_ENTRY_F(vsize_real_first);
+        CP_ENTRY_F(vsize_real_next);
+        CP_ENTRY_F(vsize_next);
+        CP_ENTRY_F(vno_base);
+        CP_ENTRY_F(vlen);
+        CP_ENTRY_F(vpos);
+        CP_ENTRY_F(vtype);
+        CP_ENTRY_F(method);
+        CP_ENTRY_F(flags_uint32);
+        return 0;
 }
 #undef CP_ENTRY_F
 
@@ -213,4 +240,3 @@ void filecache_destroy()
         hashtable_destroy(ht);
         ht = NULL;
 }
-

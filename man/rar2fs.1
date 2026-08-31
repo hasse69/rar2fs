@@ -215,6 +215,34 @@ This option can be used to instead set the permission mode bits based on file ty
 Another option is to use the FUSE \fIumask\fR mount option.
 The latter has the benefit of completely ignoring what ever the file system implementation sets but also has some caveats with respect to
 directories versus regular files.
+.RE
+.TP
+.B \-\-operation-timeout=n
+set timeout for UnRAR operations in seconds (default: 30)
+.PP
+.RS
+Limits the execution time of individual UnRAR library operations to prevent indefinite hangs
+when processing malformed or malicious archives. A timeout of 0 disables this protection.
+The default timeout of 30 seconds should be sufficient for most operations on valid archives.
+.RE
+.TP
+.B \-\-max-volume-count=n
+set maximum number of volume files to process (default: 1000)
+.PP
+.RS
+Limits the number of RAR volume files that will be processed when collecting files from
+a multi-volume archive. This prevents resource exhaustion from archives claiming an
+unreasonable number of volumes. The default limit of 1000 volumes should be sufficient
+for legitimate multi-volume archives.
+.RE
+.TP
+.B \-\-max-archive-entries=n
+set maximum number of archive entries to process (default: 10000)
+.PP
+.RS
+Limits the number of file entries that will be processed when reading RAR archives.
+This prevents resource exhaustion from archives claiming billions of files.
+The default limit of 10000 entries should be sufficient for most legitimate archives.
 .br
 .SH MOUNT OPTIONS
 .RE

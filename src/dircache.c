@@ -36,6 +36,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "debug.h"
 #include "hashtable.h"
 #include "dirlist.h"
 #include "dircache.h"
@@ -59,8 +60,12 @@ static void *__alloc()
 {
         struct dircache_entry *e;
         e = malloc(sizeof(struct dircache_entry));
-        if (e)
-                dir_list_open(&e->dir_entry_list);
+        /* Log allocation failure for debugging */
+        if (!e) {
+                printd(1, "dircache __alloc: malloc failed\n");
+                return NULL;
+        }
+        dir_list_open(&e->dir_entry_list);
         return e;
 }
 
@@ -116,6 +121,10 @@ void dircache_invalidate(const char *path)
 
         if (path) {
                 char *safe_path = strdup(path);
+                if (!safe_path) {
+                        printd(1, "dircache_invalidate: strdup failed\n");
+                        return;
+                }
                 char *tmp = safe_path;
                 safe_path = __gnu_dirname(safe_path);
                 hash = get_hash(safe_path, 0);
@@ -139,6 +148,10 @@ struct dircache_entry *dircache_alloc(const char *path)
         uint32_t hash;
 
         char *safe_path = strdup(path);
+        if (!safe_path) {
+                printd(1, "dircache_alloc: strdup failed\n");
+                return NULL;
+        }
         char *tmp = safe_path;
         safe_path = __gnu_dirname(safe_path);
         hash = get_hash(safe_path, 0);
@@ -176,6 +189,10 @@ struct dircache_entry *dircache_get(const char *path)
         int ret;
 
         char *safe_path = strdup(path);
+        if (!safe_path) {
+                printd(1, "dircache_get: strdup failed\n");
+                return NULL;
+        }
         char *tmp = safe_path;
         safe_path = __gnu_dirname(safe_path);
         hash = get_hash(safe_path, 0);
@@ -201,4 +218,3 @@ struct dircache_entry *dircache_get(const char *path)
         }
         return NULL;
 }
-
