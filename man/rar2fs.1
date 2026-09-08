@@ -216,8 +216,38 @@ Another option is to use the FUSE \fIumask\fR mount option.
 The latter has the benefit of completely ignoring what ever the file system implementation sets but also has some caveats with respect to
 directories versus regular files.
 .br
-.SH MOUNT OPTIONS
 .RE
+.TP
+.B \-\-no-eof-probe
+disable the near end-of-file index probe heuristic
+.PP
+.RS
+When reading from a compressed archive member, an early read request landing in the last few percent of the file is normally assumed to be a media player probing for trailing index data (see
+.BR \-\-save-eof )
+and is answered with fabricated (zero-filled) data instead of performing a potentially costly real extraction.
+This heuristic can incorrectly trigger for legitimate reads, most notably for external subtitle files (e.g. VOBSUB
+.I .sub
+files) accessed out of order by some media players, causing them to receive bogus data instead of real content.
+Use this option to disable this fabricated-data fallback for near end-of-file
+reads. The separate long jump heuristic remains enabled for other far-forward
+reads unless
+.B \-\-no-jump-probe
+is also used.
+.RE
+.TP
+.B \-\-no-jump-probe
+disable the long jump heuristic
+.PP
+.RS
+Similar to
+.B \-\-no-eof-probe
+but applies to any early read that jumps far ahead of the current stream position, regardless of where in the file it lands.
+Use this option to disable this fabricated-data fallback; the separate
+end-of-file probe heuristic remains enabled unless
+.B \-\-no-eof-probe
+is also used.
+.RE
+.SH MOUNT OPTIONS
 .TP
 .B \-o locale=LOCALE
 set the locale to be used for RAR file name character set conversion
@@ -264,4 +294,3 @@ Project home page
 .B Hans Beckerus
 .br
 .I \<hans.beckerus#AT#gmail.com\>
-
