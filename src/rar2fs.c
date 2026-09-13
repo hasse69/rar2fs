@@ -2738,7 +2738,8 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                 char *mp2;
 
                                 safe_path = __gnu_dirname(safe_path);
-                                if (!CHRCMP(safe_path, '.'))
+                                if (!CHRCMP(safe_path, '.') ||
+                                                !CHRCMP(safe_path, '/'))
                                         break;
 
                                 ABS_MP2(mp2, path, safe_path);
@@ -2763,7 +2764,8 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                                         char *mp2;
 
                                         safe_path = __gnu_dirname(safe_path);
-                                        if (!CHRCMP(safe_path, '.'))
+                                        if (!CHRCMP(safe_path, '.') ||
+                                                        !CHRCMP(safe_path, '/'))
                                                 break;
 
                                         ABS_MP2(mp2, path, safe_path);
