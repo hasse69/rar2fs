@@ -243,7 +243,7 @@ static int get_save_eof(char *rar)
                 char *s = OPT_STR(OPT_KEY_SRC, 0);
                 int save_eof;
 
-                if (strstr(rar, s))
+                if (str_beginwith(rar, s))
                         rar += strlen(s);
                 save_eof = rarconfig_getprop(int, rar, RAR_SAVE_EOF_PROP);
                 if (save_eof >= 0)
@@ -270,7 +270,7 @@ static const char *get_alias(const char *rar, const char *file)
 
                 ABS_MP(file_abs, "/", file);
 
-                if (strstr(rar, s))
+                if (str_beginwith(rar, s))
                         rar += strlen(s);
                 alias = rarconfig_getalias(rar, file_abs);
                 if (alias)
@@ -294,7 +294,7 @@ static int get_seek_length(char *rar)
                 char *s = OPT_STR(OPT_KEY_SRC, 0);
                 int seek_len;
 
-                if (strstr(rar, s))
+                if (str_beginwith(rar, s))
                         rar += strlen(s);
                 seek_len = rarconfig_getprop(int, rar, RAR_SEEK_LENGTH_PROP);
                 if (seek_len >= 0)
@@ -481,8 +481,11 @@ static char *get_password(const char *file, char *buf, size_t len)
         tmp = rar;
         s = OPT_STR(OPT_KEY_SRC, 0);
 
-        if (strstr(rar, s))
+        int slen = strlen(s);
+        if (!strncmp(rar, s, slen)){
                 rar += strlen(s);
+        }
+
         password = rarconfig_getprop(prop_type_, rar,
                                 RAR_PASSWORD_PROP);
         if (password) {
