@@ -37,6 +37,17 @@
 #include <errno.h>
 #include <libgen.h>
 #include <fuse.h>
+#if FUSE_MAJOR_VERSION >= 3
+# include <fuse_lowlevel.h>
+# if defined(__linux__) && defined(FUSE_CAP_PASSTHROUGH)
+#  include <sys/ioctl.h>
+#  include <linux/fuse.h>
+#  if defined(FUSE_DEV_IOC_BACKING_OPEN) && \
+                defined(FUSE_DEV_IOC_BACKING_CLOSE)
+#   define HAVE_FUSE_PASSTHROUGH 1
+#  endif
+# endif
+#endif
 #include <fcntl.h>
 #include <getopt.h>
 #include <syslog.h>
@@ -110,6 +121,10 @@ struct io_context {
 #endif
 };
 
+#ifdef HAVE_FUSE_PASSTHROUGH
+struct passthrough_backing;
+#endif
+
 struct io_handle {
         int type;
 #define IO_TYPE_NRM 0
@@ -125,6 +140,9 @@ struct io_handle {
                 uintptr_t bits;
         } u;
         char *path;                             /* type = all */
+#ifdef HAVE_FUSE_PASSTHROUGH
+        struct passthrough_backing *backing;    /* type = IO_TYPE_NRM */
+#endif
 };
 
 #define FH_ZERO(fh)            ((fh) = 0)
@@ -167,6 +185,24 @@ static volatile int warmup_threads = 0;
 static pthread_mutex_t warmup_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t warmup_cond = PTHREAD_COND_INITIALIZER;
 static char *src_path_full = NULL;
+#ifdef HAVE_FUSE_PASSTHROUGH
+struct passthrough_backing {
+        dev_t dev;
+        ino_t ino;
+        int backing_id;
+        unsigned int refs;
+        struct passthrough_backing *next;
+};
+
+static int fuse_dev_fd = -1;
+static int passthrough_enabled = 0;
+static int passthrough_required_unavailable = 0;
+static int passthrough_failure_logged = 0;
+static struct passthrough_backing *passthrough_backings = NULL;
+static pthread_mutex_t passthrough_backing_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t passthrough_log_lock = PTHREAD_MUTEX_INITIALIZER;
+static void lpassthrough_put(struct passthrough_backing *backing);
+#endif
 
 #define P_ALIGN_(a) (((a)+page_size_)&~(page_size_-1))
 
@@ -204,7 +240,19 @@ static const char *file_cmd[] = {
 struct rar2fs_mount_opts {
      char *locale;
      int warmup;
+     int passthrough;
 };
+
+#define PASSTHROUGH_AUTO  0
+#define PASSTHROUGH_OFF   1
+#define PASSTHROUGH_FORCE 2
+
+#if FUSE_MAJOR_VERSION >= 3
+# define FUSE_FILL_DIR(f, b, n, s, o) \
+        (f)((b), (n), (s), (o), (enum fuse_fill_dir_flags)0)
+#else
+# define FUSE_FILL_DIR(f, b, n, s, o) (f)((b), (n), (s), (o))
+#endif
 
 #define RAR2FS_MOUNT_OPT(t, p, v) \
         { t, offsetof(struct rar2fs_mount_opts, p), v }
@@ -1619,9 +1667,20 @@ static int lrelease(struct fuse_file_info *fi)
         if (FH_TOIO(fi->fh)->type == IO_TYPE_INFO) {
                 free(FH_TOPATH(fi->fh));
                 free(FH_TOBUF(fi->fh));
+        } else {
+#ifdef HAVE_FUSE_PASSTHROUGH
+                if (FH_TOIO(fi->fh)->type == IO_TYPE_NRM &&
+                                FH_TOIO(fi->fh)->backing) {
+                        struct passthrough_backing *backing =
+                                        FH_TOIO(fi->fh)->backing;
+                        FH_TOIO(fi->fh)->backing = NULL;
+                        fi->backing_id = 0;
+                        lpassthrough_put(backing);
+                }
+#endif
+                if (FH_TOFD(fi->fh) >= 0)
+                        close(FH_TOFD(fi->fh));
         }
-        else if (FH_TOFD(fi->fh))
-                close(FH_TOFD(fi->fh));
         printd(3, "(%05d) %s [0x%-16" PRIx64 "]\n", getpid(), "FREE", fi->fh);
         free(FH_TOIO(fi->fh));
         FH_ZERO(fi->fh);
@@ -1657,26 +1716,201 @@ static int lread(char *buffer, size_t size, off_t offset,
         return res;
 }
 
+#ifdef HAVE_FUSE_PASSTHROUGH
+/* The high-level libfuse API carries backing_id in fuse_file_info, but the
+ * backing-file registration helpers are exposed only by the low-level API
+ * and require a request handle.  Use the same public kernel ioctl against the
+ * descriptor owned by the high-level session. */
+static int lpassthrough_open(int fd)
+{
+        struct fuse_backing_map map = { .fd = fd };
+        int backing_id;
+
+        if (fuse_dev_fd < 0)
+                return -ENODEV;
+
+        backing_id = ioctl(fuse_dev_fd, FUSE_DEV_IOC_BACKING_OPEN, &map);
+        if (backing_id < 0)
+                return -errno;
+        if (!backing_id)
+                return -EIO;
+        return backing_id;
+}
+
+static const char *lpassthrough_error(int err)
+{
+        if (err == ELOOP)
+                return "backing filesystem stack is already at the kernel "
+                       "maximum depth";
+        return strerror(err);
+}
+
+static void lpassthrough_warn_once(const char *path, int err)
+{
+        pthread_mutex_lock(&passthrough_log_lock);
+        if (!passthrough_failure_logged) {
+                syslog(LOG_WARNING, "passthrough unavailable for local file "
+                       "%s: cannot register backing file: %s",
+                       path, lpassthrough_error(err));
+                passthrough_failure_logged = 1;
+        }
+        pthread_mutex_unlock(&passthrough_log_lock);
+}
+
+static void lpassthrough_close(int backing_id)
+{
+        uint32_t id = backing_id;
+
+        if (backing_id > 0 && fuse_dev_fd >= 0 &&
+                        ioctl(fuse_dev_fd, FUSE_DEV_IOC_BACKING_CLOSE, &id))
+                printd(2, "Failed to close passthrough backing id %d: %s\n",
+                       backing_id, strerror(errno));
+}
+
+/* The kernel requires every overlapping passthrough open of the same FUSE
+ * inode to use the same registered backing object.  A new BACKING_OPEN ioctl
+ * creates a distinct object even when its fd refers to the same local file,
+ * so share one backing ID for each backing inode until its last handle is
+ * released. */
+static int lpassthrough_get(int fd, struct passthrough_backing **backing_p)
+{
+        struct passthrough_backing *backing;
+        struct stat st;
+        int backing_id;
+
+        *backing_p = NULL;
+        if (fstat(fd, &st))
+                return -errno;
+
+        pthread_mutex_lock(&passthrough_backing_lock);
+        for (backing = passthrough_backings; backing; backing = backing->next) {
+                if (backing->dev == st.st_dev && backing->ino == st.st_ino) {
+                        backing->refs++;
+                        backing_id = backing->backing_id;
+                        *backing_p = backing;
+                        pthread_mutex_unlock(&passthrough_backing_lock);
+                        return backing_id;
+                }
+        }
+
+        backing = malloc(sizeof(*backing));
+        if (!backing) {
+                pthread_mutex_unlock(&passthrough_backing_lock);
+                return -ENOMEM;
+        }
+
+        backing_id = lpassthrough_open(fd);
+        backing->dev = st.st_dev;
+        backing->ino = st.st_ino;
+        backing->backing_id = backing_id;
+        backing->refs = 1;
+        backing->next = passthrough_backings;
+        passthrough_backings = backing;
+        *backing_p = backing;
+        pthread_mutex_unlock(&passthrough_backing_lock);
+        return backing_id;
+}
+
+static void lpassthrough_put(struct passthrough_backing *backing)
+{
+        struct passthrough_backing **link;
+        int backing_id;
+        int found = 0;
+
+        pthread_mutex_lock(&passthrough_backing_lock);
+        for (link = &passthrough_backings; *link; link = &(*link)->next) {
+                if (*link != backing)
+                        continue;
+                if (--(*link)->refs) {
+                        pthread_mutex_unlock(&passthrough_backing_lock);
+                        return;
+                }
+                *link = backing->next;
+                found = 1;
+                break;
+        }
+        pthread_mutex_unlock(&passthrough_backing_lock);
+
+        if (!found)
+                return;
+
+        backing_id = backing->backing_id;
+        if (backing_id > 0)
+                lpassthrough_close(backing_id);
+        free(backing);
+}
+#endif
+
 /*!
  *****************************************************************************
  *
  ****************************************************************************/
-static int lopen(const char *path, struct fuse_file_info *fi)
+static int lopen_common(const char *path, struct fuse_file_info *fi,
+                mode_t mode, int create)
 {
         ENTER_("%s", path);
-        struct io_handle *io = malloc(sizeof(struct io_handle));
+        struct io_handle *io = calloc(1, sizeof(struct io_handle));
         if (!io)
                 return -ENOMEM;
-        int fd = open(path, fi->flags);
+        int fd;
+        if (create)
+                fd = open(path, fi->flags | O_CREAT, mode);
+        else
+                fd = open(path, fi->flags);
         if (fd == -1) {
                 free(io);
                 return -errno;
         }
+
+#ifdef HAVE_FUSE_PASSTHROUGH
+        fi->backing_id = 0;
+        if (passthrough_enabled) {
+                struct passthrough_backing *backing;
+                int backing_id = lpassthrough_get(fd, &backing);
+                if (backing_id < 0) {
+                        if (!backing || rar2fs_mount_opts.passthrough ==
+                                        PASSTHROUGH_FORCE) {
+                                syslog(LOG_ERR, "cannot enable passthrough for "
+                                       "%s: %s", path,
+                                       lpassthrough_error(-backing_id));
+                                if (backing)
+                                        lpassthrough_put(backing);
+                                close(fd);
+                                if (create)
+                                        unlink(path);
+                                free(io);
+                                return backing_id;
+                        }
+                        lpassthrough_warn_once(path, -backing_id);
+                } else {
+                        fi->backing_id = backing_id;
+                        /* FOPEN_DIRECT_IO takes precedence over
+                         * FOPEN_PASSTHROUGH for read/write requests. */
+                        fi->direct_io = 0;
+                        syslog(LOG_DEBUG, "passthrough backing id %d for %s",
+                               backing_id, path);
+                }
+                io->backing = backing;
+        }
+#endif
+
         FH_SETIO(fi->fh, io);
         FH_SETTYPE(fi->fh, IO_TYPE_NRM);
         FH_SETFD(fi->fh, fd);
         return 0;
 }
+
+static int lopen(const char *path, struct fuse_file_info *fi)
+{
+        return lopen_common(path, fi, 0, 0);
+}
+
+#ifdef HAVE_FUSE_PASSTHROUGH
+static int lcreate(const char *path, mode_t mode, struct fuse_file_info *fi)
+{
+        return lopen_common(path, fi, mode, 1);
+}
+#endif
 
 /*!
  *****************************************************************************
@@ -3231,10 +3465,17 @@ static int syncrar(const char *path)
  *****************************************************************************
  *
  ****************************************************************************/
-static int rar2_getattr(const char *path, struct stat *stbuf)
+static int rar2_getattr(const char *path, struct stat *stbuf
+#if FUSE_MAJOR_VERSION >= 3
+                , struct fuse_file_info *fi
+#endif
+                )
 {
         ENTER_("%s", path);
 
+#if FUSE_MAJOR_VERSION >= 3
+        (void)fi;
+#endif
         struct filecache_entry *entry_p;
 
         pthread_rwlock_rdlock(&file_access_lock);
@@ -3309,10 +3550,17 @@ static int rar2_getattr(const char *path, struct stat *stbuf)
  *****************************************************************************
  *
  ****************************************************************************/
-static int rar2_getattr2(const char *path, struct stat *stbuf)
+static int rar2_getattr2(const char *path, struct stat *stbuf
+#if FUSE_MAJOR_VERSION >= 3
+                , struct fuse_file_info *fi
+#endif
+                )
 {
         ENTER_("%s", path);
 
+#if FUSE_MAJOR_VERSION >= 3
+        (void)fi;
+#endif
         int res;
 
         pthread_rwlock_rdlock(&file_access_lock);
@@ -3395,7 +3643,8 @@ static void dump_dir_list(const char *path, void *buffer, fuse_fill_dir_t filler
                  * the directory cache is currently in effect.
                  */
                 if (next->entry.valid) {
-                        filler(buffer, next->entry.name, next->entry.st, 0);
+                        FUSE_FILL_DIR(filler, buffer, next->entry.name,
+                                      next->entry.st, 0);
 /* TODO: If/when folder cache becomes optional this needs to be revisted */
 #if 0
                         if (next->entry.type == DIR_E_RAR)
@@ -3480,12 +3729,19 @@ opendir_ok:
  *
  ****************************************************************************/
 static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
-                off_t offset, struct fuse_file_info *fi)
+                off_t offset, struct fuse_file_info *fi
+#if FUSE_MAJOR_VERSION >= 3
+                , enum fuse_readdir_flags flags
+#endif
+                )
 {
         ENTER_("%s", (path ? path : ""));
 
         int ret = 0;
         (void)offset;           /* touch */
+#if FUSE_MAJOR_VERSION >= 3
+        (void)flags;
+#endif
 
         assert(FH_ISSET(fi->fh) && "bad I/O handle");
 
@@ -3559,8 +3815,8 @@ static int rar2_readdir(const char *path, void *buffer, fuse_fill_dir_t filler,
 dump_buff:
 
         if (dp == NULL) {
-                filler(buffer, ".", NULL, 0);
-                filler(buffer, "..", NULL, 0);
+                FUSE_FILL_DIR(filler, buffer, ".", NULL, 0);
+                FUSE_FILL_DIR(filler, buffer, "..", NULL, 0);
         }
 
         (void)dir_list_append(&dir_list, dir_list2);
@@ -3602,11 +3858,18 @@ dump_buff_nocache:
  ****************************************************************************/
 static int rar2_readdir2(const char *path, void *buffer,
                 fuse_fill_dir_t filler, off_t offset,
-                struct fuse_file_info *fi)
+                struct fuse_file_info *fi
+#if FUSE_MAJOR_VERSION >= 3
+                , enum fuse_readdir_flags flags
+#endif
+                )
 {
         ENTER_("%s", (path ? path : ""));
 
         (void)offset;           /* touch */
+#if FUSE_MAJOR_VERSION >= 3
+        (void)flags;
+#endif
 
         struct dir_entry_list *dir_list; /* internal list root */
 
@@ -3644,8 +3907,8 @@ static int rar2_readdir2(const char *path, void *buffer,
                 pthread_rwlock_unlock(&dir_access_lock);
         }
 
-        filler(buffer, ".", NULL, 0);
-        filler(buffer, "..", NULL, 0);
+        FUSE_FILL_DIR(filler, buffer, ".", NULL, 0);
+        FUSE_FILL_DIR(filler, buffer, "..", NULL, 0);
 
         dir_list_close(dir_list);
         dump_dir_list(FH_TOPATH(fi->fh), buffer, filler, dir_list);
@@ -4230,6 +4493,27 @@ static inline int access_chk(const char *path, int new_file)
         return e && !e->flags.unresolved ? 1 : 0;
 }
 
+#ifdef HAVE_FUSE_PASSTHROUGH
+/* Handle FUSE_CREATE directly so libfuse returns FOPEN_PASSTHROUGH and the
+ * backing ID in the same CREATE reply. */
+static int rar2_create(const char *path, mode_t mode,
+                struct fuse_file_info *fi)
+{
+        char *root;
+        int res;
+
+        ENTER_("%s", path);
+        if (access_chk(path, 1))
+                return -EPERM;
+
+        ABS_ROOT(root, path);
+        res = lcreate(root, mode, fi);
+        if (!res)
+                __dircache_invalidate_for_file(path);
+        return res;
+}
+#endif
+
 /*!
  *****************************************************************************
  *
@@ -4423,12 +4707,55 @@ static struct dircache_cb dircache_cb = {
  *****************************************************************************
  *
  ****************************************************************************/
-static void *rar2_init(struct fuse_conn_info *conn)
+static void *rar2_init_common(struct fuse_conn_info *conn)
 {
         ENTER_();
 
         pthread_t t;
-        (void)conn;             /* touch */
+
+#if FUSE_MAJOR_VERSION >= 3
+        /* The libfuse3 high-level fuse_new path does not consume sync_read.
+         * Preserve rar2fs's existing synchronous-read behavior through the
+         * connection capability API instead. */
+        fuse_unset_feature_flag(conn, FUSE_CAP_ASYNC_READ);
+#endif
+
+#ifdef HAVE_FUSE_PASSTHROUGH
+        passthrough_enabled = 0;
+        passthrough_required_unavailable = 0;
+        fuse_unset_feature_flag(conn, FUSE_CAP_PASSTHROUGH);
+        if (rar2fs_mount_opts.passthrough != PASSTHROUGH_OFF) {
+                /* The kernel refuses the FUSE_PASSTHROUGH and
+                 * FUSE_WRITEBACK_CACHE combination during INIT. */
+                fuse_unset_feature_flag(conn, FUSE_CAP_WRITEBACK_CACHE);
+                if (fuse_set_feature_flag(conn, FUSE_CAP_PASSTHROUGH)) {
+                        /* Permit a local backing file to reside on one stacked
+                         * filesystem (for example overlayfs or another FUSE
+                         * passthrough mount).  Libfuse's default of zero makes
+                         * those backing registrations fail with ELOOP. */
+                        conn->max_backing_stack_depth =
+                                        FUSE_BACKING_STACKED_OVER;
+                        passthrough_enabled = 1;
+                        syslog(LOG_INFO, "FUSE passthrough enabled "
+                               "(stacking=OVER, backing max depth %u, "
+                               "FUSE depth %u)",
+                               conn->max_backing_stack_depth,
+                               conn->max_backing_stack_depth + 1);
+                } else if (rar2fs_mount_opts.passthrough ==
+                                PASSTHROUGH_FORCE) {
+                        syslog(LOG_ERR, "FUSE passthrough is not supported "
+                               "by this kernel");
+                        passthrough_required_unavailable = 1;
+                        fuse_exit(fuse_get_context()->fuse);
+                } else {
+                        syslog(LOG_WARNING, "FUSE passthrough unavailable: "
+                               "the kernel did not advertise support; "
+                               "using normal FUSE I/O");
+                }
+        }
+#else
+        (void)conn;
+#endif
 
         filecache_init();
         dircache_init(&dircache_cb);
@@ -4439,6 +4766,33 @@ static void *rar2_init(struct fuse_conn_info *conn)
 
         return NULL;
 }
+
+#if FUSE_MAJOR_VERSION >= 3
+static void *rar2_init(struct fuse_conn_info *conn, struct fuse_config *cfg)
+{
+        void *data = rar2_init_common(conn);
+
+#ifdef HAVE_FUSE_PASSTHROUGH
+        /* The high-level libfuse path applies cfg->direct_io after open() has
+         * returned, overriding the per-file value above.  If left set, the
+         * OPEN reply contains both FOPEN_DIRECT_IO and FOPEN_PASSTHROUGH and
+         * the kernel routes read/write requests back to the daemon. */
+        if (passthrough_enabled && cfg->direct_io) {
+                cfg->direct_io = 0;
+                syslog(LOG_WARNING, "ignoring direct_io mount option because "
+                       "it overrides FUSE passthrough");
+        }
+#else
+        (void)cfg;
+#endif
+        return data;
+}
+#else
+static void *rar2_init(struct fuse_conn_info *conn)
+{
+        return rar2_init_common(conn);
+}
+#endif
 
 /*!
  *****************************************************************************
@@ -4647,9 +5001,16 @@ static int rar2_read(const char *path, char *buffer, size_t size, off_t offset,
  *****************************************************************************
  *
  ****************************************************************************/
-static int rar2_truncate(const char *path, off_t offset)
+static int rar2_truncate(const char *path, off_t offset
+#if FUSE_MAJOR_VERSION >= 3
+                , struct fuse_file_info *fi
+#endif
+                )
 {
         ENTER_("%s", path);
+#if FUSE_MAJOR_VERSION >= 3
+        (void)fi;
+#endif
         if (!access_chk(path, 0)) {
                 char *root;
                 ABS_ROOT(root, path);
@@ -4681,9 +5042,16 @@ static int rar2_write(const char *path, const char *buffer, size_t size,
  *****************************************************************************
  *
  ****************************************************************************/
-static int rar2_chmod(const char *path, mode_t mode)
+static int rar2_chmod(const char *path, mode_t mode
+#if FUSE_MAJOR_VERSION >= 3
+                , struct fuse_file_info *fi
+#endif
+                )
 {
         ENTER_("%s", path);
+#if FUSE_MAJOR_VERSION >= 3
+        (void)fi;
+#endif
         if (!access_chk(path, 0)) {
                 char *root;
                 ABS_ROOT(root, path);
@@ -4698,9 +5066,16 @@ static int rar2_chmod(const char *path, mode_t mode)
  *****************************************************************************
  *
  ****************************************************************************/
-static int rar2_chown(const char *path, uid_t uid, gid_t gid)
+static int rar2_chown(const char *path, uid_t uid, gid_t gid
+#if FUSE_MAJOR_VERSION >= 3
+                , struct fuse_file_info *fi
+#endif
+                )
 {
         ENTER_("%s", path);
+#if FUSE_MAJOR_VERSION >= 3
+        (void)fi;
+#endif
         if (!access_chk(path, 0)) {
                 char *root;
                 ABS_ROOT(root, path);
@@ -4724,10 +5099,18 @@ static int rar2_eperm()
  *****************************************************************************
  *
  ****************************************************************************/
-static int rar2_rename(const char *oldpath, const char *newpath)
+static int rar2_rename(const char *oldpath, const char *newpath
+#if FUSE_MAJOR_VERSION >= 3
+                , unsigned int flags
+#endif
+                )
 {
         ENTER_("%s", oldpath);
 
+#if FUSE_MAJOR_VERSION >= 3
+        if (flags)
+                return -EINVAL;
+#endif
         /* We can not move things out of- or from RAR archives */
         if (!access_chk(newpath, 0) && !access_chk(oldpath, 0)) {
                 char *oldroot;
@@ -4822,10 +5205,17 @@ static int rar2_rmdir(const char *path)
  *****************************************************************************
  *
  ****************************************************************************/
-static int rar2_utimens(const char *path, const struct timespec ts[2])
+static int rar2_utimens(const char *path, const struct timespec ts[2]
+#if FUSE_MAJOR_VERSION >= 3
+                , struct fuse_file_info *fi
+#endif
+                )
 {
         ENTER_("%s", path);
 
+#if FUSE_MAJOR_VERSION >= 3
+        (void)fi;
+#endif
         struct stat st;
 
         if (!access_chk(path, 0)) {
@@ -5321,7 +5711,7 @@ static struct fuse_operations rar2_operations = {
 #if FUSE_MAJOR_VERSION == 2 && FUSE_MINOR_VERSION > 7
         .flag_nullpath_ok = 1,
 #endif
-#if FUSE_MAJOR_VERSION > 2 || (FUSE_MAJOR_VERSION == 2 && FUSE_MINOR_VERSION >= 9)
+#if FUSE_MAJOR_VERSION == 2 && FUSE_MINOR_VERSION >= 9
         .flag_nopath = 1,
 #endif
 };
@@ -5329,6 +5719,7 @@ static struct fuse_operations rar2_operations = {
 struct work_task_data {
         struct fuse *fuse;
         int mt;
+        int clone_fd;
         volatile int work_task_exited;
         int status;
 };
@@ -5340,7 +5731,19 @@ struct work_task_data {
 static void *work_task(void *data)
 {
         struct work_task_data *wdt = (struct work_task_data *)data;
-        wdt->status = wdt->mt ? fuse_loop_mt(wdt->fuse) : fuse_loop(wdt->fuse);
+        if (!wdt->mt) {
+                wdt->status = fuse_loop(wdt->fuse);
+        } else {
+#if FUSE_MAJOR_VERSION >= 3
+# if FUSE_USE_VERSION < 32
+                wdt->status = fuse_loop_mt(wdt->fuse, wdt->clone_fd);
+# else
+                wdt->status = fuse_loop_mt(wdt->fuse, NULL);
+# endif
+#else
+                wdt->status = fuse_loop_mt(wdt->fuse);
+#endif
+        }
         wdt->work_task_exited = 1;
         return NULL;
 }
@@ -5349,6 +5752,7 @@ static void *work_task(void *data)
  *****************************************************************************
  *
  ****************************************************************************/
+#if FUSE_MAJOR_VERSION == 2
 static void scan_fuse_new_args(struct fuse_args *args)
 {
         const char *match_w_arg = "subtype=rar2fs";
@@ -5417,6 +5821,7 @@ static void release_stdio()
                 stderr_ = 0;
         }
 }
+#endif
 
 /*!
  *****************************************************************************
@@ -5449,6 +5854,9 @@ static int work(struct fuse_args *args)
                 rar2_operations.opendir         = rar2_opendir;
                 rar2_operations.readdir         = rar2_readdir;
                 rar2_operations.releasedir      = rar2_releasedir;
+#ifdef HAVE_FUSE_PASSTHROUGH
+                rar2_operations.create          = rar2_create;
+#endif
                 rar2_operations.rename          = rar2_rename;
                 rar2_operations.mknod           = rar2_mknod;
                 rar2_operations.unlink          = rar2_unlink;
@@ -5478,13 +5886,19 @@ static int work(struct fuse_args *args)
         }
 
         struct fuse *f = NULL;
+#if FUSE_MAJOR_VERSION == 2
         struct fuse_chan *ch = NULL;
+#else
+        struct fuse_cmdline_opts opts;
+        memset(&opts, 0, sizeof(opts));
+#endif
         pthread_t t;
         char *mp;
         int mt = 0;
         int fg = 0;
 
         /* This is doing more or less the same as fuse_setup(). */
+#if FUSE_MAJOR_VERSION == 2
         if (!fuse_parse_cmdline(args, &mp, &mt, &fg)) {
               ch = fuse_mount(mp, args);
               if (ch) {
@@ -5510,12 +5924,43 @@ static int work(struct fuse_args *args)
                       }
               }
         }
+#else
+        if (!fuse_parse_cmdline(args, &opts)) {
+                mp = opts.mountpoint;
+                mt = !opts.singlethread;
+                fg = opts.foreground;
 
-        if (f == NULL)
+                f = fuse_new(args, &rar2_operations,
+                             sizeof(rar2_operations), NULL);
+                if (f != NULL && fuse_mount(f, mp)) {
+                        fuse_destroy(f);
+                        f = NULL;
+                }
+                if (f != NULL) {
+#ifdef HAVE_FUSE_PASSTHROUGH
+                        fuse_dev_fd = fuse_session_fd(fuse_get_session(f));
+#endif
+                        fuse_daemonize(fg);
+                        fuse_set_signal_handlers(fuse_get_session(f));
+                        syslog(LOG_DEBUG, "mounted %s", mp);
+                }
+        }
+#endif
+
+        if (f == NULL) {
+#if FUSE_MAJOR_VERSION >= 3
+                free(opts.mountpoint);
+#endif
                 return -1;
+        }
 
         wdt.fuse = f;
         wdt.mt = mt;
+#if FUSE_MAJOR_VERSION >= 3
+        wdt.clone_fd = opts.clone_fd;
+#else
+        wdt.clone_fd = 0;
+#endif
         wdt.work_task_exited = 0;
         wdt.status = 0;
         pthread_create(&t, &thread_attr, work_task, (void *)&wdt);
@@ -5526,7 +5971,13 @@ static int work(struct fuse_args *args)
          * But this is really what we want since this thread should not
          * block blindly without some user control.
          */
-        while (!fuse_exited(f) && !wdt.work_task_exited) {
+        while (
+#if FUSE_MAJOR_VERSION >= 3
+                        !fuse_session_exited(fuse_get_session(f)) &&
+#else
+                        !fuse_exited(f) &&
+#endif
+                        !wdt.work_task_exited) {
                 sleep(1);
                 ++rar2_ticks;
         }
@@ -5536,11 +5987,23 @@ static int work(struct fuse_args *args)
         fs_terminated = 1;
         warmup_cancelled = 1;
         pthread_join(t, NULL);
+#ifdef HAVE_FUSE_PASSTHROUGH
+        if (passthrough_required_unavailable)
+                wdt.status = -ENOTSUP;
+#endif
 
         /* This is doing more or less the same as fuse_teardown(). */
         fuse_remove_signal_handlers(fuse_get_session(f));
+#if FUSE_MAJOR_VERSION == 2
         fuse_unmount(mp, ch);
+#else
+        fuse_unmount(f);
+#endif
         fuse_destroy(f);
+#ifdef HAVE_FUSE_PASSTHROUGH
+        fuse_dev_fd = -1;
+        passthrough_enabled = 0;
+#endif
         syslog(LOG_DEBUG, "unmounted %s", mp);
         free(mp);
 
@@ -5576,6 +6039,11 @@ static void print_version()
         printf("This program comes with ABSOLUTELY NO WARRANTY.\n"
                "This is free software, and you are welcome to redistribute it under\n"
                "certain conditions; see <http://www.gnu.org/licenses/> for details.\n");
+#ifdef HAVE_FUSE_PASSTHROUGH
+        printf("FUSE passthrough support: compiled in\n");
+#else
+        printf("FUSE passthrough support: unavailable at build time\n");
+#endif
 }
 
 /*!
@@ -5609,6 +6077,7 @@ static void print_help()
         printf("    -o locale=LOCALE        set the locale for file names (default: according to LC_*/LC_CTYPE)\n");
 #endif
         printf("    -o warmup[=THREADS]     start background cache warmup threads (default: 5)\n");
+        printf("    -o passthrough=MODE     local-file I/O: off, auto, or force (default: auto)\n");
 }
 
 /* FUSE API specific keys continue where 'optdb' left off */
@@ -5623,6 +6092,9 @@ static struct fuse_opt rar2fs_opts[] = {
 #endif
         RAR2FS_MOUNT_OPT("warmup=%d", warmup, 0),
         RAR2FS_MOUNT_OPT("warmup", warmup, 5),
+        RAR2FS_MOUNT_OPT("passthrough=auto", passthrough, PASSTHROUGH_AUTO),
+        RAR2FS_MOUNT_OPT("passthrough=off", passthrough, PASSTHROUGH_OFF),
+        RAR2FS_MOUNT_OPT("passthrough=force", passthrough, PASSTHROUGH_FORCE),
 
         FUSE_OPT_KEY("-V",              OPT_KEY_VERSION),
         FUSE_OPT_KEY("--version",       OPT_KEY_VERSION),
@@ -5761,6 +6233,16 @@ int main(int argc, char *argv[])
                            rar2fs_opt_proc))
                 return -1;
 
+#ifndef HAVE_FUSE_PASSTHROUGH
+        if (rar2fs_mount_opts.passthrough == PASSTHROUGH_FORCE) {
+                fprintf(stderr, "%s: passthrough=force requires libfuse3 "
+                                ">= 3.17.1 on Linux\n", argv[0]);
+                fuse_opt_free_args(&args);
+                optdb_destroy();
+                return -1;
+        }
+#endif
+
         /* Check src/dst path */
         if (OPT_SET(OPT_KEY_SRC) && OPT_SET(OPT_KEY_DST)) {
                 const int err = check_paths(argv[0], OPT_STR(OPT_KEY_SRC, 0),
@@ -5797,7 +6279,11 @@ int main(int argc, char *argv[])
                         return -1;
         }
 
+#if FUSE_MAJOR_VERSION >= 3
+        fuse_opt_add_arg(&args, "-ofsname=rar2fs,subtype=rar2fs");
+#else
         fuse_opt_add_arg(&args, "-osync_read,fsname=rar2fs,subtype=rar2fs");
+#endif
         if (OPT_SET(OPT_KEY_DST))
                 fuse_opt_add_arg(&args, OPT_STR(OPT_KEY_DST, 0));
 

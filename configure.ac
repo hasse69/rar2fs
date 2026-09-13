@@ -202,6 +202,37 @@ if test x"$withval" != x; then
     fi
 fi
 
+AC_ARG_ENABLE([fuse3],
+   [AS_HELP_STRING([--disable-fuse3],
+               [do not prefer libfuse3 on Linux when it is available]
+   )],
+   [enable_fuse3=$enableval], [enable_fuse3=auto])
+
+use_fuse3=no
+case "$host_os" in
+linux*)
+    if test x"$enable_fuse3" != x"no"; then
+        AC_ARG_VAR([PKG_CONFIG], [path to pkg-config])
+        AC_PATH_TOOL([PKG_CONFIG], [pkg-config], [no])
+        if test x"$PKG_CONFIG" != x"no" &&
+           $PKG_CONFIG --exists 'fuse3 >= 3.17.1'; then
+            use_fuse3=yes
+            FUSE_CPPFLAGS="`$PKG_CONFIG --cflags fuse3` $FUSE_CPPFLAGS"
+            FUSE_LIBS="`$PKG_CONFIG --libs fuse3`"
+        elif test x"$enable_fuse3" = x"yes"; then
+            AC_MSG_ERROR([libfuse3 >= 3.17.1 was requested but was not found])
+        fi
+    fi
+    ;;
+*)
+    if test x"$enable_fuse3" = x"yes"; then
+        AC_MSG_ERROR([libfuse3 support is currently available on Linux only])
+    fi
+    ;;
+esac
+
+AM_CONDITIONAL([FUSE3], [test x"$use_fuse3" = x"yes"])
+
 static_unrar=fallback
 enableval=
 AC_ARG_ENABLE([static-unrar],
@@ -253,7 +284,11 @@ if test x"$withval" != x; then
     fi
 fi
 
-FUSE_CPPFLAGS="$FUSE_CPPFLAGS -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=26"
+if test x"$use_fuse3" = x"yes"; then
+    FUSE_CPPFLAGS="$FUSE_CPPFLAGS -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=31"
+else
+    FUSE_CPPFLAGS="$FUSE_CPPFLAGS -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=26"
+fi
 UNRAR_CXXFLAGS="-DRARDLL"
 AC_SUBST(FUSE_CPPFLAGS)
 AC_SUBST(UNRAR_CPPFLAGS)
@@ -304,21 +339,23 @@ save_LDFLAGS="$LDFLAGS"
 save_LIBS="$LIBS"
 LDFLAGS="$LDFLAGS $FUSE_LDFLAGS $PTHREAD_CFLAGS"
 LIBS="$PTHREAD_LIBS $LIBS"
-AC_CHECK_LIB(osxfuse_i64,fuse_new, [FUSE_LIBS="-losxfuse_i64"],
-    [ AC_CHECK_LIB(osxfuse,fuse_new, [FUSE_LIBS="-losxfuse"],
-        [ AC_CHECK_LIB(fuse_ino64,fuse_new, [FUSE_LIBS="-lfuse_ino64"],
-            [ AC_CHECK_LIB(fuse4x,fuse_new, [FUSE_LIBS="-lfuse4x"],
-                [ AC_CHECK_LIB(fuse,fuse_new, [FUSE_LIBS="-lfuse"],
-                    [ AC_CHECK_LIB(dokanfuse1.dll,fuse_new, [FUSE_LIBS="-ldokanfuse1.dll"],
-                        [AC_MSG_ERROR([
-                            Cannot find fuse library - add alternative library search path using
-                            --with-fuse-lib and rerun configure. ])
+if test x"$use_fuse3" != x"yes"; then
+    AC_CHECK_LIB(osxfuse_i64,fuse_new, [FUSE_LIBS="-losxfuse_i64"],
+        [ AC_CHECK_LIB(osxfuse,fuse_new, [FUSE_LIBS="-losxfuse"],
+            [ AC_CHECK_LIB(fuse_ino64,fuse_new, [FUSE_LIBS="-lfuse_ino64"],
+                [ AC_CHECK_LIB(fuse4x,fuse_new, [FUSE_LIBS="-lfuse4x"],
+                    [ AC_CHECK_LIB(fuse,fuse_new, [FUSE_LIBS="-lfuse"],
+                        [ AC_CHECK_LIB(dokanfuse1.dll,fuse_new, [FUSE_LIBS="-ldokanfuse1.dll"],
+                            [AC_MSG_ERROR([
+                                Cannot find fuse library - add alternative library search path using
+                                --with-fuse-lib and rerun configure. ])
+                        ],)
                     ],)
                 ],)
             ],)
         ],)
     ],)
-],)
+fi
 LIBS="$FUSE_LIBS $LIBS"
 # fuse_version() became available for the first time in fuse 2.7
 AC_CHECK_FUNCS(fuse_version)
@@ -334,7 +371,8 @@ if test x"$cross_compiling" = x"no"; then
         AC_LANG_PROGRAM([[
              #include <fuse.h>]],
     [[
-        if(FUSE_MAJOR_VERSION == 2 && FUSE_MINOR_VERSION >= 6)
+        if((FUSE_MAJOR_VERSION == 2 && FUSE_MINOR_VERSION >= 6) ||
+           FUSE_MAJOR_VERSION == 3)
             return 0;
         return -1;
     ]])],
@@ -751,6 +789,5 @@ CXXFLAGS="$CXXFLAGS $PTHREAD_CFLAGS"
 AC_CONFIG_FILES([Makefile])
 AC_CONFIG_FILES([src/Makefile])
 AC_CONFIG_FILES([man/Makefile])
+AC_CONFIG_FILES([tests/Makefile])
 AC_OUTPUT
-
-

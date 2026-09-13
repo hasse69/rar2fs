@@ -232,6 +232,24 @@ specific locale to be applied in such character set conversions. The possible va
 easily be determined by the \fB`locale -a`\fR command.
 .RE
 .TP
+.B \-o passthrough=off|auto|force
+control kernel passthrough for normal local files
+.PP
+.RS
+On Linux systems built with libfuse3 passthrough support, local files that are
+not archive members can have their read and write operations redirected by the
+kernel directly to the backing file. The default mode is
+.BR auto ,
+which enables passthrough when both libfuse and the kernel support it and
+otherwise falls back to normal FUSE I/O.
+.B off
+always uses normal FUSE I/O.
+.B force
+fails the mount if passthrough cannot be negotiated and fails a local-file open
+if its backing file cannot be registered. Files inside RAR archives always use
+rar2fs extraction I/O and are never opened in passthrough mode.
+.RE
+.TP
 .B \-o warmup
 .TP
 .B \-o warmup=THREADS
@@ -264,4 +282,3 @@ Project home page
 .B Hans Beckerus
 .br
 .I \<hans.beckerus#AT#gmail.com\>
-
