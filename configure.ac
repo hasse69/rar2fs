@@ -309,10 +309,12 @@ AC_CHECK_LIB(osxfuse_i64,fuse_new, [FUSE_LIBS="-losxfuse_i64"],
         [ AC_CHECK_LIB(fuse_ino64,fuse_new, [FUSE_LIBS="-lfuse_ino64"],
             [ AC_CHECK_LIB(fuse4x,fuse_new, [FUSE_LIBS="-lfuse4x"],
                 [ AC_CHECK_LIB(fuse,fuse_new, [FUSE_LIBS="-lfuse"],
-                    [ AC_CHECK_LIB(dokanfuse1.dll,fuse_new, [FUSE_LIBS="-ldokanfuse1.dll"],
-                        [AC_MSG_ERROR([
-                            Cannot find fuse library - add alternative library search path using
-                            --with-fuse-lib and rerun configure. ])
+                    [ AC_CHECK_LIB(dokanfuse2.dll,fuse_new, [FUSE_LIBS="-ldokanfuse2.dll"],
+			   [ AC_CHECK_LIB(dokanfuse1.dll,fuse_new, [FUSE_LIBS="-ldokanfuse1.dll"],
+				  [AC_MSG_ERROR([
+				           Cannot find fuse library - add alternative library search path using
+					   --with-fuse-lib and rerun configure. ])
+			   ],)
                     ],)
                 ],)
             ],)
