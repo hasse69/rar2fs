@@ -2343,6 +2343,28 @@ static void set_rarstats(struct filecache_entry *entry_p, RARArchiveDataEx *arc,
 
 /*!
  *****************************************************************************
+ * File names in an archive are normally relative, but some archives store
+ * them with a leading '/', or with leading "./" or "../" components. Skip
+ * any such leading sequence of '.' and '/' so that the entry is presented
+ * relative to the archive location, the same way unrar strips it on
+ * extraction, e.g. "/dir/file" is presented as "dir/file".
+ ****************************************************************************/
+static const char *skip_path_prefix(const char *name)
+{
+        const char *s = name;
+        const char *t;
+
+        for (t = name; *t; t++) {
+                if (*t == '/')
+                        s = t + 1;
+                else if (*t != '.')
+                        break;
+        }
+        return s;
+}
+
+/*!
+ *****************************************************************************
  *
  ****************************************************************************/
 static struct filecache_entry *lookup_filecopy(const char *path,
@@ -2358,7 +2380,8 @@ static struct filecache_entry *lookup_filecopy(const char *path,
                         DOS_TO_UNIX_PATH(tmp);
                         char *mp2;
                         if (!display) {
-                                ABS_MP(mp2, (*rar_root ? rar_root : "/"), tmp);
+                                ABS_MP(mp2, (*rar_root ? rar_root : "/"),
+                                                skip_path_prefix(tmp));
                         } else {
                                 char *rar_dir = strdup(tmp);
                                 ABS_MP(mp2, path, basename(rar_dir));
@@ -2722,6 +2745,14 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
 
                 DOS_TO_UNIX_PATH(arc->hdr.FileName);
 
+                /* Present the entry relative to the archive location even
+                 * if the name is stored as an absolute path. The original
+                 * name is still what is used to look up the file in the
+                 * archive. */
+                const char *name = skip_path_prefix(arc->hdr.FileName);
+                if (!*name || !strcmp(name, ".") || !strcmp(name, ".."))
+                        continue;
+
                 pthread_rwlock_wrlock(&file_access_lock);
 
                 /* Handle the case when the parent folders do not have
@@ -2732,14 +2763,14 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                  * invalidated and replaced with the real file stats. */
                 if (is_root_path) {
                         int populate_cache = 0;
-                        char *safe_path = strdup(arc->hdr.FileName);
+                        char *safe_path = strdup(name);
                         char *tmp = safe_path;
                         while (1) {
                                 char *mp2;
 
                                 safe_path = __gnu_dirname(safe_path);
                                 if (!CHRCMP(safe_path, '.') ||
-                                                !CHRCMP(safe_path, '/'))
+                                                *safe_path == '/')
                                         break;
 
                                 ABS_MP2(mp2, path, safe_path);
@@ -2758,14 +2789,14 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                         if (populate_cache) {
                                 /* Entries have been forced into the cache.
                                  * Add the child node to each entry. */
-                                safe_path = strdup(arc->hdr.FileName);
+                                safe_path = strdup(name);
                                 tmp = safe_path;
                                 while (1) {
                                         char *mp2;
 
                                         safe_path = __gnu_dirname(safe_path);
                                         if (!CHRCMP(safe_path, '.') ||
-                                                        !CHRCMP(safe_path, '/'))
+                                                        *safe_path == '/')
                                                 break;
 
                                         ABS_MP2(mp2, path, safe_path);
@@ -2779,10 +2810,9 @@ static int listrar(const char *path, struct dir_entry_list **buffer,
                 /* Aliasing is not support for directories */
                 if (!IS_RAR_DIR(&arc->hdr))
                         ABS_MP2(mp, (*rar_root ? rar_root : "/"),
-                                        get_alias(*first_arch, arc->hdr.FileName));
+                                        get_alias(*first_arch, name));
                 else
-                        ABS_MP2(mp, (*rar_root ? rar_root : "/"),
-                                        arc->hdr.FileName);
+                        ABS_MP2(mp, (*rar_root ? rar_root : "/"), name);
 
                 printd(3, "Looking up %s in cache\n", mp);
                 struct filecache_entry *entry_p = filecache_get(mp);
