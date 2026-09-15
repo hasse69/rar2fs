@@ -1395,6 +1395,7 @@ static int lread_rar(char *buf, size_t size, off_t offset,
 {
         int n = 0;
         struct io_context* op = FH_TOCONTEXT(fi->fh);
+        int eof_probe_disarmed = 0;
 #ifdef DEBUG_READ
         char *buf_saved = buf;
         off_t offset_saved = offset;
@@ -1455,13 +1456,14 @@ check_idx:
                 /*
                  * Early reads at offsets reaching the last few percent of the
                  * file is most likely a request for index information.
+                 * This is only a heuristic guess; --no-eof-probe disables
+                 * the fabricated-data fallback for file types where it causes
+                 * incorrect data to be returned (e.g. sidecar subtitle files
+                 * read out-of-order by some media players).
                  */
                 } else if ((((offset - op->pos) / (op->entry_p->stat.st_size * 1.0) * 100) > 95.0 &&
                                 op->seq < 10)) {
-                        printd(3, "seq=%d    long jump hack1    offset=%" PRIu64 ","
-                                                " size=%zu, buf->offset=%" PRIu64 "\n",
-                                                op->seq, offset, size,
-                                                op->buf->offset);
+                        struct filecache_entry *e_p; /* "real" cache entry */
                         op->seq--;      /* pretend it never happened */
 
                         /*
@@ -1472,7 +1474,6 @@ check_idx:
                          * otherwise the fake data might propagate incorrectly
                          * to sub-sequent reads.
                          */
-                        struct filecache_entry *e_p; /* "real" cache entry */
                         if (op->entry_p->flags.save_eof) {
                                 pthread_rwlock_wrlock(&file_access_lock);
                                 e_p = filecache_get(FH_TOPATH(fi->fh));
@@ -1490,15 +1491,24 @@ check_idx:
                                         }
                                 }
                         }
-                        pthread_rwlock_wrlock(&file_access_lock);
-                        e_p = filecache_get(FH_TOPATH(fi->fh));
-                        if (e_p)
-                                e_p->flags.direct_io = 1;
-                        pthread_rwlock_unlock(&file_access_lock);
-                        op->entry_p->flags.direct_io = 1;
-                        memset(buf, 0, size);
-                        n += size;
-                        goto out;
+                        if (OPT_SET(OPT_KEY_NO_EOF_PROBE)) {
+                                eof_probe_disarmed = 1;
+                                op->seq++;
+                        } else {
+                                printd(3, "seq=%d    long jump hack1    offset=%" PRIu64 ","
+                                                " size=%zu, buf->offset=%" PRIu64 "\n",
+                                                op->seq + 1, offset, size,
+                                                op->buf->offset);
+                                pthread_rwlock_wrlock(&file_access_lock);
+                                e_p = filecache_get(FH_TOPATH(fi->fh));
+                                if (e_p)
+                                        e_p->flags.direct_io = 1;
+                                pthread_rwlock_unlock(&file_access_lock);
+                                op->entry_p->flags.direct_io = 1;
+                                memset(buf, 0, size);
+                                n += size;
+                                goto out;
+                        }
                 }
         }
 
@@ -1532,7 +1542,10 @@ check_idx:
                          * fake data to propagate in sub-sequent reads.
                          * This case is very likely for multi-part AVI 2.0.
                          */
-                        if (op->seq < 25 && ((offset + size) - op->buf->offset)
+                        if (!eof_probe_disarmed &&
+                                        !OPT_SET(OPT_KEY_NO_JUMP_PROBE) &&
+                                        op->seq < 25 &&
+                                        ((offset + size) - op->buf->offset)
                                         > (IOB_SZ - IOB_HIST_SZ)) {
                                 struct filecache_entry *e_p; /* "real" cache entry */
                                 printd(3, "seq=%d    long jump hack2    offset=%" PRIu64 ","
@@ -1555,16 +1568,22 @@ check_idx:
                 /* Take control of reader thread */
                 if (sync_thread_noread(op))
                         return -EIO;
-                if (!feof(op->fp) && offset > op->buf->offset) {
+                while (!feof(op->fp) && offset > op->buf->offset) {
+                        off_t offset_saved = op->buf->offset;
                         /* consume buffer */
                         op->pos += op->buf->used;
                         op->buf->ri = op->buf->wi;
                         op->buf->used = 0;
                         (void)iob_write(op->buf, op->fp, IOB_SAVE_HIST);
                         sched_yield();
+                        if (op->buf->offset == offset_saved)
+                                return -EIO;
                 }
 
                 if (!feof(op->fp)) {
+                        if (offset > op->buf->offset ||
+                                        offset - op->pos > (off_t)op->buf->used)
+                                return -EIO;
                         op->buf->ri = offset & (IOB_SZ - 1);
                         op->buf->used -= (offset - op->pos);
                         op->pos = offset;
@@ -5604,6 +5623,8 @@ static void print_help()
         printf("    --date-rar\t\t    use file date from main archive file(s)\n");
         printf("    --config=file\t    config file name [source/.rarconfig]\n");
         printf("    --no-inherit-perm\t    do not inherit file permission mode from archive\n");
+        printf("    --no-eof-probe\t    never return fabricated data for early reads near the end of a compressed file\n");
+        printf("    --no-jump-probe\t    never return fabricated data for early reads that jump far ahead of the current stream position\n");
         printf("\n");
 #ifdef HAVE_SETLOCALE
         printf("    -o locale=LOCALE        set the locale for file names (default: according to LC_*/LC_CTYPE)\n");
@@ -5655,6 +5676,8 @@ static struct option longopts[] = {
         {"date-rar",          no_argument, NULL, OPT_ADDR(OPT_KEY_DATE_RAR)},
         {"config",      required_argument, NULL, OPT_ADDR(OPT_KEY_CONFIG)},
         {"no-inherit-perm",   no_argument, NULL, OPT_ADDR(OPT_KEY_NO_INHERIT_PERM)},
+        {"no-eof-probe",      no_argument, NULL, OPT_ADDR(OPT_KEY_NO_EOF_PROBE)},
+        {"no-jump-probe",     no_argument, NULL, OPT_ADDR(OPT_KEY_NO_JUMP_PROBE)},
         {NULL,                          0, NULL, 0}
 };
 
